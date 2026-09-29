@@ -31,6 +31,8 @@ export interface OpencodeFamilyVariant {
   readonly dbFileName: string;
   /** Project config dir whose `skills/<name>/SKILL.md` the CLI loads. */
   readonly projectConfigDir: string;
+  /** Bare install command. Preflight renders "install <name> (<hint>)" and
+   *  the verifier "<binary> not found (install: <hint>)". */
   readonly installHint: string;
 }
 
@@ -43,7 +45,7 @@ export const OPENCODE_VARIANT: OpencodeFamilyVariant = {
   dbEnvVar: "OPENCODE_DB",
   dbFileName: "opencode.db",
   projectConfigDir: ".opencode",
-  installHint: "Install OpenCode: brew install anomalyco/tap/opencode, or npm i -g opencode-ai (https://opencode.ai/docs/)",
+  installHint: "brew install anomalyco/tap/opencode, or npm i -g opencode-ai",
 };
 
 export const KILO_VARIANT: OpencodeFamilyVariant = {
@@ -56,7 +58,7 @@ export const KILO_VARIANT: OpencodeFamilyVariant = {
   dbEnvVar: "KILO_DB",
   dbFileName: "kilo.db",
   projectConfigDir: ".kilo",
-  installHint: "Install Kilo CLI: npm i -g @kilocode/cli (https://kilo.ai/docs/code-with-ai/platforms/cli)",
+  installHint: "npm i -g @kilocode/cli",
 };
 
 // ── Resume token ─────────────────────────────────────────────────────────────
@@ -153,16 +155,36 @@ export function opencodeFamilySkillsDir(variant: OpencodeFamilyVariant, cwd: str
 // ── Pane patterns ────────────────────────────────────────────────────────────
 
 /**
- * Ready markers. The home screen shows the placeholder `Ask anything`
- * (OpenCode ends it with a Unicode ellipsis, Kilo with three dots). A resumed
- * session opens on the session route, which has no placeholder, so the prompt
- * footer `ctrl+p commands` (default palette key, rendered on every route in
- * normal mode) is the second marker.
+ * A dialog is open. Every OpenCode and Kilo dialog (command palette, model and
+ * session pickers, alerts, confirms, help) draws a header row with its title
+ * on the left and `esc` (help: `esc/enter`) on the right. The prompt footer's
+ * busy hint `esc interrupt` / `esc again to interrupt` is not a dialog.
+ */
+export const OPENCODE_FAMILY_DIALOG_PATTERN = /\S {4,}esc(?:\/enter)?(?! +(?:again to )?interrupt)(?=[ \r\n]|$)/;
+
+/** `marker`, but only on a screen with no dialog open: the prompt box stays
+ *  drawn underneath a dialog, so a bare marker would call it ready. */
+function readyWithoutDialog(marker: RegExp): RegExp {
+  // No "m" flag: ^ is the start of the whole capture, so the lookahead scans
+  // every line for a dialog header before the marker is tried.
+  return new RegExp(`^(?![\\s\\S]*${OPENCODE_FAMILY_DIALOG_PATTERN.source})[\\s\\S]*${marker.source}`);
+}
+
+/**
+ * Ready markers, each refused while a dialog is open. The home screen shows
+ * the placeholder `Ask anything` (OpenCode ends it with a Unicode ellipsis,
+ * Kilo with three dots). A resumed session opens on the session route, which
+ * has no placeholder; there the prompt box's bottom border (`╹▀▀▀...`, drawn
+ * on every route) is the marker. The footer `ctrl+p commands` is kept as a
+ * third marker, but it wraps across two lines in an 80-column pane when the
+ * cwd is long (seen live on restore) and its key can be rebound, so it is
+ * never the only one. Verified on 80x24 captures of both CLIs.
  */
 export const OPENCODE_FAMILY_READY_PATTERNS: readonly RegExp[] = [
   /Ask anything/,
+  /╹▀{8,}/,
   /ctrl\+p\s+commands/,
-];
+].map(readyWithoutDialog);
 
 export interface OpencodeFamilyErrorPattern {
   pattern: RegExp;

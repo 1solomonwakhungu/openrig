@@ -10,6 +10,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   KILO_VARIANT,
+  OPENCODE_FAMILY_DIALOG_PATTERN,
   OPENCODE_FAMILY_ERROR_PATTERNS,
   OPENCODE_FAMILY_GUIDANCE_FILE,
   OPENCODE_FAMILY_READY_PATTERNS,
@@ -164,6 +165,59 @@ describe("pane patterns (fixture captures)", () => {
     const pane = fixture("opencode-session-idle.source-derived.txt");
     expect(pane).not.toContain("Ask anything");
     expect(isReady(pane)).toBe(true);
+  });
+
+  it("a restored session in an 80-column pane is ready although its footer wraps (live capture)", () => {
+    const pane = fixture("opencode-1.18.33-session-idle-80col-wrapped.txt");
+    expect(pane).not.toContain("Ask anything");
+    expect(pane).not.toMatch(/ctrl\+p\s+commands/);
+    expect(isReady(pane)).toBe(true);
+  });
+
+  // Live 80x24 captures (opencode 1.18.33, kilo 7.8.1), long cwd, no
+  // credentials. Palette captures have the command palette dialog open.
+  it.each([
+    ["80x24-opencode-1.18.33-home.txt", true],
+    ["80x24-opencode-1.18.33-session.txt", true],
+    ["80x24-opencode-1.18.33-home-palette.txt", false],
+    ["80x24-opencode-1.18.33-session-palette.txt", false],
+    ["80x24-opencode-1.18.33-not-found.txt", false],
+    ["80x24-kilo-7.8.1-home.txt", true],
+    ["80x24-kilo-7.8.1-session.txt", true],
+    ["80x24-kilo-7.8.1-home-palette.txt", false],
+    ["80x24-kilo-7.8.1-session-palette.txt", false],
+    ["80x24-kilo-7.8.1-not-found.txt", false],
+    ["80x24-kilo-7.8.1-claude-migration.txt", true],
+  ])("80x24 capture %s is ready: %s", (name, ready) => {
+    expect(isReady(fixture(name))).toBe(ready);
+  });
+
+  it("the bare markers are on dialog screens too, which is why every marker is dialog-guarded", () => {
+    for (const name of ["80x24-opencode-1.18.33-session-palette.txt", "80x24-kilo-7.8.1-session-palette.txt"]) {
+      const pane = fixture(name);
+      expect(pane).toMatch(/╹▀{8,}/);
+      expect(pane).toMatch(OPENCODE_FAMILY_DIALOG_PATTERN);
+    }
+  });
+
+  it("the dialog guard ignores the busy footer and text that merely mentions esc", () => {
+    const idle = fixture("80x24-opencode-1.18.33-session.txt");
+    expect(OPENCODE_FAMILY_DIALOG_PATTERN.test(idle)).toBe(false);
+    for (const busy of ["  ⠋ Working      esc interrupt", "  ⠋ Working      esc again to interrupt", "press esc to cancel"]) {
+      expect(OPENCODE_FAMILY_DIALOG_PATTERN.test(busy)).toBe(false);
+      expect(isReady(`${idle}\n${busy}`)).toBe(true);
+    }
+    // Dialog headers: title left, esc (help: esc/enter) right, above or below the marker.
+    expect(isReady(`${idle}\n    Select model                              esc`)).toBe(false);
+    expect(isReady(`    Help                                   esc/enter\n${idle}`)).toBe(false);
+  });
+
+  it("the Session-not-found exit never looks ready, in either CLI", () => {
+    for (const name of ["80x24-opencode-1.18.33-not-found.txt", "80x24-kilo-7.8.1-not-found.txt"]) {
+      const pane = fixture(name);
+      expect(pane).toContain("Session not found: ses_");
+      expect(OPENCODE_FAMILY_ERROR_PATTERNS.find((p) => p.pattern.test(pane))?.recovery).toBe("retry_fresh");
+    }
   });
 
   it("a shell prompt or a boot splash is not ready", () => {

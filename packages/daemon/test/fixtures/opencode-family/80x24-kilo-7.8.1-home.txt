@@ -1,0 +1,24 @@
+
+
+               ██  ██ ██🬺🬏   ██  ██   ██🬺🬏     ████ ██     ██🬺🬏
+               ████🬺🬏 ▀▀██   ██  ▀▀ ██▀▀██   ██▀▀▀▀ ██     ▀▀██
+               ██  ██ ██████ 🬁🬬████ 🬁🬬██▀▀   🬁🬬████ 🬁🬬████ ██████
+               ▀▀  ▀▀ ▀▀▀▀▀▀   ▀▀▀▀   ▀▀       ▀▀▀▀   ▀▀▀▀ ▀▀▀▀▀▀
+
+
+   ┃
+   ┃  Ask anything... "What is the tech stack of this project?"
+   ┃
+   ┃  Code  · Auto Free Kilo Gateway
+   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                   tab agents  ctrl+p commands
+
+
+
+
+
+      ● Tip Use /redo to restore previously undone messages and file changes
+  /home/operator/src/client-projects/some-team/work/builder2-            7.8.1
+  probe80/work/client-workspaces/a-rather-long-project-directory-
+  name/service:main
+

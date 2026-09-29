@@ -1,0 +1,24 @@
+       onboarding-02 onboarding-width retrieval has nothing behind it. No
+       world pack to load either.
+     - Working dir /Users/.../rigs/opencode/work is a near-empty scratch repo:
+       one commit (c6cbc7c init), a one-line README, and untracked AGENTS.md.
+
+     No work is routed to this seat and no context pack defines what the rig
+     is for. Per the onboarding guidance, guessing at a purpose here is the
+     failure mode to avoid — the rig is a smoke rig whose own culture block
+     says "readiness only." I'm reporting readiness rather than inventing a
+     task.
+
+     To give me work, either drop a qitem on this seat (rig queue create --to
+     dev-seat@smoke-opencode ...), or rig send dev-seat@smoke-opencode "..."
+     to type into this terminal directly.
+
+     ▣  Build · big-pickle · 45.4s
+
+  ┃
+  ┃
+  ┃
+  ┃  Code  · Auto Free Kilo Gateway
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                        15.1K  ctrl+p commands
+
