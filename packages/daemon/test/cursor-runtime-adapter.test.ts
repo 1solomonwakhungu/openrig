@@ -8,7 +8,8 @@ import os from "node:os";
 import nodePath from "node:path";
 import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
-import { CURSOR_CHAT_SNAPSHOT_FILE, CURSOR_REGISTRATION } from "../src/adapters/cli/cursor/index.js";
+import { CURSOR_CHAT_SNAPSHOT_FILE, CURSOR_REGISTRATION, CURSOR_SPEC } from "../src/adapters/cli/cursor/index.js";
+import { createNodeFsOps } from "../src/adapters/node-fs-ops.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import {
@@ -143,14 +144,27 @@ describe("Cursor chat store", () => {
     expect(cursorResumeTargetExists(fs, dir, "../../etc")).toBe(false);
   });
 
-  it("capture takes exactly one new chat since the pre-launch snapshot, else null", () => {
-    expect(pickNewCursorChat([OTHER_ID], [OTHER_ID, ID])).toBe(ID);
-    expect(pickNewCursorChat([OTHER_ID], [OTHER_ID])).toBeNull();
-    expect(pickNewCursorChat([], [OTHER_ID, ID])).toBeNull();
+  it("capture takes exactly one new chat created at or after launch start, else null", () => {
+    const launchStartedAt = new Date("2026-09-29T12:00:00Z");
+    const after = (iso: string) => () => new Date(iso);
+    const pick = (before: string[], afterIds: string[], createdAt: (id: string) => Date | null, start: Date | null = launchStartedAt) =>
+      pickNewCursorChat({ before, after: afterIds, launchStartedAt: start ?? undefined, createdAt });
+    expect(pick([OTHER_ID], [OTHER_ID, ID], after("2026-09-29T12:00:05Z"))).toBe(ID);
+    expect(pick([OTHER_ID], [OTHER_ID, ID], after("2026-09-29T12:00:00Z"))).toBe(ID);
+    // Nothing new, or two new chats (a pod-mate prompted too): ambiguous.
+    expect(pick([OTHER_ID], [OTHER_ID], after("2026-09-29T12:00:05Z"))).toBeNull();
+    expect(pick([], [OTHER_ID, ID], after("2026-09-29T12:00:05Z"))).toBeNull();
+    // A chat that predates this launch but was missing from the snapshot
+    // (created by the owner or a pod-mate before we started) is refused.
+    expect(pick([], [ID], after("2026-09-29T11:59:59Z"))).toBeNull();
+    // Unknown creation time or unknown launch start: refuse.
+    expect(pick([], [ID], () => null)).toBeNull();
+    expect(pick([], [ID], after("2026-09-29T12:00:05Z"), null)).toBeNull();
   });
 
   it("round-trips the snapshot and rejects a corrupt one", () => {
-    expect(parseCursorChatSnapshot(serializeCursorChatSnapshot([ID]))).toEqual([ID]);
+    expect(parseCursorChatSnapshot(serializeCursorChatSnapshot({ chatIds: [ID], configDir: "/c" }))).toEqual({ chatIds: [ID], configDir: "/c" });
+    expect(parseCursorChatSnapshot(JSON.stringify({ chatIds: [ID] }))).toEqual({ chatIds: [ID] });
     expect(parseCursorChatSnapshot("{")).toBeNull();
     expect(parseCursorChatSnapshot(JSON.stringify({ chatIds: [1] }))).toBeNull();
   });
@@ -220,7 +234,8 @@ describe("Cursor adapter launch", () => {
   it("snapshots the chats that already exist for the cwd before launch", async () => {
     const files = harnessMemFs({ [storeDbUnder(HARNESS_HOME, HARNESS_CWD, SEEDED_ID)]: "" });
     await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
-    expect(parseCursorChatSnapshot(files.files[nodePath.join(seatDir, CURSOR_CHAT_SNAPSHOT_FILE)]!)).toEqual([SEEDED_ID]);
+    expect(parseCursorChatSnapshot(files.files[nodePath.join(seatDir, CURSOR_CHAT_SNAPSHOT_FILE)]!))
+      .toEqual({ chatIds: [SEEDED_ID], configDir: nodePath.join(HARNESS_HOME, ".cursor") });
   });
 
   it("resumes an existing chat by exact id", async () => {
@@ -231,29 +246,103 @@ describe("Cursor adapter launch", () => {
     expect(pane.typed[0]).toContain(`'--resume' '${SEEDED_ID}'`);
   });
 
-  it("late capture ignores chats that existed before launch and refuses to guess", () => {
+  function captureRig() {
     const root = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "openrig-cursor-"));
     const homedir = nodePath.join(root, "home");
     const cwd = nodePath.join(root, "work");
     const seatStateDir = nodePath.join(root, "seat");
     fs.mkdirSync(seatStateDir, { recursive: true });
-    const seed = (id: string) => {
-      const file = storeDbUnder(homedir, cwd, id);
+    const seed = (id: string, configDir = nodePath.join(homedir, ".cursor")) => {
+      const file = nodePath.join(cursorChatsDirForCwd(configDir, cwd), id, "store.db");
       fs.mkdirSync(nodePath.dirname(file), { recursive: true });
       fs.writeFileSync(file, "");
     };
-    const capture = () => CURSOR_REGISTRATION.descriptor.captureResumeToken!(
-      { sessionName: HARNESS_SESSION, cwd, seatStateDir, homedir }, {} as never,
+    const snapshot = (chatIds: string[], configDir?: string) =>
+      fs.writeFileSync(nodePath.join(seatStateDir, CURSOR_CHAT_SNAPSHOT_FILE), serializeCursorChatSnapshot({ chatIds, configDir }));
+    // null = the seat has no recorded launch start.
+    const capture = (launchStartedAt: Date | null = new Date(Date.now() - 60_000)) => CURSOR_REGISTRATION.descriptor.captureResumeToken!(
+      { sessionName: HARNESS_SESSION, cwd, seatStateDir, homedir, launchStartedAt: launchStartedAt ?? undefined }, {} as never,
     );
-    expect(capture()).toBeNull(); // no snapshot yet
-    seed(OTHER_ID);
-    fs.writeFileSync(nodePath.join(seatStateDir, CURSOR_CHAT_SNAPSHOT_FILE), serializeCursorChatSnapshot([OTHER_ID]));
-    expect(capture()).toBeNull(); // nothing new since launch
-    seed(SEEDED_ID);
-    expect(capture()).toBe(SEEDED_ID);
-    seed(ID);
-    expect(capture()).toBeNull(); // two new chats: ambiguous
-    fs.rmSync(root, { recursive: true, force: true });
+    return { root, homedir, cwd, seatStateDir, seed, snapshot, capture, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+  }
+
+  it("late capture ignores pre-launch chats and refuses to guess", () => {
+    const rig = captureRig();
+    try {
+      expect(rig.capture()).toBeNull(); // no snapshot yet
+      rig.seed(OTHER_ID);
+      rig.snapshot([OTHER_ID]);
+      expect(rig.capture()).toBeNull(); // nothing new since launch
+      rig.seed(SEEDED_ID);
+      expect(rig.capture()).toBe(SEEDED_ID);
+      expect(rig.capture(null)).toBeNull(); // no launch start: refuse
+      expect(rig.capture(new Date(Date.now() + 60_000))).toBeNull(); // created before this launch
+    } finally {
+      rig.cleanup();
+    }
+  });
+
+  it("pod-mate race: a second new chat in the shared cwd makes capture refuse", () => {
+    const rig = captureRig();
+    try {
+      rig.snapshot([]);
+      rig.seed(SEEDED_ID); // this seat's chat
+      rig.seed(ID); // a pod-mate in the same cwd prompted too
+      expect(rig.capture()).toBeNull();
+    } finally {
+      rig.cleanup();
+    }
+  });
+
+  it("owner race: a chat created before this launch is never taken, even if the snapshot missed it", () => {
+    const rig = captureRig();
+    try {
+      rig.seed(OTHER_ID); // the owner's chat, created before the seat launched
+      rig.snapshot([]); // a snapshot that did not see it (e.g. written first)
+      expect(rig.capture(new Date(Date.now() + 1_000))).toBeNull();
+    } finally {
+      rig.cleanup();
+    }
+  });
+
+  it("owner race, documented limit: an owner chat started after launch and before the seat prompts is taken", () => {
+    // Cursor gives no per-process marker to tell these apart (see cursor.md,
+    // Known limits). This pins the limit so a future change is deliberate.
+    const rig = captureRig();
+    try {
+      rig.snapshot([]);
+      rig.seed(OTHER_ID);
+      expect(rig.capture()).toBe(OTHER_ID);
+    } finally {
+      rig.cleanup();
+    }
+  });
+
+  it("capture and the resume check read the config dir the launch recorded, not the daemon env", async () => {
+    const rig = captureRig();
+    try {
+      const configDir = nodePath.join(rig.root, "custom-cursor");
+      rig.snapshot([], configDir);
+      rig.seed(SEEDED_ID); // under ~/.cursor: not where this seat's Cursor writes
+      expect(rig.capture()).toBeNull();
+      rig.seed(ID, configDir);
+      expect(rig.capture()).toBe(ID);
+      const check = await CURSOR_SPEC.validateResumeTarget!({
+        token: ID, cwd: rig.cwd, seatStateDir: rig.seatStateDir, homedir: rig.homedir,
+        fs: createNodeFsOps(), binding: harnessBinding({ cwd: rig.cwd }),
+      });
+      expect(check).toEqual({ ok: true });
+    } finally {
+      rig.cleanup();
+    }
+  });
+
+  it("prepareLaunch records the config dir from the launch env", async () => {
+    const files = harnessMemFs();
+    const pane = mockTmux([atShell(), running]);
+    const adapter = CURSOR_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: files, env: { CURSOR_CONFIG_DIR: "/data/cursor" } }));
+    await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(parseCursorChatSnapshot(files.files[nodePath.join(seatDir, CURSOR_CHAT_SNAPSHOT_FILE)]!)?.configDir).toBe("/data/cursor");
   });
 
   it("identifies itself by process argv, never by the node host", () => {

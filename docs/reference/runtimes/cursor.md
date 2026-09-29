@@ -66,14 +66,27 @@ where the config dir is `CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`,
 else `~/.cursor`.
 
 Before each launch OpenRig records the chat ids that already exist for the
-seat's directory. The resume token is the single chat that appears after that
-launch, captured once it exists (after readiness, by the periodic resume
-refresher, or at restore). If no new chat appears, or several do (two seats
-started in the same directory at once), no token is recorded rather than a
-guess. Resume launches `cursor-agent --trust --resume <chat id>` after checking
-the chat's `store.db` still exists; if it does not, the resume is refused as
+seat's directory, along with the config dir the launch resolved. Cursor
+creates a chat only when the seat receives its first prompt, so the resume
+token is captured afterward (after readiness, by the periodic resume refresher,
+or at restore). A chat is taken as this seat's only when it is the single chat
+that appeared since the launch snapshot and its `store.db` was created at or
+after the launch started. Anything else records no token rather than a guess.
+While another OpenRig seat of the same runtime shares the directory, OpenRig
+does not attempt late capture at all.
+
+Resume launches `cursor-agent --trust --resume <chat id>` after checking the
+chat's `store.db` still exists; if it does not, the resume is refused as
 `retry_fresh` and restore asks before starting a new chat. Fork is not
 supported (Cursor has no fork flag).
+
+To set the token by hand (for example in a shared directory where capture is
+refused), take the chat id from the seat's chat directory name under
+`<config dir>/chats/<md5 of the working directory>/` and pipe it in:
+
+```sh
+printf '%s' "$CHAT_ID" | rig seat set-resume-token impl@my-rig --token-stdin --reason "cursor chat id"
+```
 
 ## Guidance and skills
 
@@ -89,8 +102,15 @@ supported (Cursor has no fork flag).
   pane command is `node`; discovery matches the `cursor-agent` program name. A
   CLI started through the `agent` link is not recognized as Cursor. Stop reaps
   the pane's process tree.
-- Seats that share a working directory and start at the same moment may get no
-  captured resume token (see Resume).
+- Chats the owner starts by hand. If you run `cursor-agent` yourself in a
+  seat's directory after the seat launched and before the seat's first prompt,
+  capture cannot tell that chat from the seat's and may record it. Avoid
+  starting your own Cursor chats in a seat's directory until the seat has
+  prompted, or set the token by hand (see Resume).
+- Seats that share a working directory get no captured token while a sibling
+  Cursor seat is live there; set it by hand if you need resume.
+- `cursor-agent create-chat` was considered for choosing the chat id up front.
+  Without signing in it printed an id but wrote no chat, so it is not used.
 - Readiness is read from the composer placeholder (`Plan, search, build
   anything` or `Add a follow-up`). A busy-state marker is not used.
 

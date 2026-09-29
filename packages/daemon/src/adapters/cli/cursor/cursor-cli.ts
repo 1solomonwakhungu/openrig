@@ -164,27 +164,49 @@ export function cursorResumeTargetExists(fs: ReadOnlyFs, chatsDir: string, chatI
 }
 
 /**
- * Cursor creates the chat id itself, so capture diffs the cwd's chats dir
- * against a snapshot taken just before launch. Exactly one new chat is this
- * seat's; zero (not created yet) or several (another seat in the same cwd
- * launched concurrently) return null rather than a guess.
+ * Cursor creates the chat lazily (on the first prompt) and picks its id
+ * itself, so capture diffs the cwd's chats dir against a snapshot taken just
+ * before launch. A chat is this seat's only when it is the single chat that
+ * appeared since the snapshot AND its store was created at or after the launch
+ * started. Zero or several new chats, a missing or earlier creation time, or no
+ * launch start return null rather than a guess.
+ *
+ * Limit: a chat the owner starts by hand in the same directory before this
+ * seat prompts is indistinguishable and can still be taken. Other OpenRig seats
+ * sharing the cwd are excluded by the base's sibling-seat guard.
  */
-export function pickNewCursorChat(before: readonly string[], after: readonly string[]): string | null {
-  const known = new Set(before);
-  const fresh = after.filter((id) => !known.has(id));
-  return fresh.length === 1 ? fresh[0]! : null;
+export function pickNewCursorChat(input: {
+  before: readonly string[];
+  after: readonly string[];
+  launchStartedAt?: Date;
+  createdAt: (chatId: string) => Date | null;
+}): string | null {
+  const known = new Set(input.before);
+  const fresh = input.after.filter((id) => !known.has(id));
+  if (fresh.length !== 1 || !input.launchStartedAt) return null;
+  const created = input.createdAt(fresh[0]!);
+  if (!created || created.getTime() < input.launchStartedAt.getTime()) return null;
+  return fresh[0]!;
+}
+
+export interface CursorChatSnapshot {
+  chatIds: string[];
+  /** The config dir the launch resolved (from the launch env), so capture and
+   *  the resume check look where this seat's Cursor writes. */
+  configDir?: string;
 }
 
 /** Snapshot file content (seat state dir) and its tolerant parser. */
-export function serializeCursorChatSnapshot(ids: readonly string[]): string {
-  return `${JSON.stringify({ chatIds: [...ids] })}\n`;
+export function serializeCursorChatSnapshot(snapshot: CursorChatSnapshot): string {
+  return `${JSON.stringify(snapshot)}\n`;
 }
 
-export function parseCursorChatSnapshot(content: string): string[] | null {
+export function parseCursorChatSnapshot(content: string): CursorChatSnapshot | null {
   try {
-    const parsed = JSON.parse(content) as { chatIds?: unknown };
+    const parsed = JSON.parse(content) as { chatIds?: unknown; configDir?: unknown };
     if (!Array.isArray(parsed.chatIds) || !parsed.chatIds.every((id) => typeof id === "string")) return null;
-    return parsed.chatIds as string[];
+    const configDir = typeof parsed.configDir === "string" && parsed.configDir.trim() ? parsed.configDir : undefined;
+    return { chatIds: parsed.chatIds as string[], ...(configDir ? { configDir } : {}) };
   } catch {
     return null;
   }

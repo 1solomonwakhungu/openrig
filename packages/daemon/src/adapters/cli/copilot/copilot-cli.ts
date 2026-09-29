@@ -27,6 +27,11 @@ export const COPILOT_GUIDANCE_FILE = "AGENTS.md";
  *  cross-runtime location the Codex adapter already projects into. */
 export const COPILOT_SKILLS_SUBDIR = [".agents", "skills"] as const;
 
+/** Discovery program match: basename `copilot` (standalone binary, npm
+ *  `.bin/copilot` launcher) or a path inside @github/copilot or its
+ *  per-platform package (@github/copilot-darwin-arm64/...). */
+export const COPILOT_PROCESS_MATCH = /(?:^|\/)copilot$|\/@github\/copilot(?:-[a-z0-9-]+)?\//;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export type TokenFormatResult = { ok: true; token: string } | { ok: false; error: string };
@@ -99,8 +104,11 @@ export const COPILOT_GATE_PATTERNS: ReadonlyArray<{ pattern: RegExp; code: strin
     reason: "copilot is asking to trust the workspace folder",
   },
   {
-    // Printed above an otherwise idle prompt, so it must win over the ready footer.
-    pattern: /Please use \/login to sign in to use Copilot/,
+    // Printed as the last message above the prompt (cwd line, rule, `❯`). It
+    // must win over the ready footer, but only while nothing has printed after
+    // it: once `/login` runs, later lines push it off that position and the
+    // stale text no longer gates.
+    pattern: /Please use \/login to sign in to use Copilot[ \t]*\r?\n[^\n]*\r?\n[ \t]*─+[ \t]*\r?\n[ \t]*❯/,
     code: "login_required",
     reason: "copilot is not signed in (run `copilot login` or set COPILOT_GITHUB_TOKEN)",
   },

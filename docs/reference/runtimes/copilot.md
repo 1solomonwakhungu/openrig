@@ -79,13 +79,13 @@ new session. Fork is not supported (Copilot has no fork flag).
 ## Known limits
 
 - The npm install runs under `node`, so the pane command alone does not
-  identify Copilot; discovery matches the program path of the `copilot`
-  launcher or its native binary. Stop reaps the pane's process tree because the launcher
-  starts the native binary as a child.
+  identify Copilot; discovery matches a program named `copilot` or one inside
+  the `@github/copilot` packages. Stop reaps the pane's process tree because
+  the launcher starts the native binary as a child.
 - Readiness is read from the pane: the footer `/ commands · ? help` means ready.
   A busy-state marker is not used.
-- `COPILOT_HOME` is read from the daemon's environment when OpenRig checks and
-  captures sessions.
+- OpenRig records the `COPILOT_HOME` each launch resolved in the seat's state
+  and uses it for the resume check and capture.
 
 ## What was verified live
 

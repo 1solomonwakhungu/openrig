@@ -6,11 +6,11 @@
 import fs, { readFileSync } from "node:fs";
 import nodePath from "node:path";
 import { describe, it, expect } from "vitest";
-import { COPILOT_REGISTRATION } from "../src/adapters/cli/copilot/index.js";
+import { COPILOT_REGISTRATION, COPILOT_SEAT_FILE, COPILOT_SPEC } from "../src/adapters/cli/copilot/index.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import {
-  HARNESS_CWD, HARNESS_HOME, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux,
+  HARNESS_CWD, HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux,
 } from "./helpers/tui-cli-adapter-harness.js";
 import {
   buildCopilotArgv, validateCopilotSessionId, COPILOT_READY_PATTERNS, COPILOT_GATE_PATTERNS,
@@ -104,6 +104,10 @@ describe("Copilot pane patterns (live captures)", () => {
 
   it("the idle footer is ready once signed in", () => {
     expect(classify(fixture("copilot-idle-derived.txt"))).toBe("ready");
+  });
+
+  it("a stale sign-in prompt with later output above the input box no longer gates", () => {
+    expect(classify(fixture("copilot-after-login-derived.txt"))).toBe("ready");
   });
 
   it("gate codes are attention-required readiness codes", async () => {
@@ -257,6 +261,25 @@ describe("Copilot adapter launch", () => {
     expect(files.files[SETTINGS]).toBe("// user comment\n{ \"trustedFolders\": [] }");
   });
 
+  it("records the COPILOT_HOME the launch resolved; capture and the resume check use it", async () => {
+    const files = harnessMemFs();
+    const { adapter } = launch(files, { COPILOT_HOME: "/data/copilot" });
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    const token = result.ok ? result.resumeToken! : "";
+    const seatStateDir = nodePath.join(HARNESS_STATE_ROOT, "copilot", HARNESS_SESSION);
+    expect(JSON.parse(files.files[nodePath.join(seatStateDir, COPILOT_SEAT_FILE)]!)).toEqual({ copilotHome: "/data/copilot" });
+    files.writeFile(copilotWorkspaceFile("/data/copilot", token), workspaceYaml(token, HARNESS_CWD, "2026-09-29T12:00:00Z"));
+    // The daemon env has no COPILOT_HOME; the recorded one still finds the session.
+    const check = await COPILOT_SPEC.validateResumeTarget!({
+      token, cwd: HARNESS_CWD, seatStateDir, homedir: HARNESS_HOME, fs: files, binding: harnessBinding(),
+    });
+    expect(check).toEqual({ ok: true });
+    const missing = await COPILOT_SPEC.validateResumeTarget!({
+      token, cwd: HARNESS_CWD, seatStateDir: "/nowhere", homedir: HARNESS_HOME, fs: files, binding: harnessBinding(),
+    });
+    expect(missing).toMatchObject({ ok: false });
+  });
+
   it("resumes an existing session by exact id without minting a new one", async () => {
     const files = harnessMemFs({ [workspaceFileUnder(HARNESS_HOME, SEEDED_ID)]: workspaceYaml(SEEDED_ID, HARNESS_CWD, "2026-09-29T12:00:00Z") });
     const { adapter, pane } = launch(files);
@@ -271,7 +294,10 @@ describe("Copilot adapter launch", () => {
     expect(d.paneCommands).toEqual(["copilot"]);
     const matches = (command: string) => processMatches(command, d.processMatch!);
     expect(matches("node /opt/tools/node_modules/.bin/copilot --no-auto-update")).toBe(true);
+    expect(matches("node /usr/local/lib/node_modules/@github/copilot/npm-loader.js")).toBe(true);
     expect(matches("/opt/tools/node_modules/@github/copilot-darwin-arm64/copilot --session-id x")).toBe(true);
+    expect(matches("/opt/homebrew/bin/copilot")).toBe(true);
+    expect(matches("node /home/u/code/copilot/server.js")).toBe(false);
     expect(matches("node /usr/local/bin/opencode --prompt copilot")).toBe(false);
     expect(matches("gh copilot suggest")).toBe(false);
     expect(d.reapProcessTreeOnStop).toBe(true);
