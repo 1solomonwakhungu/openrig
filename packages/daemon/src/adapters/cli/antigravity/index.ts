@@ -72,6 +72,9 @@ function siblingSharesCwd(seatStateDir: string, cwd: string, launchStartedAt: Da
   });
 }
 
+/** Ready: the `? for shortcuts` status line, and no `initializing...` state on screen. */
+export const ANTIGRAVITY_READY_RE = /^(?![\s\S]*initializing\.\.\.)[\s\S]*\? for shortcuts/;
+
 export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
   id: "antigravity",
   displayName: "Antigravity CLI",
@@ -126,7 +129,11 @@ export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
   validateResumeTarget: ({ token, homedir }) => fs.existsSync(antigravityConversationPath(homedir, token))
     ? { ok: true }
     : { ok: false, reason: "no local Antigravity conversation with that id" },
-  readyPatterns: [/\? for shortcuts/],
+  // The idle screen was not observed live (see the runtime doc), so readiness
+  // is strict: the status line must show and the TUI must not still be
+  // initializing. Anything else runs out the wait as attention_required with
+  // pane evidence, never a false ready.
+  readyPatterns: [ANTIGRAVITY_READY_RE],
   gatePatterns: [
     { pattern: /Do you trust the contents of this project\?/, code: "trust_gate", reason: "agy is asking to trust the project" },
     {

@@ -91,6 +91,15 @@ describe("antigravity adapter", () => {
     expect(pane.typed[0]!.endsWith(`'--mode' 'accept-edits' '--conversation' '${TOKEN}'`)).toBe(true);
   });
 
+  it("fails toward attention_required, never a false ready, on an unrecognized or initializing screen", async () => {
+    for (const content of ["  initializing...\n  ? for shortcuts", "  Antigravity CLI\n  loading workspace"]) {
+      const pane = mockTmux([atShell(), { command: "agy", content }]);
+      const adapter = new TuiCliRuntimeAdapter(ANTIGRAVITY_SPEC, harnessDeps({ tmux: pane.tmux, fsOps: memFs() }));
+      const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+      expect(result).toMatchObject({ ok: false, recovery: "attention_required", evidence: expect.stringContaining(content.split("\n")[1]!.trim()) });
+    }
+  });
+
   it("validates conversation ids as UUIDs", () => {
     expect(validateAntigravityConversationId(TOKEN.toUpperCase())).toEqual({ ok: true, token: TOKEN });
     expect(validateAntigravityConversationId("-c").ok).toBe(false);

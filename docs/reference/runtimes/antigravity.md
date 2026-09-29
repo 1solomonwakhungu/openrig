@@ -60,10 +60,33 @@ agy draws a full-screen TUI on the terminal's alternate screen; the base adapter
 - agy shares `~/.gemini/` with Gemini CLI (global `GEMINI.md`, `AGENTS.md`, rules).
 - Whether agy's process survives `tmux kill-session` was not verified; the adapter does not opt into process-tree reaping.
 
-## Verified
+## Verified versus derived
 
-Against agy 1.1.27 on macOS (2026-09-29):
+Against agy 1.1.27 on macOS (2026-09-29).
 
-- Live: `agy --help` (flags `--model`, `--dangerously-skip-permissions`, `--mode accept-edits|plan`, `--conversation`, `-c`, `-i`, no fork, no session-id flag). The local app data layout (`~/.gemini/antigravity-cli/conversations/<uuid>.db`, `cache/last_conversations.json` keyed by workspace path) was read with values masked.
-- From binary strings: the `? for shortcuts` status line, the trust prompt, the sign-in texts, `conversation not found`, `[Auth Error]`, and the exit hint `agy --conversation=<id>`.
-- Not verified live: any pane text. agy authenticates through the OS keyring, which a throwaway `HOME` does not isolate from the owner's account, so the TUI was not launched.
+Verified live (observed from the real binary or files):
+
+- `agy --help`: `--model`, `--dangerously-skip-permissions`, `--mode accept-edits|plan`, `--conversation`, `-c/--continue`, `-i/--prompt-interactive`; no fork flag and no flag to choose a conversation id.
+- `agy --version` prints `1.1.27` (the preflight probe).
+- The local app data layout, read with ids and paths masked: `~/.gemini/antigravity-cli/conversations/<uuid>.db` (one file per conversation) and `~/.gemini/antigravity-cli/cache/last_conversations.json` as `{ "<workspace path>": "<uuid>" }`.
+
+Derived from strings in the agy binary (never seen in a live pane):
+
+| String | Adapter use |
+|---|---|
+| `? for shortcuts` | ready (with no `initializing...` on screen) |
+| `initializing...` | not ready |
+| `Do you trust the contents of this project?` | `trust_gate` |
+| `Select login method:`, `Other sign-in options` | `login_required` |
+| `Authentication required. Please visit the URL to log in:`, `Waiting for authentication (timeout 60s)...` | `login_required` |
+| `Paste the authorization code below:`, `Enter the authorization code:` | `login_required` |
+| `conversation not found` | resume refused, `retry_fresh` |
+| `[Auth Error]` | launch error, `attention_required` |
+| `Resume with -c (or command below):` / `agy --conversation=%s` | confirms `--conversation <id>` resume |
+| `last_conversations.json`, `<appDataDir>/brain/<conversation-id>/` | conversation storage |
+
+Not verified, carried as residual risk:
+
+- The idle (ready) screen, the placement of the status line, and every gate screen. agy authenticates through the OS keyring, which a throwaway `HOME` does not isolate from the owner's account, so the TUI was not launched.
+- Because of that, readiness is strict and fails toward `attention_required` with pane evidence: a screen the adapter does not recognize times out as attention, never as ready. The first real launch should confirm the ready string and adjust `ANTIGRAVITY_READY_RE` if needed.
+- When the conversation file is created (first prompt versus launch), and whether agy survives `tmux kill-session`.
