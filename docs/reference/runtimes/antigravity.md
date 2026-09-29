@@ -56,6 +56,12 @@ Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or
 - Guidance merges as managed blocks into `<cwd>/AGENTS.md` (agy reads workspace `AGENTS.md` and `GEMINI.md`), with the `rig-role` skip. Teardown removes the blocks. `AGENTS.md` is the same file Codex seats use.
 - Skills project into `<cwd>/.agents/skills/` (agy workspace skills; Codex reads the same directory).
 
+## Self-update
+
+- Mechanism: agy runs a built-in background auto-updater at launch (it spawns a separate update process, downloads `updater.tar.gz`, and replaces the installed `agy`), throttled by `~/.gemini/antigravity-cli/last_check.timestamp`.
+- **No switch found.** agy 1.1.27 has no update flag (`--noUpdate`, `--no-update`, and similar are rejected as undefined), none of its twelve `AGY_*` environment variables controls updates, and the CLI reference documents no update setting. Managed seats therefore cannot turn it off without writing owner state, and the adapter does not.
+- Residual risk: a managed seat can update the operator's agy install. It updates only agy's own binary (not an npm or Homebrew global prefix) and happens at most once per update window. If agy adds a flag or environment variable for this, add it to the launch command.
+
 ## Known limits
 
 - The trust prompt has no known pre-trust flag; a seat in an untrusted project stops at `trust_gate` until someone answers it once.

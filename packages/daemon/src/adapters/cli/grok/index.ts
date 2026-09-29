@@ -92,7 +92,10 @@ export const GROK_SPEC: TuiCliRuntimeSpec = {
     // --no-alt-screen keeps output in the normal screen and its scrollback,
     // so transcripts and `rig capture` see it. --trust records folder trust for
     // the seat cwd, like the Claude adapter's trust acceptance.
-    const argv = ["grok", "--no-alt-screen", "--trust"];
+    // --no-auto-update (session scope) and GROK_DISABLE_AUTOUPDATER=1 (process
+    // scope, in the env below) both stop grok's launch-time self-update of its
+    // managed install under ~/.grok; neither writes owner config.
+    const argv = ["grok", "--no-alt-screen", "--trust", "--no-auto-update"];
     if (binding.model) argv.push("--model", binding.model);
     argv.push(...(posture === "full_bypass" ? ["--always-approve"] : ["--permission-mode", "acceptEdits"]));
     if (resumeToken) {

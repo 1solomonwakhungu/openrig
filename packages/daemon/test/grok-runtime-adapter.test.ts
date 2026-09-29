@@ -78,14 +78,29 @@ describe("grok adapter", () => {
     const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
     const minted = uuidIn(pane.typed[0]!);
     expect(minted).toBeTruthy();
-    expect(pane.typed[0]).toBe(`exec env 'GROK_DISABLE_AUTOUPDATER=1' 'BROWSER=true' 'grok' '--no-alt-screen' '--trust' '--permission-mode' 'acceptEdits' '--session-id' '${minted}'`);
+    expect(pane.typed[0]).toBe(`exec env 'GROK_DISABLE_AUTOUPDATER=1' 'BROWSER=true' 'grok' '--no-alt-screen' '--trust' '--no-auto-update' '--permission-mode' 'acceptEdits' '--session-id' '${minted}'`);
     expect(result).toEqual({ ok: true, resumeToken: minted, resumeType: "grok_session_id" });
+  });
+
+  it("disables grok's self-update on every launch path without writing owner config", async () => {
+    for (const opts of [{}, { resumeToken: TOKEN }, { forkSource: { kind: "native_id" as const, value: "0198a2f0-aaaa-7bbb-8ccc-dddddddddddd" } }]) {
+      const root = tmp();
+      const home = nodePath.join(root, "home");
+      seedGrokSession(home, "/work/project", TOKEN);
+      const pane = mockTmux([atShell(), { command: "grok", content: READY }]);
+      const files = memFs();
+      const adapter = new TuiCliRuntimeAdapter(GROK_SPEC, harnessDeps({ tmux: pane.tmux, fsOps: files, homedir: home }));
+      await adapter.launchHarness(harnessBinding(), { name: "x", ...opts });
+      expect(pane.typed[0]).toContain("'GROK_DISABLE_AUTOUPDATER=1'");
+      expect(pane.typed[0]).toContain("'--no-auto-update'");
+      expect(Object.keys(files.files).filter((p) => p.includes(".grok/config.toml"))).toEqual([]);
+    }
   });
 
   it("maps full_bypass to --always-approve and passes the model", async () => {
     const { pane, adapter } = launch();
     await adapter.launchHarness(harnessBinding({ model: "grok-4", launchPosture: "full_bypass" }), { name: "x" });
-    expect(pane.typed[0]).toContain("'grok' '--no-alt-screen' '--trust' '--model' 'grok-4' '--always-approve' '--session-id'");
+    expect(pane.typed[0]).toContain("'grok' '--no-alt-screen' '--trust' '--no-auto-update' '--model' 'grok-4' '--always-approve' '--session-id'");
     expect(pane.typed[0]).not.toContain("acceptEdits");
   });
 

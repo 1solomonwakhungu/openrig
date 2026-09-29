@@ -21,7 +21,7 @@ members:
 
 ## Launch
 
-The seat runs `exec env GROK_DISABLE_AUTOUPDATER=1 BROWSER=true grok --no-alt-screen --trust [--model <m>] <posture> --session-id <uuid>`.
+The seat runs `exec env GROK_DISABLE_AUTOUPDATER=1 BROWSER=true grok --no-alt-screen --trust --no-auto-update [--model <m>] <posture> --session-id <uuid>`.
 
 | Setting | Flag |
 |---|---|
@@ -30,7 +30,7 @@ The seat runs `exec env GROK_DISABLE_AUTOUPDATER=1 BROWSER=true grok --no-alt-sc
 | Posture `full_bypass` (policy or `OPENRIG_YOLO`) | `--always-approve` |
 | Output | `--no-alt-screen`, so output stays in pane scrollback for transcripts and `rig capture` |
 | Folder trust | `--trust` records trust for the seat cwd (same role as the Claude adapter's trust acceptance) |
-| Updates | `GROK_DISABLE_AUTOUPDATER=1` |
+| Updates | `GROK_DISABLE_AUTOUPDATER=1` and `--no-auto-update` (see Self-update) |
 | Browser | `BROWSER=true`, so sign-in never opens a tab on the operator's desktop; the device code shows in the pane |
 
 ## Resume and fork
@@ -56,6 +56,12 @@ Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or
 - Identity: the pane command is `grok`, but on macOS tmux reports the symlink target's name (`grok-<version>-macos-aarch64`), so discovery also matches the program path (`processMatch: "grok"`): `~/.grok/bin/grok` matches, and the installer's `~/.grok/bin/agent` symlink never does.
 - Guidance merges as managed blocks into `<cwd>/AGENTS.md` (grok reads `AGENTS.md`, `AGENT.md`, and `CLAUDE.md` from the cwd up to the repo root), with the `rig-role` skip. Teardown removes the blocks.
 - Skills project into `<cwd>/.grok/skills/`. grok loads project skills only for a trusted folder, which `--trust` provides.
+
+## Self-update
+
+- Mechanism: on launch grok checks for a new release and replaces its managed install under `~/.grok` (`$GROK_HOME/bin/grok`); it does not touch npm or Homebrew prefixes.
+- Disabled in every managed seat, on fresh, resume, and fork launches, by `GROK_DISABLE_AUTOUPDATER=1` (process scope) and `--no-auto-update` (session scope, a hidden flag grok 1.0.25 accepts). Neither writes owner config.
+- Not reachable without owner config: session-start plugin auto-update (git updates of installed marketplace plugins inside `~/.grok`), whose only switch is `plugin_auto_update = false` in `config.toml` or managed policy, and first-run registration of the official xAI plugin marketplace in `config.toml`. grok's `GROK_CONFIG` overlay cannot set either (it only accepts `models`, `features`, `toolset`, and part of `shell_environment_policy`). These stay inside grok's own `~/.grok` and never install into a system prefix; an operator who wants them off sets `plugin_auto_update = false` once.
 
 ## Known limits
 
