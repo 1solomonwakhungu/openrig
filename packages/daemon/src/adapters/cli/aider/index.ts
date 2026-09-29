@@ -23,7 +23,9 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   validateResumeToken: validateAiderChatHistoryToken,
   // The history file minted for the seat's latest fresh launch (launch.json
   // presetToken). The base already reports the minted token at launch; this
-  // covers late capture (refresher, restore).
+  // covers late capture (refresher, restore). It reads only this seat's own
+  // state dir, so pod-mates sharing a cwd cannot confuse it.
+  captureIsSessionScoped: true,
   captureResumeToken: ({ seatStateDir }) =>
     captureAiderChatHistory({ fs: createNodeFsOps(), seatStateDir }) ?? null,
   supportsFork: false,

@@ -379,6 +379,10 @@ describe("aider adapter", () => {
     expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("not installed") });
   });
 
+  it("capture is seat-scoped (its own state dir), so the sibling-seat guard never skips it", () => {
+    expect(AIDER_DESCRIPTOR.captureIsSessionScoped).toBe(true);
+  });
+
   it("merges guidance into AGENTS.md (which the launch --read loads) and skips skills", async () => {
     expect(AIDER_DESCRIPTOR.guidanceFile).toBe("AGENTS.md");
     expect(buildAiderArgv({ posture: "floor", seatStateDir: SEAT }).join(" ")).toContain("--read AGENTS.md");

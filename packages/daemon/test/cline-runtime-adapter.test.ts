@@ -346,6 +346,10 @@ describe("cline adapter", () => {
     expect(CLINE_DESCRIPTOR.skillsDir!({ cwd: "/work/repo" })).toBe("/work/repo/.cline/skills");
   });
 
+  it("capture is not session-scoped, so the sibling-seat guard applies", () => {
+    expect(CLINE_DESCRIPTOR.captureIsSessionScoped ?? false).toBe(false);
+  });
+
   it("does not reap the pane process tree (the shared hub daemon lives there)", () => {
     expect(CLINE_DESCRIPTOR.reapProcessTreeOnStop).toBe(false);
     expect(CLINE_DESCRIPTOR.paneCommands).toBeUndefined();
