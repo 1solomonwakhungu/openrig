@@ -1,0 +1,24 @@
+
+
+Tips for getting started:
+1. Create GEMINI.md files to customize your interactions
+2. /help for more information
+3. Ask coding questions, edit code or run commands
+4. Be specific for the best results
+
+⚠  Warning: True color (24-bit) support not detected. Using a terminal with true
+   color enabled will result in a better visual experience.
+
+
+ ╭──────────────────────────────────────────────────────────────────────────────
+ │
+ │ > Do you want to connect Android Studio to Gemini CLI?
+ │ If you select Yes, we'll install an extension that allows the CLI to access
+ │ your open files and display diffs directly in Android Studio.
+ │
+ │ ● 1. Yes
+ │   2. No (esc)
+ │   3. No, don't ask again
+ │
+ ╰──────────────────────────────────────────────────────────────────────────────
+

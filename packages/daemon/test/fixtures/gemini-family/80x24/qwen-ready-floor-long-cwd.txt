@@ -1,0 +1,24 @@
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ >_ Qwen Code (v0.24.7)                                                   │
+  │                                                                          │
+  │ API Key | probe-model (/model to change)                                 │
+  │ /Users/.../nested-service-module-with-long-name                          │
+  └──────────────────────────────────────────────────────────────────────────┘
+  Tips: Add a QWEN.md file to give Qwen Code persistent project context.
+  ●︎ Extensions changed on disk. Run /reload-plugins to apply updates.
+
+────────────────────────────────────────────────────────────────────────────────
+>   Type your message or @path/to/file
+────────────────────────────────────────────────────────────────────────────────
+  ➜ nested-service-module-with-long-name · probe-model
+  auto-accept edits (shift + tab to cycle)
+
+
+
+
+
+
+
+
+
+

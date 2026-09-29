@@ -1,0 +1,24 @@
+
+Tips for getting started:
+1. Create GEMINI.md files to customize your interactions
+2. /help for more information
+3. Ask coding questions, edit code or run commands
+4. Be specific for the best results
+
+⚠  Warning: True color (24-bit) support not detected. Using a terminal with true
+   color enabled will result in a better visual experience.
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  Gemini CLI works best with Shift+Enter/Ctrl+Enter for multiline input.      │
+│  Would you like to automatically configure your terminal keybindings?        │
+│                                                                              │
+│  Do you want to continue?                                                    │
+│                                                                              │
+│  ● 1. Yes                                                                    │
+│    2. No                                                                     │
+│                                                                              │
+│  Enter to select · ↑/↓ to navigate · Esc to cancel                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
