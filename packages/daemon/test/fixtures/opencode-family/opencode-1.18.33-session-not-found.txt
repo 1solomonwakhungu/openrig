@@ -1,0 +1,2 @@
+Error: Session not found: ses_doesnotexist123
+user@host project % 
