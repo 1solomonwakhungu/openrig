@@ -38,8 +38,12 @@ function seatConfigDir(snapshot: CursorChatSnapshot | null, homedir: string): st
   return snapshot?.configDir ?? cursorConfigDir(process.env, homedir);
 }
 
-/** When the chat's store was created (birth time where the filesystem has
- *  one, else its change time). */
+/** When the chat's store was created: the birth time where the filesystem
+ *  reports one (macOS, most Linux filesystems via statx). Where it is 0 this
+ *  falls back to the change time, which moves on every write, so there the
+ *  check only proves the store was touched after launch start: a chat created
+ *  before launch and written to afterward can pass. The snapshot diff still
+ *  excludes every chat that existed when the seat launched. */
 function storeCreatedAt(chatsDir: string, chatId: string): Date | null {
   try {
     const stat = fs.statSync(nodePath.join(chatsDir, chatId, "store.db"));
