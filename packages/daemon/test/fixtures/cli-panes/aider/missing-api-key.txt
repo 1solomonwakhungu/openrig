@@ -1,0 +1,40 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Warning: claude-sonnet-4-5 expects these environment variables
+- ANTHROPIC_API_KEY: Not set
+Warning: claude-haiku-4-5 expects these environment variables
+- ANTHROPIC_API_KEY: Not set
+You can skip this check with --no-show-model-warnings
+
+https://aider.chat/docs/llms/warnings.html
+Open documentation url for more info? (Y)es/(N)o/(D)on't ask again [Yes]:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,40 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Error: Read-only file /home/user/ws-aider/AGENTS.md does not exist.
+Skipping.
+Aider v0.86.2
+Main model: claude-sonnet-4-5 with diff edit format, infinite output
+Weak model: claude-haiku-4-5
+Git repo: .git with 0 files
+Repo-map: using 4096 tokens, auto refresh
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
