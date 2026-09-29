@@ -61,6 +61,10 @@ export const DEFAULT_LAUNCH_TIMEOUT_MS = 30_000;
 export const DEFAULT_POLL_INTERVAL_MS = 500;
 export const DEFAULT_EVIDENCE_LINES = 12;
 const PANE_CAPTURE_LINES = 40;
+/** Every pane read joins soft-wrapped rows (tmux -J): on an 80-column pane a
+ *  long line printed inline wraps at the pane width, possibly mid-word, and
+ *  patterns must see the line as printed. */
+const JOINED = { joinWrapped: true } as const;
 
 export interface TuiCliLaunchInput {
   binding: NodeBinding;
@@ -396,7 +400,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     // left in a reused pane's scrollback never counts.
     const window: LaunchWindow = {
       line: await this.tmux.getPaneLinePosition(sessionName),
-      lines: new Set(((await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES)) ?? "").split("\n")),
+      lines: new Set(((await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "").split("\n")),
       alternateAtLaunch: (await this.tmux.isPaneAlternateScreen(sessionName)) === true,
     };
     const sent = await this.tmux.sendShellCommand(sessionName, command);
@@ -615,8 +619,8 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     const paneCommand = ((await this.tmux.getPaneCommand(sessionName)) ?? "").trim().replace(/^-/, "");
     const atShell = SHELL_COMMANDS.has(paneCommand);
     let content = window && window.line !== null
-      ? (await this.tmux.capturePaneFromLine(sessionName, window.line)) ?? ""
-      : (await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES)) ?? "";
+      ? (await this.tmux.capturePaneFromLine(sessionName, window.line, JOINED)) ?? ""
+      : (await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "";
     // An alternate screen is the new CLI's only while the CLI holds the
     // foreground and the screen was not already on before the launch (a
     // previous TUI that exited without restoring it). Otherwise keep only the
