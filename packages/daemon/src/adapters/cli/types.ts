@@ -20,6 +20,11 @@ export interface CliAdapterFsOps {
   rename?(from: string, to: string): void;
   /** Resolve symlinks; owner-config writes follow a linked dotfile. */
   realpath?(path: string): string;
+  /** Whether the path itself is a symbolic link (not followed). */
+  isSymlink?(path: string): boolean;
+  /** Create a new file exclusively (fail if it exists) with this mode from
+   *  the start; owner-config temp files never exist with a wider mode. */
+  createFile?(path: string, content: string, mode: number): void;
   /** File mode; owner-config writes keep it across the atomic replace. */
   statMode?(path: string): number;
   chmod?(path: string, mode: number): void;

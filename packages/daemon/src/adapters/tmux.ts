@@ -771,7 +771,6 @@ export class TmuxAdapter {
     }
   }
 
-  /** Capture pane content (last N lines). Returns null if unavailable. */
   /** Absolute line index of the cursor in the pane's scrollback plus screen
    *  (history_size + cursor_y). A position taken before typing marks where new
    *  output starts; capturePaneFromLine reads from it. Null when unavailable. */
@@ -819,6 +818,7 @@ export class TmuxAdapter {
     }
   }
 
+  /** Capture pane content (last N lines). Returns null if unavailable. */
   async capturePaneContent(paneId: string, lines: number = 20): Promise<string | null> {
     try {
       const output = await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)} -S -${lines}`);

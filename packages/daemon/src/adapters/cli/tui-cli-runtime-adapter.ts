@@ -472,8 +472,10 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   // ── internals ──────────────────────────────────────────────────────────────
 
   /** The exact text typed into the pane (exposed for tests and docs). It
-   *  `exec`s the CLI so the CLI replaces the launch shell: pane_current_command
-   *  becomes the CLI, and the pane closes with it instead of dropping to a shell. */
+   *  `exec`s the CLI so the CLI replaces the launch script's shell
+   *  (`/bin/sh <script>` from sendShellCommand) and pane_current_command
+   *  becomes the CLI. When the CLI exits, the pane returns to its own shell
+   *  prompt; the pane does not close. */
   buildShellCommand(input: TuiCliLaunchInput): string {
     const argv = this.spec.buildLaunchCommand(input);
     if (argv.length === 0 || !argv[0]) throw new Error("empty launch command");

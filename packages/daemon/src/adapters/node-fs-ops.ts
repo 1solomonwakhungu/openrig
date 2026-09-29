@@ -32,6 +32,8 @@ export function createNodeFsOps() {
     chmod: (p: string, mode: number) => fs.chmodSync(p, mode),
     rename: (from: string, to: string) => fs.renameSync(from, to),
     realpath: (p: string) => fs.realpathSync(p),
+    isSymlink: (p: string) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } },
+    createFile: (p: string, content: string, mode: number) => fs.writeFileSync(p, content, { encoding: "utf-8", mode, flag: "wx" }),
   };
 }
 

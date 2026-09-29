@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mergeOwnerConfig } from "../src/adapters/cli/owner-config.js";
 import { createNodeFsOps } from "../src/adapters/node-fs-ops.js";
 import { memFs } from "./helpers/tui-cli-adapter-harness.js";
@@ -83,6 +83,35 @@ describe("mergeOwnerConfig (owner-state-safe config edits)", () => {
     fs.chmodSync(file, 0o600);
     mergeOwnerConfig(createNodeFsOps(), file, "json", (c) => c.setIfAbsent(["a"], 1));
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("creates the temp file with the target's mode from the start (real fs)", () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "openrig-owner-"));
+    const file = path.join(root, "secret.json");
+    fs.writeFileSync(file, "{}");
+    fs.chmodSync(file, 0o600);
+    const ops = createNodeFsOps();
+    const tempModes: number[] = [];
+    const createFile = ops.createFile;
+    ops.createFile = (p, content, mode) => {
+      createFile(p, content, mode);
+      tempModes.push(fs.statSync(p).mode & 0o777); // before any chmod or rename
+    };
+    mergeOwnerConfig(ops, file, "json", (c) => c.setIfAbsent(["a"], 1));
+    expect(tempModes).toEqual([0o600]);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("leaves a dangling symlink alone (real fs)", () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "openrig-owner-"));
+    const link = path.join(root, "config.json");
+    fs.symlinkSync(path.join(root, "missing", "config.json"), link);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(mergeOwnerConfig(createNodeFsOps(), link, "json", (c) => c.setIfAbsent(["a"], 1)))
+      .toMatchObject({ status: "skipped", reason: "dangling_symlink" });
+    warn.mockRestore();
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.existsSync(path.join(root, "missing"))).toBe(false);
   });
 
   it("follows a symlinked dotfile and keeps the link (real fs)", () => {
