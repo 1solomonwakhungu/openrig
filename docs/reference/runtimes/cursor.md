@@ -46,8 +46,8 @@ members:
 
 | Posture | Launch flags |
 |---|---|
-| `floor` (default) | `--trust` only: Cursor's own approval settings apply |
-| `full_bypass` | `--trust --force` (`--force` runs commands unless explicitly denied) |
+| `floor` (default) | `--disable-auto-update --trust`: Cursor's own approval settings apply |
+| `full_bypass` | `--disable-auto-update --trust --force` (`--force` runs commands unless explicitly denied) |
 
 Posture comes from the member or rig `permission_policy` (for example
 `builtin:yolo` selects `full_bypass`). `rig seat set-permissions` is currently
@@ -57,6 +57,18 @@ limited to `claude-code` and `codex`.
 so the "Workspace Trust Required" dialog does not block the seat; `--force`
 alone does not skip that dialog in the interactive CLI. This mirrors how
 OpenRig pre-accepts workspace trust for Claude Code seats.
+
+## Updates
+
+Every managed launch passes `--disable-auto-update`, so a seat never updates
+Cursor. Without it the CLI checks for a newer release about two seconds after
+it starts and, when one exists, installs it under
+`~/.local/share/cursor-agent/versions/`, deletes older versions, and re-links
+`~/.local/bin/agent`, `~/.local/bin/cursor-agent`, and a `~/.local/bin/cursor`
+shim (the same `agent` link the install script replaces). The flag is not
+listed in `cursor-agent --help` but is accepted by the CLI. Update Cursor
+yourself with `cursor-agent update` (which also re-links `agent`) or by
+reinstalling.
 
 ## Resume
 
@@ -75,7 +87,7 @@ after the launch started. Anything else records no token rather than a guess.
 While another OpenRig seat of the same runtime shares the directory, OpenRig
 does not attempt late capture at all.
 
-Resume launches `cursor-agent --trust --resume <chat id>` after checking the
+Resume launches `cursor-agent --disable-auto-update --trust --resume <chat id>` after checking the
 chat's `store.db` still exists; if it does not, the resume is refused as
 `retry_fresh` and restore asks before starting a new chat. Fork is not
 supported (Cursor has no fork flag).

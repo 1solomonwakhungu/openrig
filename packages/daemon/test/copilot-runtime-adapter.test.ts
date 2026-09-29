@@ -52,7 +52,7 @@ function workspaceYaml(id: string, cwd: string, createdAt: string): string {
 describe("buildCopilotArgv", () => {
   it("fresh launch mints the session id and passes the model; floor adds no permission flag", () => {
     expect(buildCopilotArgv({ posture: "floor", newSessionId: ID, model: "gpt-5.4" }))
-      .toEqual(["copilot", "--session-id", ID, "--model", "gpt-5.4"]);
+      .toEqual(["copilot", "--no-auto-update", "--session-id", ID, "--model", "gpt-5.4"]);
   });
 
   it("full_bypass maps to --yolo and floor never passes it", () => {
@@ -64,9 +64,20 @@ describe("buildCopilotArgv", () => {
 
   it("resume uses the exact-id form, never the bare picker", () => {
     const argv = buildCopilotArgv({ posture: "floor", resumeToken: ID });
-    expect(argv).toEqual(["copilot", `--resume=${ID}`]);
+    expect(argv).toEqual(["copilot", "--no-auto-update", `--resume=${ID}`]);
     expect(argv).not.toContain("--resume");
     expect(argv).not.toContain("--continue");
+  });
+
+  it("every launch shape disables self-update", () => {
+    for (const input of [
+      { posture: "floor" as const, newSessionId: ID },
+      { posture: "full_bypass" as const, newSessionId: ID },
+      { posture: "floor" as const, resumeToken: ID },
+      { posture: "floor" as const },
+    ]) {
+      expect(buildCopilotArgv(input)[1]).toBe("--no-auto-update");
+    }
   });
 
   it("refuses fork, malformed tokens, mixed fresh/resume, and flag-like models", () => {
@@ -79,7 +90,7 @@ describe("buildCopilotArgv", () => {
 
   it("ignores a blank model and honors a resolved binary path", () => {
     expect(buildCopilotArgv({ posture: "floor", model: "  ", binary: "/opt/copilot/bin/copilot" }))
-      .toEqual(["/opt/copilot/bin/copilot"]);
+      .toEqual(["/opt/copilot/bin/copilot", "--no-auto-update"]);
   });
 });
 
@@ -233,6 +244,20 @@ describe("Copilot adapter launch", () => {
     expect(pane.typed[0]).toContain(`'--session-id' '${token}'`);
     expect(pane.typed[0]).toContain("'--model' 'gpt-5.4'");
     expect(pane.typed[0]).not.toContain("--yolo");
+  });
+
+  it("fresh, resume, and restore launches all type --no-auto-update", async () => {
+    const fresh = launch();
+    await fresh.adapter.launchHarness(harnessBinding(), { name: "x" });
+    const files = harnessMemFs({ [workspaceFileUnder(HARNESS_HOME, SEEDED_ID)]: workspaceYaml(SEEDED_ID, HARNESS_CWD, "2026-09-29T12:00:00Z") });
+    const resumed = launch(files);
+    await resumed.adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: SEEDED_ID });
+    const restored = launch(harnessMemFs({ [workspaceFileUnder(HARNESS_HOME, SEEDED_ID)]: workspaceYaml(SEEDED_ID, HARNESS_CWD, "2026-09-29T12:00:00Z") }));
+    const restore = await restored.adapter.resume({ nodeId: "node-1", sessionName: HARNESS_SESSION, resumeType: "copilot_session_id", resumeToken: SEEDED_ID, cwd: HARNESS_CWD });
+    expect(restore.ok).toBe(true);
+    for (const typed of [fresh.pane.typed[0], resumed.pane.typed[0], restored.pane.typed[0]]) {
+      expect(typed).toContain("'copilot' '--no-auto-update'");
+    }
   });
 
   it("full_bypass types --yolo", async () => {

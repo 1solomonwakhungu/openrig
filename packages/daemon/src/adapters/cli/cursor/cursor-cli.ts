@@ -58,7 +58,8 @@ export interface CursorLaunchInput {
  * argv for an interactive Cursor launch. Throws (refusing the launch) on a
  * fork request, a malformed token, or a bare `agent` binary.
  * - Every launch passes `--trust` (workspace trust is neutral plumbing, as the
- *   Claude adapter's hasTrustDialogAccepted provisioning is).
+ *   Claude adapter's hasTrustDialogAccepted provisioning is) and
+ *   `--disable-auto-update` (a managed seat never updates the CLI).
  * - full_bypass: `--force`. floor: no approval flag, so Cursor keeps its own
  *   allowlist default.
  */
@@ -70,7 +71,11 @@ export function buildCursorArgv(input: CursorLaunchInput): string[] {
   if (nodePath.basename(binary) === "agent") {
     throw new Error("cursor launch: use `cursor-agent`, not `agent` (`agent` can resolve to another CLI)");
   }
-  const argv = [binary, "--trust"];
+  // `--disable-auto-update` (hidden in --help, present in the bundle) stops
+  // the background updater the TUI starts 2s after launch. That updater
+  // installs a newer release and re-links ~/.local/bin/agent and
+  // ~/.local/bin/cursor-agent, which would replace another CLI's `agent`.
+  const argv = [binary, "--disable-auto-update", "--trust"];
   if (input.resumeToken !== undefined) {
     const token = validateCursorChatId(input.resumeToken);
     if (!token.ok) throw new Error(`cursor resume: ${token.error}`);

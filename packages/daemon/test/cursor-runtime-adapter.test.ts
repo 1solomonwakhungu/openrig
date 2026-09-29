@@ -49,11 +49,11 @@ function memFs(files: Record<string, string>): ReadOnlyFs {
 describe("buildCursorArgv", () => {
   it("fresh launch always trusts the workspace and passes the model; floor adds no approval flag", () => {
     expect(buildCursorArgv({ posture: "floor", model: "sonnet-4-thinking" }))
-      .toEqual(["cursor-agent", "--trust", "--model", "sonnet-4-thinking"]);
+      .toEqual(["cursor-agent", "--disable-auto-update", "--trust", "--model", "sonnet-4-thinking"]);
   });
 
   it("full_bypass maps to --force and floor never passes it", () => {
-    expect(buildCursorArgv({ posture: "full_bypass" })).toEqual(["cursor-agent", "--trust", "--force"]);
+    expect(buildCursorArgv({ posture: "full_bypass" })).toEqual(["cursor-agent", "--disable-auto-update", "--trust", "--force"]);
     const floor = buildCursorArgv({ posture: "floor" });
     expect(floor).not.toContain("--force");
     expect(floor).not.toContain("--yolo");
@@ -61,12 +61,12 @@ describe("buildCursorArgv", () => {
 
   it("keeps bracketed model overrides as one argv element", () => {
     const model = "claude-opus-4-8[context=1m,effort=high]";
-    expect(buildCursorArgv({ posture: "floor", model })).toEqual(["cursor-agent", "--trust", "--model", model]);
+    expect(buildCursorArgv({ posture: "floor", model })).toEqual(["cursor-agent", "--disable-auto-update", "--trust", "--model", model]);
   });
 
   it("resume passes the exact chat id, never --continue", () => {
     const argv = buildCursorArgv({ posture: "floor", resumeToken: ID });
-    expect(argv).toEqual(["cursor-agent", "--trust", "--resume", ID]);
+    expect(argv).toEqual(["cursor-agent", "--disable-auto-update", "--trust", "--resume", ID]);
     expect(argv).not.toContain("--continue");
   });
 
@@ -222,7 +222,7 @@ describe("Cursor adapter launch", () => {
     const { adapter, pane } = launch();
     const result = await adapter.launchHarness(harnessBinding({ model: "gpt-5" }), { name: "x" });
     expect(result).toEqual({ ok: true });
-    expect(pane.typed[0]).toContain("'cursor-agent' '--trust' '--model' 'gpt-5'");
+    expect(pane.typed[0]).toContain("'cursor-agent' '--disable-auto-update' '--trust' '--model' 'gpt-5'");
     expect(pane.typed[0]).not.toContain("--force");
   });
 
@@ -237,6 +237,20 @@ describe("Cursor adapter launch", () => {
     await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
     expect(parseCursorChatSnapshot(files.files[nodePath.join(seatDir, CURSOR_CHAT_SNAPSHOT_FILE)]!))
       .toEqual({ chatIds: [SEEDED_ID], configDir: nodePath.join(HARNESS_HOME, ".cursor") });
+  });
+
+  it("fresh, resume, and restore launches all type --disable-auto-update", async () => {
+    const seeded = () => harnessMemFs({ [storeDbUnder(HARNESS_HOME, HARNESS_CWD, SEEDED_ID)]: "" });
+    const fresh = launch();
+    await fresh.adapter.launchHarness(harnessBinding({ launchPosture: "full_bypass" }), { name: "x" });
+    const resumed = launch(seeded());
+    await resumed.adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: SEEDED_ID });
+    const restored = launch(seeded());
+    const restore = await restored.adapter.resume({ nodeId: "node-1", sessionName: HARNESS_SESSION, resumeType: "cursor_chat_id", resumeToken: SEEDED_ID, cwd: HARNESS_CWD });
+    expect(restore.ok).toBe(true);
+    for (const typed of [fresh.pane.typed[0], resumed.pane.typed[0], restored.pane.typed[0]]) {
+      expect(typed).toContain("'cursor-agent' '--disable-auto-update'");
+    }
   });
 
   it("resumes an existing chat by exact id", async () => {

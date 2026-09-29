@@ -67,6 +67,7 @@ export interface CopilotLaunchInput {
  * fork request, a malformed token, or an ambiguous fresh/resume mix.
  * - full_bypass: `--yolo`. floor: no permission flag, so Copilot keeps its
  *   own default (prompt for writes and commands).
+ * - Always `--no-auto-update`: a managed seat never updates the CLI.
  */
 export function buildCopilotArgv(input: CopilotLaunchInput): string[] {
   if (input.forkSource) {
@@ -75,7 +76,10 @@ export function buildCopilotArgv(input: CopilotLaunchInput): string[] {
   if (input.resumeToken && input.newSessionId) {
     throw new Error("copilot launch: a resume token and a new session id are mutually exclusive");
   }
-  const argv = [input.binary ?? COPILOT_BINARY];
+  // Every managed launch pins the installed version: without this a
+  // standalone install downloads newer packages into its per-user cache and
+  // switches to them on a later launch (`copilot help config`, autoUpdate).
+  const argv = [input.binary ?? COPILOT_BINARY, "--no-auto-update"];
   if (input.resumeToken !== undefined) {
     const token = validateCopilotSessionId(input.resumeToken);
     if (!token.ok) throw new Error(`copilot resume: ${token.error}`);
