@@ -109,6 +109,12 @@ describe("runtime registry: built-in descriptors (behavior-preserving)", () => {
     expect(processMatches("node /usr/local/lib/node_modules/@github/copilot/index.js --yolo", "@github/copilot")).toBe(true);
     expect(processMatches("node --max-old-space-size=4096 /x/cursor-agent/dist/index.js", /cursor-agent\/dist\/index\.js$/)).toBe(true);
     expect(processMatches("node server.js --name copilot", "copilot")).toBe(false);
+    // Versioned and framework interpreters are script hosts too.
+    expect(processMatches("/opt/homebrew/Cellar/python@3.12/3.12.7/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /Users/x/.local/bin/aider --model sonnet", "aider")).toBe(true);
+    expect(processMatches("/home/x/.venv/bin/python3.12 /home/x/.venv/bin/aider", "aider")).toBe(true);
+    expect(processMatches("python -m aider --yes-always", "aider")).toBe(true);
+    expect(processMatches("node22 /usr/lib/node_modules/@github/copilot/index.js", "@github/copilot")).toBe(true);
+    expect(processMatches("pythonista notes.py aider", "aider")).toBe(false);
     expect(processMatches("", "x")).toBe(false);
   });
 

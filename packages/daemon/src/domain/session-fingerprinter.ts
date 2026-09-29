@@ -240,8 +240,10 @@ function registeredRuntimeForCommand(cmd: string): { id: string; command: string
 interface ProcessRow { pid: number; ppid: number; command: string }
 type ProcessLister = () => ProcessRow[] | Promise<ProcessRow[]>;
 
-/** Interpreters whose first script argument, not the interpreter, is the program. */
-const SCRIPT_HOSTS = new Set(["node", "nodejs", "bun", "deno", "python", "python3", "ruby"]);
+/** Interpreters whose first script argument, not the interpreter, is the
+ *  program: node/bun/deno/ruby/python/pypy with an optional version suffix
+ *  (node22, python3.12) in any case (macOS framework builds run as "Python"). */
+const SCRIPT_HOST_RE = /^(?:node|nodejs|bun|deno|ruby|python|pypy)(?:\d+(?:\.\d+)*)?$/i;
 
 /**
  * Match a descriptor's processMatch against one ps command line, anchored to
@@ -255,7 +257,7 @@ export function processMatches(command: string, match: string | RegExp): boolean
   const argv = command.trim().split(/\s+/).filter(Boolean);
   if (argv.length === 0) return false;
   const programs = [argv[0]!];
-  if (SCRIPT_HOSTS.has(nodePath.basename(argv[0]!))) {
+  if (SCRIPT_HOST_RE.test(nodePath.basename(argv[0]!))) {
     const script = argv.slice(1).find((arg) => !arg.startsWith("-"));
     if (script) programs.push(script);
   }
