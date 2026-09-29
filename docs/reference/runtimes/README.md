@@ -9,9 +9,11 @@ adapter", for how to add one.
 
 One line per runtime, alphabetical by id:
 
+- `antigravity`: Antigravity CLI (`agy`). Resume by conversation id (captured late), no fork, managed `AGENTS.md` blocks. [antigravity.md](antigravity.md)
 - `claude-code`: Claude Code (`claude`). Resume, fork, managed `CLAUDE.md` blocks.
 - `codex`: Codex (`codex`). Resume, fork, managed `AGENTS.md` blocks.
 - `gemini`: Gemini CLI (`gemini`). Resume by minted session id, no fork, managed `GEMINI.md` blocks. See [gemini.md](gemini.md).
+- `grok`: Grok Build (`grok`). Resume and fork by minted session id, managed `AGENTS.md` blocks. [grok.md](grok.md)
 - `kilo`: Kilo CLI (`kilo`), an OpenCode fork. Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.kilo/skills`. No fork. See [kilo.md](kilo.md).
 - `opencode`: OpenCode (`opencode`). Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.opencode/skills`. No fork. See [opencode.md](opencode.md).
 - `pi`: Pi coding agent (`pi`, RPC runner in the pane). Resume by session file, fork.
