@@ -16,6 +16,10 @@ import type { ClaudeResumeAdapter } from "../adapters/claude-resume.js";
 import type { CodexResumeAdapter } from "../adapters/codex-resume.js";
 import type { PiResumeAdapter } from "../adapters/pi-resume.js";
 import type { TranscriptStore } from "./transcript-store.js";
+import type { RuntimeResumeAdapter } from "./runtime-adapter.js";
+import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor, runtimeSeatStateDir } from "./runtime-registry.js";
+import { runDescriptorTokenCapture } from "./runtime-capture.js";
+import { validateResumeToken } from "./resume-token-validation.js";
 import { assessNativeResumeProbe } from "./native-resume-probe.js";
 import type {
   RestoreOutcome,
@@ -138,6 +142,13 @@ interface RestoreOrchestratorDeps {
   /** OPR.0.4.6.PI1 FR-6 — optional so older wiring/tests keep working; a Pi
    *  resume without the adapter falls through to the honest no-adapter error. */
   piResume?: PiResumeAdapter;
+  /** Registered runtimes' resume adapters (adapters/cli/index.ts), consulted
+   *  after the built-in claude/codex/pi adapters. */
+  resumeAdapters?: readonly RuntimeResumeAdapter[];
+  /** Runtime state root for registered CLI runtimes' seat dirs. Default <OPENRIG_HOME>/state. */
+  runtimeStateRoot?: string;
+  /** Home directory handed to late-capture hooks. Default os.homedir(). */
+  homedir?: string;
   transcriptStore?: TranscriptStore;
   serviceOrchestrator?: import("./service-orchestrator.js").ServiceOrchestrator;
   listProcesses?: () => Promise<Array<{ pid: number; ppid: number; command: string }>>;
@@ -156,6 +167,9 @@ export class RestoreOrchestrator {
   private claudeResume: ClaudeResumeAdapter;
   private codexResume: CodexResumeAdapter;
   private piResume: PiResumeAdapter | null;
+  private registeredResumeAdapters: readonly RuntimeResumeAdapter[];
+  private runtimeStateRoot: string | undefined;
+  private homedir: string | undefined;
   private transcriptStore: TranscriptStore | null;
   private serviceOrchestrator: import("./service-orchestrator.js").ServiceOrchestrator | null;
   private listProcesses: (() => Promise<Array<{ pid: number; ppid: number; command: string }>>) | undefined;
@@ -195,6 +209,16 @@ export class RestoreOrchestrator {
     this.claudeResume = deps.claudeResume;
     this.codexResume = deps.codexResume;
     this.piResume = deps.piResume ?? null;
+    this.registeredResumeAdapters = deps.resumeAdapters ?? [];
+    this.runtimeStateRoot = deps.runtimeStateRoot;
+    this.homedir = deps.homedir;
+    const runtimes = new Set(["claude-code", "codex", "pi"]);
+    for (const adapter of this.registeredResumeAdapters) {
+      if (runtimes.has(adapter.runtime)) {
+        throw new Error(`RestoreOrchestrator: duplicate resume adapter for runtime "${adapter.runtime}"`);
+      }
+      runtimes.add(adapter.runtime);
+    }
     this.transcriptStore = deps.transcriptStore ?? null;
     this.serviceOrchestrator = deps.serviceOrchestrator ?? null;
     this.listProcesses = deps.listProcesses;
@@ -1005,6 +1029,11 @@ export class RestoreOrchestrator {
       const snapSession = occupantResolution.kind === "resolved" ? occupantResolution.session : null;
       const policy = snapSession?.restorePolicy ?? "resume_if_possible";
       const freshRequested = opts?.freshLogicalIds?.includes(node.logicalId) ?? false;
+      // Registered CLI runtimes that create their session lazily may have a
+      // token on disk the ledger never saw: capture it once before deciding.
+      if (policy === "resume_if_possible" && snapSession && !snapSession.resumeToken && !freshRequested) {
+        await this.captureLateResumeToken(node.runtime ?? null, node.cwd ?? null, snapSession);
+      }
       const resumeSourceRecorded = !!snapSession?.resumeType && snapSession.resumeType !== "none";
       if (policy === "resume_if_possible" && snapSession && !snapSession.resumeToken && !freshRequested) {
         const sourceNote = resumeSourceRecorded
@@ -1604,6 +1633,35 @@ export class RestoreOrchestrator {
     return "floor";
   }
 
+  /**
+   * Restore-time late capture for registered CLI runtimes (adapters/cli/):
+   * run the descriptor's read-only capture hook once for a seat whose snapshot
+   * has no token. A valid token is written onto the in-memory snapshot session
+   * (so this restore resumes it) and persisted on the session row with `scrape`
+   * provenance. Built-ins and runtimes without a hook are untouched. Never throws.
+   */
+  private async captureLateResumeToken(runtime: string | null, cwd: string | null, session: Session): Promise<void> {
+    if (!runtime || (BUILTIN_RUNTIME_IDS as readonly string[]).includes(runtime)) return;
+    const descriptor = getRuntimeDescriptor(runtime);
+    if (!descriptor?.resumeType || !descriptor.captureResumeToken) return;
+    try {
+      const captured = await runDescriptorTokenCapture(descriptor, {
+        sessionName: session.sessionName,
+        cwd,
+        seatStateDir: runtimeSeatStateDir(descriptor.id, session.sessionName, this.runtimeStateRoot),
+        homedir: this.homedir,
+      });
+      if (captured.outcome !== "token") return;
+      const validation = validateResumeToken(descriptor.id, captured.token);
+      if (!validation.ok) return;
+      session.resumeType = validation.resumeType;
+      session.resumeToken = validation.token;
+      this.sessionRegistry.updateResumeToken(session.id, validation.resumeType, validation.token, "scrape");
+    } catch (err) {
+      console.warn(`[openrig] restore late capture failed for ${session.sessionName}: ${(err as Error).message}`);
+    }
+  }
+
   private async attemptResume(
     nodeId: string,
     sessionName: string,
@@ -1622,65 +1680,35 @@ export class RestoreOrchestrator {
     | { kind: "attention_required"; message: string; evidence?: string }
   > {
     const launchGeneration = this.sessionRegistry.currentOccupantTenure(nodeId)?.generationUuid;
+    const adapters = [
+      ...builtinResumeAdapters(this.claudeResume, this.codexResume, this.piResume ?? null),
+      ...(this.registeredResumeAdapters ?? []),
+    ];
+    const adapter = adapters.find((candidate) => candidate.canResume(resumeType, resumeToken));
     let permissionMode: string | undefined;
     try {
       const selection = new NativePermissionStore(this.db).read(nodeId);
-      const runtime = this.claudeResume.canResume(resumeType, resumeToken) ? "claude-code"
-        : this.codexResume.canResume(resumeType, resumeToken) ? "codex" : "pi";
+      // Pre-registry fallback: an unmatched pair was attributed to "pi".
+      const runtime = adapter?.runtime ?? "pi";
       if (selection && selection.runtime !== runtime) throw new Error("Seat runtime changed since permission selection; explicitly select again or inherit.");
       const override = permissionBindingOverride(selection);
       resolvedPosture = override.launchPosture ?? resolvedPosture;
       permissionMode = override.permissionMode;
     } catch (error) { return { kind: "failed", message: `Permission selection: ${(error as Error).message}` }; }
-    if (this.claudeResume.canResume(resumeType, resumeToken)) {
-      const result = await this.claudeResume.resume(sessionName, resumeType, resumeToken, cwd, resolvedPosture, model, permissionMode, nodeId);
-      if (result.ok) {
-        if (result.appliedLaunch && launchGeneration) this.appliedLaunchStore.recordGeneration(launchGeneration, result.appliedLaunch);
-        return { kind: "resumed" };
-      }
-      if (result.code === "retry_fresh") return { kind: "retry_fresh" };
-      // L3: surface attention_required from the Claude probe (resume-selection prompt).
-      if (result.code === "attention_required") {
-        return {
-          kind: "attention_required",
-          message: result.message,
-          evidence: (result as { evidence?: string }).evidence,
-        };
-      }
-      return { kind: "failed", message: result.message };
-    }
 
-    if (this.codexResume.canResume(resumeType, resumeToken)) {
-      const result = await this.codexResume.resume(sessionName, resumeType, resumeToken, cwd, codexConfigProfile, resolvedPosture, model);
+    if (adapter) {
+      const result = await adapter.resume({
+        nodeId, sessionName, resumeType, resumeToken, cwd, codexConfigProfile, model, resolvedPosture, permissionMode,
+      });
       if (result.ok) {
         if (result.appliedLaunch && launchGeneration) this.appliedLaunchStore.recordGeneration(launchGeneration, result.appliedLaunch);
         return { kind: "resumed" };
       }
+      // A missing session maps to the awaiting-decision stop-and-ask, never a
+      // silent fresh start.
       if (result.code === "retry_fresh") return { kind: "retry_fresh" };
-      // Codex auth-refusal: stored OAuth token can no longer be refreshed.
-      // Recoverable — operator runs `codex login` and the seat continues.
-      // Per-node mapping at lines 725-735 emits `status: "attention_required"`
-      // with `attentionEvidence` for both runtimes; no further wiring needed.
-      if (result.code === "attention_required") {
-        return {
-          kind: "attention_required",
-          message: result.message,
-          evidence: (result as { evidence?: string }).evidence,
-        };
-      }
-      return { kind: "failed", message: result.message };
-    }
-
-    // OPR.0.4.6.PI1 FR-6 — honest session-file continuation. A missing
-    // session file returns retry_fresh, which the caller maps to the
-    // awaiting-decision stop-and-ask — never a silent fresh start (BR-6).
-    if (this.piResume?.canResume(resumeType, resumeToken)) {
-      const result = await this.piResume.resume(sessionName, resumeType, resumeToken, cwd, model, resolvedPosture);
-      if (result.ok) {
-        if (result.appliedLaunch && launchGeneration) this.appliedLaunchStore.recordGeneration(launchGeneration, result.appliedLaunch);
-        return { kind: "resumed" };
-      }
-      if (result.code === "retry_fresh") return { kind: "retry_fresh" };
+      // Alive and recoverable but blocked on the operator (Claude resume-selection
+      // prompt, Codex auth refusal, a CLI trust/login gate).
       if (result.code === "attention_required") {
         return {
           kind: "attention_required",
@@ -1878,4 +1906,33 @@ export class RestoreOrchestrator {
 
 interface PlanEntry {
   node: NodeWithBinding;
+}
+
+/** The built-in resume adapters behind the generic RuntimeResumeAdapter
+ *  contract, in the pre-registry dispatch order (claude, codex, pi). */
+function builtinResumeAdapters(
+  claude: ClaudeResumeAdapter,
+  codex: CodexResumeAdapter,
+  pi: PiResumeAdapter | null,
+): RuntimeResumeAdapter[] {
+  const adapters: RuntimeResumeAdapter[] = [
+    {
+      runtime: "claude-code",
+      canResume: (type, token) => claude.canResume(type, token),
+      resume: (r) => claude.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.resolvedPosture, r.model, r.permissionMode, r.nodeId),
+    },
+    {
+      runtime: "codex",
+      canResume: (type, token) => codex.canResume(type, token),
+      resume: (r) => codex.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.codexConfigProfile, r.resolvedPosture, r.model),
+    },
+  ];
+  if (pi) {
+    adapters.push({
+      runtime: "pi",
+      canResume: (type, token) => pi.canResume(type, token),
+      resume: (r) => pi.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.model, r.resolvedPosture),
+    });
+  }
+  return adapters;
 }

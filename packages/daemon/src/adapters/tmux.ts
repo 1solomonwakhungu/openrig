@@ -566,7 +566,16 @@ export class TmuxAdapter {
     }
   }
 
+  /** Wraps every killSession (domain/process-tree-reaper.ts createRuntimeStopHook):
+   *  runtimes that opt in reap the pane's process tree around the kill. */
+  stopHook?: (sessionName: string, kill: () => Promise<TmuxResult>) => Promise<TmuxResult>;
+
   async killSession(name: string): Promise<TmuxResult> {
+    if (this.stopHook) return this.stopHook(name, () => this.killSessionGuarded(name));
+    return this.killSessionGuarded(name);
+  }
+
+  private async killSessionGuarded(name: string): Promise<TmuxResult> {
     if (this.deliveryGuard) {
       return this.guardedInput(name, async pane => {
         const stdout = await this.exec(`tmux display-message -p -t ${shellQuote(pane)} '#{session_id}'`);
@@ -763,6 +772,53 @@ export class TmuxAdapter {
   }
 
   /** Capture pane content (last N lines). Returns null if unavailable. */
+  /** Absolute line index of the cursor in the pane's scrollback plus screen
+   *  (history_size + cursor_y). A position taken before typing marks where new
+   *  output starts; capturePaneFromLine reads from it. Null when unavailable. */
+  async getPaneLinePosition(paneId: string): Promise<number | null> {
+    try {
+      const output = await this.exec(`tmux display-message -p -t ${shellQuote(paneId)} "#{history_size}\t#{cursor_y}"`);
+      const [historyRaw, cursorRaw] = output.trim().split("\t");
+      const history = Number.parseInt(historyRaw ?? "", 10);
+      const cursor = Number.parseInt(cursorRaw ?? "", 10);
+      return Number.isFinite(history) && Number.isFinite(cursor) && history >= 0 && cursor >= 0 ? history + cursor : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether the pane is showing the alternate screen (a full-screen TUI, or
+   *  one that exited without restoring the normal screen). Null when unknown. */
+  async isPaneAlternateScreen(paneId: string): Promise<boolean | null> {
+    try {
+      const output = (await this.exec(`tmux display-message -p -t ${shellQuote(paneId)} "#{alternate_on}"`)).trim();
+      return output === "1" ? true : output === "0" ? false : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Capture from an absolute line (getPaneLinePosition) to the end of the
+   *  screen. Lines trimmed from history since then are simply gone, so the
+   *  capture starts at the oldest line still kept. While the pane is on the
+   *  alternate screen (a full-screen TUI) the line position does not apply,
+   *  so the whole visible screen is returned; the caller decides whether that
+   *  screen is the new process's (isPaneAlternateScreen before and after). */
+  async capturePaneFromLine(paneId: string, absoluteLine: number): Promise<string | null> {
+    try {
+      const output = await this.exec(`tmux display-message -p -t ${shellQuote(paneId)} "#{history_size}\t#{alternate_on}"`);
+      const [historyRaw, alternateRaw] = output.trim().split("\t");
+      const history = Number.parseInt(historyRaw ?? "", 10);
+      if (!Number.isFinite(history)) return null;
+      if (alternateRaw === "1") return (await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)}`)) ?? "";
+      const start = Math.max(absoluteLine - history, -history);
+      const captured = await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)} -S ${start} -E -`);
+      return captured ?? "";
+    } catch {
+      return null;
+    }
+  }
+
   async capturePaneContent(paneId: string, lines: number = 20): Promise<string | null> {
     try {
       const output = await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)} -S -${lines}`);

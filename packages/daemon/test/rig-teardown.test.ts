@@ -12,6 +12,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ALL_MIGRATIONS } from "../src/db/all-migrations.js";
+import { registerRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { EXAMPLE_CLI_DESCRIPTOR } from "./helpers/example-cli-runtime.js";
 
 
 function mockTmux(killResult?: { ok: boolean; code?: string; message?: string }): TmuxAdapter {
@@ -298,6 +300,38 @@ describe("RigTeardownOrchestrator", () => {
 
     expect(result.alreadyStopped).toBe(true);
     expect(fs.existsSync(agentsMd)).toBe(false);
+  });
+
+  it("leaves Pi's AGENTS.md alone (pre-registry behavior preserved)", async () => {
+    const cwd = path.join(tmpDir, "pi-project");
+    fs.mkdirSync(cwd, { recursive: true });
+    const agentsMd = path.join(cwd, "AGENTS.md");
+    const managed = ["<!-- BEGIN OpenRig MANAGED BLOCK: role -->", "managed role", "<!-- END OpenRig MANAGED BLOCK: role -->"].join("\n");
+    fs.writeFileSync(agentsMd, managed);
+    const { rigId } = seedRigWithNode({ runtime: "pi", cwd, sessionStatus: "exited" });
+
+    await buildTeardown().teardown(rigId);
+
+    expect(fs.readFileSync(agentsMd, "utf-8")).toBe(managed);
+  });
+
+  it("strips managed blocks from a registered runtime's guidance file", async () => {
+    const unregister = registerRuntimeDescriptor(EXAMPLE_CLI_DESCRIPTOR);
+    try {
+      const cwd = path.join(tmpDir, "example-project");
+      fs.mkdirSync(cwd, { recursive: true });
+      const guidance = path.join(cwd, "EXAMPLE.md");
+      fs.writeFileSync(guidance, ["# Mine", "<!-- BEGIN OpenRig MANAGED BLOCK: role -->", "managed", "<!-- END OpenRig MANAGED BLOCK: role -->"].join("\n\n"));
+      const { rigId } = seedRigWithNode({ runtime: "example-cli", cwd, sessionStatus: "exited" });
+
+      await buildTeardown().teardown(rigId);
+
+      const content = fs.readFileSync(guidance, "utf-8");
+      expect(content).toContain("# Mine");
+      expect(content).not.toContain("OpenRig MANAGED BLOCK");
+    } finally {
+      unregister();
+    }
   });
 
   // T14: Per-node cleanup is atomic (status + binding together)

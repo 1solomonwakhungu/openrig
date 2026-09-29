@@ -28,6 +28,16 @@ export function yoloEnabled(
   return v === "1" || v === "true";
 }
 
+/** The seat's effective posture for a runtime without a harness-specific helper below:
+ *  the resolved policy when attached, otherwise the OPENRIG_YOLO env decision. Each CLI
+ *  runtime maps this onto its own launch flags. */
+export function effectiveLaunchPosture(
+  env: NodeJS.ProcessEnv = process.env,
+  resolvedPosture?: ResolvedLaunchPosture,
+): ResolvedLaunchPosture {
+  return yoloEnabled(env, resolvedPosture) ? "full_bypass" : "floor";
+}
+
 // ── The single launch-posture decision per harness — used on EVERY managed launch path (fresh,
 // resume, fork) so the floor (OFF) and the maximally-permissive posture (ON) are uniform, never
 // path-dependent. NOTE the ON posture differs by harness: Claude/Codex = permission bypass; Pi =

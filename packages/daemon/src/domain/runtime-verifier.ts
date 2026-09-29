@@ -2,26 +2,16 @@ import type Database from "better-sqlite3";
 import { ulid } from "ulid";
 import type { ExecFn } from "../adapters/tmux.js";
 import type { RuntimeVerification, RuntimeStatus } from "./bootstrap-types.js";
+import { getRuntimeDescriptor, parseRuntimeVersion, type RuntimeDescriptor } from "./runtime-registry.js";
 
 interface RuntimeVerifierDeps {
   exec: ExecFn;
   db: Database.Database;
 }
 
-// OPR.0.4.6.PI1 — Pi's documented Node engine floor (package.json engines).
-export const PI_NODE_ENGINE_FLOOR = "22.19.0";
-
-export function meetsPiNodeEngineFloor(version: string): boolean {
-  const parts = version.replace(/^v/, "").split(".").map((p) => parseInt(p, 10));
-  const floor = PI_NODE_ENGINE_FLOOR.split(".").map((p) => parseInt(p, 10));
-  for (let i = 0; i < floor.length; i++) {
-    const have = parts[i] ?? 0;
-    const need = floor[i]!;
-    if (have > need) return true;
-    if (have < need) return false;
-  }
-  return true;
-}
+// OPR.0.4.6.PI1: the Pi Node engine floor now lives on Pi's registry
+// descriptor (its verify hook); re-exported for existing importers.
+export { PI_NODE_ENGINE_FLOOR, meetsPiNodeEngineFloor } from "./runtime-registry.js";
 
 /**
  * Verifies runtimes are usable — not just present on PATH.
@@ -69,39 +59,34 @@ export class RuntimeVerifier {
 
   /** Verify Claude Code: `claude --version`, fallback to `claude --help`. */
   async verifyClaude(): Promise<RuntimeVerification> {
-    const result = await this.verifyVersionOrHelp("claude", "claude-code");
-    this.persist(result);
-    return result;
+    return this.verifyRegistered(getRuntimeDescriptor("claude-code")!);
   }
 
   /** Verify Codex: `codex --version`, fallback to `codex --help`. */
   async verifyCodex(): Promise<RuntimeVerification> {
-    const result = await this.verifyVersionOrHelp("codex", "codex");
-    this.persist(result);
-    return result;
+    return this.verifyRegistered(getRuntimeDescriptor("codex")!);
   }
 
   /** OPR.0.4.6.PI1 FR-1 — Verify Pi: `pi --version` (fallback `pi --help`)
-   *  plus the Node engine floor Pi requires (>= 22.19.0). Provider/model
-   *  resolvability is member-scoped and verified at launch, not here. */
+   *  plus the Node engine floor Pi requires (>= 22.19.0), via Pi's descriptor
+   *  verify hook. Provider/model resolvability is member-scoped and verified
+   *  at launch, not here. */
   async verifyPi(): Promise<RuntimeVerification> {
-    let result = await this.verifyVersionOrHelp("pi", "pi");
-    if (result.status === "verified") {
-      try {
-        const nodeVersion = this.parseVersion(await this.exec("node --version"));
-        if (nodeVersion && !meetsPiNodeEngineFloor(nodeVersion)) {
-          result = this.buildVerification(
-            "pi",
-            "error",
-            result.version,
-            null,
-            `Pi requires Node >= ${PI_NODE_ENGINE_FLOOR}; found ${nodeVersion}. Upgrade Node to run pi seats.`,
-          );
-        }
-      } catch {
-        // `node` unresolvable from the daemon's exec context — leave the
-        // binary verification standing; the engine floor re-checks at launch.
-      }
+    return this.verifyRegistered(getRuntimeDescriptor("pi")!);
+  }
+
+  /** Verify a registered runtime: the binary probe (version, then help
+   *  fallback) followed by the descriptor's optional verify hook. */
+  async verifyRegistered(descriptor: RuntimeDescriptor): Promise<RuntimeVerification> {
+    let result = descriptor.binary
+      ? await this.verifyVersionOrHelp(descriptor.binary, descriptor.id, descriptor.versionArgs)
+      : this.buildVerification(descriptor.id, "not_found", null, null, `unknown runtime: ${descriptor.id}`);
+    if (result.status === "not_found" && descriptor.binary && descriptor.installHint) {
+      result = this.buildVerification(descriptor.id, "not_found", null, null, `${descriptor.binary} not found (install: ${descriptor.installHint})`);
+    }
+    if (result.status === "verified" && descriptor.verify) {
+      const error = await descriptor.verify({ exec: this.exec, version: result.version });
+      if (error) result = this.buildVerification(descriptor.id, "error", result.version, null, error);
     }
     this.persist(result);
     return result;
@@ -109,7 +94,7 @@ export class RuntimeVerifier {
 
   /**
    * Verify multiple runtimes. Returns results in input order.
-   * @param runtimes - canonical runtime names: 'tmux', 'cmux', 'claude-code', 'codex', 'pi'
+   * @param runtimes - 'tmux', 'cmux', or any registered runtime id with a binary
    */
   async verifyAll(runtimes: string[]): Promise<RuntimeVerification[]> {
     const results: RuntimeVerification[] = [];
@@ -117,10 +102,12 @@ export class RuntimeVerifier {
       switch (runtime) {
         case "tmux": results.push(await this.verifyTmux()); break;
         case "cmux": results.push(await this.verifyCmux()); break;
-        case "claude-code": results.push(await this.verifyClaude()); break;
-        case "codex": results.push(await this.verifyCodex()); break;
-        case "pi": results.push(await this.verifyPi()); break;
         default: {
+          const descriptor = getRuntimeDescriptor(runtime);
+          if (descriptor?.binary) {
+            results.push(await this.verifyRegistered(descriptor));
+            break;
+          }
           const v = this.buildVerification(runtime, "not_found", null, null, `unknown runtime: ${runtime}`);
           this.persist(v);
           results.push(v);
@@ -132,12 +119,16 @@ export class RuntimeVerifier {
 
   /**
    * Shared helper: try `{binary} --version`, fall back to `{binary} --help`.
-   * Used by verifyClaude and verifyCodex.
+   * Used for every registered runtime with a binary.
    */
-  private async verifyVersionOrHelp(binary: string, canonicalName: string): Promise<RuntimeVerification> {
+  private async verifyVersionOrHelp(
+    binary: string,
+    canonicalName: string,
+    versionArgs: readonly string[] = ["--version"],
+  ): Promise<RuntimeVerification> {
     // Try --version first
     try {
-      const output = await this.exec(`${binary} --version`);
+      const output = await this.exec([binary, ...versionArgs].join(" "));
       const version = this.parseVersion(output);
       return this.buildVerification(canonicalName, "verified", version ?? null, null, null);
     } catch {
@@ -187,8 +178,7 @@ export class RuntimeVerifier {
 
   /** Parse a semver-like version from output (e.g. "tmux 3.4" -> "3.4"). */
   private parseVersion(output: string): string | undefined {
-    const match = output.match(/(\d+\.\d+(?:\.\d+)?(?:[a-z])?)/);
-    return match?.[1];
+    return parseRuntimeVersion(output);
   }
 
   /** Persist verification to runtime_verifications table. Upserts by runtime name. */

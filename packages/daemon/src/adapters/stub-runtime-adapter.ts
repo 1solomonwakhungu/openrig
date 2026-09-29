@@ -16,7 +16,7 @@
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TmuxAdapter } from "./tmux.js";
-import { yoloEnabled, type ResolvedLaunchPosture } from "./yolo-mode.js";
+import { effectiveLaunchPosture, type ResolvedLaunchPosture } from "./yolo-mode.js";
 import type {
   RuntimeAdapter, NodeBinding, ResolvedStartupFile,
   InstalledResource, ProjectionResult, StartupDeliveryResult, ReadinessResult,
@@ -179,7 +179,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       if (!this.fsOps || !this.fsOps.exists(this.runnerEntryPath)) {
         return { ok: false, error: `stub-runner entry not found at ${this.runnerEntryPath} — the daemon package is incomplete` };
       }
-      const posture: ResolvedLaunchPosture = yoloEnabled(process.env, binding.launchPosture) ? "full_bypass" : "floor";
+      const posture: ResolvedLaunchPosture = effectiveLaunchPosture(process.env, binding.launchPosture);
       const cmd = buildStubRunnerCommand({
         runnerEntryPath: this.runnerEntryPath,
         sessionName,

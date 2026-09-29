@@ -1,7 +1,9 @@
+import nodePath from "node:path";
 import type { CmuxAdapter } from "../adapters/cmux.js";
 import type { TmuxAdapter } from "../adapters/tmux.js";
 import type { ScannedPane } from "./tmux-discovery-scanner.js";
 import type { RuntimeHint, Confidence } from "./discovery-types.js";
+import { listRuntimeDescriptors } from "./runtime-registry.js";
 
 /** Evidence collected during fingerprinting */
 export interface FingerprintEvidence {
@@ -49,10 +51,33 @@ export class SessionFingerprinter {
   private fsExists: (path: string) => boolean;
   private cachedAgentPIDs: Map<number, { runtime: string; pid: number }> | null = null;
 
-  constructor(deps: { cmuxAdapter: CmuxAdapter; tmuxAdapter: TmuxAdapter; fsExists: (path: string) => boolean }) {
+  constructor(deps: {
+    cmuxAdapter: CmuxAdapter;
+    tmuxAdapter: TmuxAdapter;
+    fsExists: (path: string) => boolean;
+    /** Process census for registered runtimes' processMatch (ps). Absent =
+     *  processMatch is skipped. Only consulted when a registered runtime
+     *  declares processMatch and the pane command did not already decide. */
+    listProcesses?: ProcessLister;
+  }) {
     this.cmux = deps.cmuxAdapter;
     this.tmux = deps.tmuxAdapter;
     this.fsExists = deps.fsExists;
+    this.listProcesses = deps.listProcesses;
+  }
+
+  private listProcesses: ProcessLister | undefined;
+  private processCache: { at: number; rows: ProcessRow[] } | null = null;
+
+  /** One census per 2s window, so a scan over many panes spawns one ps. */
+  private async processRows(): Promise<ProcessRow[]> {
+    if (!this.listProcesses) return [];
+    const now = Date.now();
+    if (this.processCache && now - this.processCache.at < 2000) return this.processCache.rows;
+    let rows: ProcessRow[] = [];
+    try { rows = await this.listProcesses(); } catch { rows = []; }
+    this.processCache = { at: now, rows };
+    return rows;
   }
 
   /** Pre-fetch cmux agent PIDs for batch use. Call before fingerprinting multiple panes. */
@@ -99,6 +124,27 @@ export class SessionFingerprinter {
           evidence.layerUsed = 1;
           evidence.processSignal = { command: pane.activeCommand, matched: pattern };
           return { runtimeHint: "codex", confidence: "high", evidence };
+        }
+      }
+
+      // Registered runtimes (adapters/cli/) declare exact foreground process
+      // names. Built-ins keep their pattern tables above.
+      const registered = registeredRuntimeForCommand(cmd);
+      if (registered) {
+        evidence.layerUsed = 1;
+        evidence.processSignal = { command: pane.activeCommand, matched: registered.command };
+        return { runtimeHint: registered.id, confidence: "high", evidence };
+      }
+
+      // processMatch: CLIs whose pane command is a generic host ("node" for
+      // npm-installed CLIs) are identified by the argv of the pane's process
+      // tree. "node" alone never identifies a runtime.
+      if (pane.pid && !SHELL_NAMES.has(cmd)) {
+        const byProcess = await this.registeredRuntimeForProcessTree(pane.pid);
+        if (byProcess) {
+          evidence.layerUsed = 1;
+          evidence.processSignal = { command: byProcess.command, matched: byProcess.id };
+          return { runtimeHint: byProcess.id, confidence: "high", evidence };
         }
       }
 
@@ -153,4 +199,71 @@ export class SessionFingerprinter {
     evidence.layerUsed = -1;
     return { runtimeHint: "unknown", confidence: "low", evidence };
   }
+
+  private async registeredRuntimeForProcessTree(panePid: number): Promise<{ id: string; command: string } | null> {
+    const matchers = listRuntimeDescriptors().filter((d) => d.kind === "agent" && d.processMatch && !PATTERN_TABLE_RUNTIMES.has(d.id));
+    if (matchers.length === 0) return null;
+    const rows = await this.processRows();
+    const children = new Map<number, ProcessRow[]>();
+    for (const row of rows) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
+    const tree: ProcessRow[] = [];
+    const queue = [panePid];
+    const seen = new Set<number>();
+    while (queue.length > 0 && tree.length < 256) {
+      const pid = queue.shift()!;
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+      const self = rows.find((row) => row.pid === pid);
+      if (self) tree.push(self);
+      for (const child of children.get(pid) ?? []) queue.push(child.pid);
+    }
+    for (const descriptor of matchers) {
+      const hit = tree.find((row) => processMatches(row.command, descriptor.processMatch!));
+      if (hit) return { id: descriptor.id, command: hit.command };
+    }
+    return null;
+  }
+}
+
+const PATTERN_TABLE_RUNTIMES = new Set(["claude-code", "codex"]);
+
+/** Exact paneCommands match against registered non-built-in runtimes. */
+function registeredRuntimeForCommand(cmd: string): { id: string; command: string } | null {
+  for (const descriptor of listRuntimeDescriptors()) {
+    if (PATTERN_TABLE_RUNTIMES.has(descriptor.id) || descriptor.kind !== "agent") continue;
+    const command = descriptor.paneCommands?.find((name) => name.toLowerCase() === cmd);
+    if (command) return { id: descriptor.id, command };
+  }
+  return null;
+}
+
+interface ProcessRow { pid: number; ppid: number; command: string }
+type ProcessLister = () => ProcessRow[] | Promise<ProcessRow[]>;
+
+/** Interpreters whose first script argument, not the interpreter, is the
+ *  program: node/bun/deno/ruby/python/pypy with an optional version suffix
+ *  (node22, python3.12) in any case (macOS framework builds run as "Python"). */
+const SCRIPT_HOST_RE = /^(?:node|nodejs|bun|deno|ruby|python|pypy)(?:\d+(?:\.\d+)*)?$/i;
+
+/**
+ * Match a descriptor's processMatch against one ps command line, anchored to
+ * the program: argv[0], or the script path when argv[0] is an interpreter
+ * ("node /usr/lib/node_modules/@github/copilot/index.js"). Other arguments
+ * never count, so `vim gemini-notes.md` cannot match "gemini". A string
+ * matches a path by its basename or a trailing or inner path segment run
+ * ("@github/copilot"); a RegExp is tested against each program path.
+ */
+export function processMatches(command: string, match: string | RegExp): boolean {
+  const argv = command.trim().split(/\s+/).filter(Boolean);
+  if (argv.length === 0) return false;
+  const programs = [argv[0]!];
+  if (SCRIPT_HOST_RE.test(nodePath.basename(argv[0]!))) {
+    const script = argv.slice(1).find((arg) => !arg.startsWith("-"));
+    if (script) programs.push(script);
+  }
+  return programs.some((program) => {
+    if (typeof match !== "string") return match.test(program);
+    const anchored = `/${program.replace(/^\/+/, "")}`;
+    return nodePath.basename(program) === match || anchored.endsWith(`/${match}`) || anchored.includes(`/${match}/`);
+  });
 }

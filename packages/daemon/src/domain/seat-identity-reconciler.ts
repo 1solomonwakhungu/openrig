@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { TmuxAdapter } from "../adapters/tmux.js";
 import type { SeatIdentityVerdict } from "./types.js";
+import { getRuntimeDescriptor } from "./runtime-registry.js";
 import { SeatIdentityStore, SelfHostIdentityStore } from "./seat-identity-store.js";
 import { RESERVED_HOST_IDS, validateHostRegistry } from "./hosts/hosts-registry-reader.js";
 
@@ -59,8 +60,26 @@ export function classifyPaneRuntimeMatch(
   // gone or an orphan/squat shell occupies the pane.
   if (expectsAgent && SHELL_COMMANDS.has(cmd)) return "mismatch";
 
+  // Registered CLI runtimes (adapters/cli/) with declared paneCommands: an
+  // exact foreground match is positive identity, a bare shell contradicts.
+  // Built-ins keep the rules above unchanged.
+  const registered = expectsAgent ? undefined : registeredPaneCommands(expectedRuntime);
+  if (registered) {
+    if (registered.includes(cmd)) return "match";
+    if (SHELL_COMMANDS.has(cmd)) return "mismatch";
+  }
+
   // Ambiguous / expected-shell (terminal nodes) — no contradiction.
   return "match";
+}
+
+const BUILTIN_IDENTITY_RUNTIMES = new Set(["claude-code", "codex", "pi", "stub", "terminal"]);
+
+function registeredPaneCommands(runtime: string | null): string[] | undefined {
+  if (!runtime || BUILTIN_IDENTITY_RUNTIMES.has(runtime)) return undefined;
+  const descriptor = getRuntimeDescriptor(runtime);
+  if (descriptor?.kind !== "agent" || !descriptor.paneCommands?.length) return undefined;
+  return descriptor.paneCommands.map((name) => name.toLowerCase());
 }
 
 interface RunningSeatRow {

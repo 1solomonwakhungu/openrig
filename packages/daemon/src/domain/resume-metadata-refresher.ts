@@ -16,6 +16,9 @@ import {
   isProbeShellReady,
 } from "./native-resume-probe.js";
 import { runAsyncSite } from "./sync-site-wrap.js";
+import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor, runtimeSeatStateDir } from "./runtime-registry.js";
+import { runDescriptorTokenCapture } from "./runtime-capture.js";
+import { validateResumeToken } from "./resume-token-validation.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,7 +47,12 @@ interface ResumeMetadataRefresherDeps {
   contextUsageStore?: {
     readSidecar(sessionName: string): { ok: true; data: { session_id?: string } } | { ok: false; reason: string };
   };
+  /** Runtime state root for registered CLI runtimes' seat dirs. Default <OPENRIG_HOME>/state. */
+  runtimeStateRoot?: string;
 }
+
+/** Built-ins keep their own refresh rules below. */
+const BUILTIN_REFRESH_RUNTIMES = new Set<string>(BUILTIN_RUNTIME_IDS);
 
 export class ResumeMetadataRefresher {
   private sessionRegistry: SessionRegistry;
@@ -56,6 +64,7 @@ export class ResumeMetadataRefresher {
   private sleep: (ms: number) => Promise<void>;
   private homeDir: string;
   private contextUsageStore: ResumeMetadataRefresherDeps["contextUsageStore"] | null;
+  private runtimeStateRoot: string | undefined;
 
   constructor(deps: ResumeMetadataRefresherDeps) {
     this.sessionRegistry = deps.sessionRegistry;
@@ -78,6 +87,37 @@ export class ResumeMetadataRefresher {
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.homeDir = deps.homeDir ?? os.homedir();
     this.contextUsageStore = deps.contextUsageStore ?? null;
+    this.runtimeStateRoot = deps.runtimeStateRoot;
+  }
+
+  /**
+   * Registered CLI runtimes (adapters/cli/): run the descriptor's read-only
+   * capture hook on every refresh, in both modes. Many CLIs create their
+   * session lazily on the first prompt, so launch-time capture can come back
+   * empty; this is where the token lands. A new token fills a null slot or
+   * replaces a different one (the session rolled) with `scrape` provenance, so
+   * the registry rank guard still protects adoption/hook/operator tokens. An
+   * equal token re-stamps freshness. Returns false for runtimes this does not own.
+   */
+  private async refreshRegisteredRuntime(session: ResumeRefreshSession): Promise<boolean> {
+    if (!session.runtime || BUILTIN_REFRESH_RUNTIMES.has(session.runtime)) return false;
+    const descriptor = getRuntimeDescriptor(session.runtime);
+    if (!descriptor?.resumeType) return !!descriptor;
+    const captured = await runDescriptorTokenCapture(descriptor, {
+      sessionName: session.sessionName,
+      cwd: session.cwd,
+      seatStateDir: runtimeSeatStateDir(descriptor.id, session.sessionName, this.runtimeStateRoot),
+      homedir: this.homeDir,
+    });
+    if (captured.outcome !== "token") return true;
+    const validation = validateResumeToken(descriptor.id, captured.token);
+    if (!validation.ok) return true;
+    if (validation.token === session.resumeToken) {
+      this.sessionRegistry.markResumeProbeResult(session.sessionId, "resumable");
+    } else {
+      this.sessionRegistry.updateResumeToken(session.sessionId, validation.resumeType, validation.token, "scrape");
+    }
+    return true;
   }
 
   /**
@@ -119,6 +159,7 @@ export class ResumeMetadataRefresher {
     // on a recurring tick it multiplied `ps` spawns per seat, forever.
     const captureOpts = { attempts: fillNullOnly ? 1 : undefined, listProcesses: opts?.listProcesses };
     for (const session of sessions) {
+      if (await this.refreshRegisteredRuntime(session)) continue;
       if (session.runtime === "codex") {
         if (session.resumeToken) {
           // OPR.0.4.3.20 FR-6.1 — lightweight equal-value freshness RE-STAMP on the

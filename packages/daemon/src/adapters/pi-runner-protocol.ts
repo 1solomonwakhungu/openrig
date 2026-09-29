@@ -122,7 +122,7 @@ export const PI_ENV_BASELINE_VARS = ["PATH", "HOME", "TERM", "LANG", "LC_ALL", "
 // ordinary whoami/send/queue resolve as an unmanaged caller or another instance.
 // Preserve supplied runtime/generation and legacy context-root provenance too;
 // never synthesize identity or forward arbitrary OPENRIG_* settings/tokens.
-const PI_ENV_OPENRIG_VARS = [
+export const PI_ENV_OPENRIG_VARS = [
   "OPENRIG_NODE_ID", "OPENRIG_SESSION_NAME", "OPENRIG_RUNTIME", "OPENRIG_OCCUPANT_GENERATION",
   "OPENRIG_HOME", "OPENRIG_URL", "OPENRIG_HOST", "OPENRIG_PORT", "OPENRIG_SHARED_DOCS_ROOT",
 ] as const;

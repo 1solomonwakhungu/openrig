@@ -4,13 +4,9 @@ import type { RigRepository } from "./rig-repository.js";
 import type { TmuxAdapter } from "../adapters/tmux.js";
 import type { ExecFn } from "../adapters/tmux.js";
 import type { LegacyRigSpec as RigSpec, PreflightResult, RigSpec as PodRigSpec, RigSpecPod, RigSpecPodMember } from "./types.js"; // TODO: AS-T08b — migrate to pod-aware RigSpec
+import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor, isRegisteredRuntime, runtimeProbeCommand } from "./runtime-registry.js";
 import { deriveSessionName, validateSessionName, validateSessionComponents, VIRTUAL_DOMAIN_TOKENS } from "./session-name.js";
 
-const RUNTIME_COMMANDS: Record<string, string> = {
-  "claude-code": "claude --version",
-  "codex": "codex --version",
-  "pi": "pi --version",
-};
 
 interface RigSpecPreflightDeps {
   rigRepo: RigRepository;
@@ -96,7 +92,7 @@ export class RigSpecPreflight {
       if (checkedRuntimes.has(node.runtime)) continue;
       checkedRuntimes.add(node.runtime);
 
-      const cmd = RUNTIME_COMMANDS[node.runtime];
+      const cmd = runtimeProbeCommand(getRuntimeDescriptor(node.runtime));
       if (cmd) {
         try {
           await this.exec(cmd);
@@ -141,8 +137,6 @@ import {
 
 // Slice 51-01 (OPR.0.5.1.1): `stub` is a first-class runtime (the deterministic node-script fake harness
 // through the real orchestrator) — admitted at the modern-pod preflight gate alongside the real runtimes.
-const SUPPORTED_RUNTIMES = new Set(["claude-code", "codex", "pi", "terminal", "stub"]);
-
 // Default daemon-shipped asset paths for the managed Claude activity hooks — the SAME files the
 // ClaudeCodeAdapter is wired with in startup.ts (validation is the shared module either way).
 // Overridable via PreflightSpecContext.claudeActivityAssets for fixture-injecting tests.
@@ -296,7 +290,7 @@ export async function preflightValidatedSpec(rigSpec: PodRigSpec, preflightCtx: 
       // Terminal members: skip agent resolution and profile resolution
       if (member.agentRef === "builtin:terminal") {
         // Only validate runtime and cwd for terminal members
-        if (!SUPPORTED_RUNTIMES.has(member.runtime)) {
+        if (!isRegisteredRuntime(member.runtime)) {
           errors.push(`${pod.id}.${member.id}: unsupported runtime "${member.runtime}"`);
         }
         if (!member.cwd) {
@@ -377,7 +371,7 @@ export async function preflightValidatedSpec(rigSpec: PodRigSpec, preflightCtx: 
       }
 
       // Check runtime
-      if (!SUPPORTED_RUNTIMES.has(member.runtime)) {
+      if (!isRegisteredRuntime(member.runtime)) {
         errors.push(`${pod.id}.${member.id}: unsupported runtime "${member.runtime}"`);
       }
 
@@ -402,6 +396,7 @@ export async function preflightValidatedSpec(rigSpec: PodRigSpec, preflightCtx: 
     // launch-time surprise.
     const piErrors = await verifyPiRuntimeAvailable(rigSpec, preflightCtx.exec);
     errors.push(...piErrors);
+    errors.push(...await verifyCliRuntimesAvailable(rigSpec, preflightCtx.exec));
   }
 
   // §6 RECONCILIATION — WARNING EMISSION ORDER (PM ruling 2026-08-05): ACTIVITY-HOOK-FIRST,
@@ -433,13 +428,46 @@ export async function verifyPiRuntimeAvailable(
   );
   if (!hasPiMember) return [];
   try {
-    await exec(RUNTIME_COMMANDS["pi"]!);
+    await exec(runtimeProbeCommand(getRuntimeDescriptor("pi"))!);
     return [];
   } catch {
     return [
       `Runtime "pi" not available ('pi --version' failed). The spec declares a pi member, so the launch would fail. Fix: install the Pi coding agent (npm install -g @earendil-works/pi-coding-agent, or the pi.dev install script) and ensure 'pi' is on PATH.`,
     ];
   }
+}
+
+/**
+ * Async post-preflight probe for registered CLI runtimes (adapters/cli/): each
+ * distinct non-built-in runtime a member declares must answer its availability
+ * probe (e.g. `gemini --version`), so a missing binary fails preflight rather
+ * than the launch.
+ */
+export async function verifyCliRuntimesAvailable(
+  rigSpec: PodRigSpec,
+  exec: ExecFn,
+): Promise<string[]> {
+  const builtins = new Set<string>(BUILTIN_RUNTIME_IDS);
+  const runtimes = new Set<string>();
+  for (const pod of rigSpec.pods ?? []) {
+    for (const member of pod.members ?? []) {
+      if (member.runtime && !builtins.has(member.runtime)) runtimes.add(member.runtime);
+    }
+  }
+  const errors: string[] = [];
+  for (const runtime of [...runtimes].sort()) {
+    const descriptor = getRuntimeDescriptor(runtime);
+    const cmd = runtimeProbeCommand(descriptor);
+    if (!descriptor || !cmd) continue;
+    try {
+      await exec(cmd);
+    } catch {
+      errors.push(
+        `Runtime "${runtime}" not available ('${cmd}' failed). The spec declares a ${runtime} member, so the launch would fail. Fix: install ${descriptor.displayName}${descriptor.installHint ? ` (${descriptor.installHint})` : ""} and ensure '${descriptor.binary}' is on PATH.`,
+      );
+    }
+  }
+  return errors;
 }
 
 /**

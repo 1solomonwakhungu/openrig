@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import { WORKSPACE_KINDS } from "./types.js";
 import { validateSafePath } from "./path-safety.js";
+import { getRuntimeDescriptor } from "./runtime-registry.js";
 import { CLAUDE_MANAGED_BLOCK_FILES } from "./managed-blocks.js";
 import { canonicalCompactionStrategy, canonicalContinuityMechanic } from "./agent-manifest.js";
 import { aliasModelPinAdvisory } from "./spec-validation-advisory.js";
@@ -1177,7 +1178,12 @@ function normalizePod(raw: Record<string, unknown>): RigSpecPod {
 // -- Legacy flat-node RigSpec validation (pre-reboot) --
 // TODO: Remove when AS-T08b/AS-T12 migrate all consumers
 
-const LEGACY_KNOWN_RUNTIMES = new Set(["claude-code", "codex", "pi"]);
+/** Legacy (non-pod) specs accept every registered agent runtime except
+ *  internal/test-only ones (the stub runner); terminal nodes are pod-only. */
+function isLegacyKnownRuntime(runtime: string): boolean {
+  const descriptor = getRuntimeDescriptor(runtime);
+  return descriptor?.kind === "agent" && !descriptor.internal;
+}
 const LEGACY_KNOWN_RESTORE_POLICIES = new Set(["resume_if_possible", "relaunch_fresh", "checkpoint_only"]);
 const LEGACY_KNOWN_EDGE_KINDS = new Set(["delegates_to", "spawned_by", "can_observe"]);
 
@@ -1235,7 +1241,7 @@ export class LegacyRigSpecSchema {
 
         if (!node["runtime"] || typeof node["runtime"] !== "string") {
           errors.push(`node ${node["id"]}: runtime is required`);
-        } else if (!LEGACY_KNOWN_RUNTIMES.has(node["runtime"] as string)) {
+        } else if (!isLegacyKnownRuntime(node["runtime"] as string)) {
           errors.push(`node ${node["id"]}: unknown runtime '${node["runtime"]}'`);
         }
 

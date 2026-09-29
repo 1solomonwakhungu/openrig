@@ -1,4 +1,5 @@
 import nodePath from "node:path";
+import { getRuntimeDescriptor } from "./runtime-registry.js";
 
 export type AppliedLaunchAxis = "permission" | "sandbox" | "resource_trust" | "not_applicable";
 export type AppliedLaunchState = "observed" | "unknown";
@@ -102,10 +103,8 @@ export function observePiResourceTrust(trust: "approve" | "no-approve"): Applied
 }
 
 function runtimeCommand(runtime: string): string | null {
-  if (runtime === "claude-code") return "claude";
-  if (runtime === "codex") return "codex";
-  if (runtime === "pi") return "pi";
-  return null;
+  const descriptor = getRuntimeDescriptor(runtime);
+  return descriptor?.kind === "agent" ? descriptor.binary ?? null : null;
 }
 
 function cwdReadState(fs: PermissionDriftFs, cwd: string | null): CwdReadState {

@@ -51,12 +51,35 @@ export function normalizeRuntimeBrandId(runtime: string | null | undefined): Run
   return "unknown";
 }
 
+// A runtime id as the daemon registry accepts it (lowercase, digits, '-').
+const RUNTIME_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+function titleCase(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/** Generic brand for a runtime without a brand entry (a newly registered CLI
+ *  runtime): the label comes from its id, the mark stays the neutral glyph. */
+function genericRuntimeBrand(runtime: string): RuntimeBrand | null {
+  const id = runtime.toLowerCase().trim();
+  if (!RUNTIME_ID_RE.test(id)) return null;
+  const words = id.split("-").filter(Boolean);
+  return {
+    id: "unknown",
+    label: words.map(titleCase).join(" "),
+    shortLabel: titleCase(words[0] ?? id),
+    tone: "neutral",
+  };
+}
+
 export function runtimeBrand(runtime: string | null | undefined): RuntimeBrand {
-  return RUNTIME_BRANDS[normalizeRuntimeBrandId(runtime)];
+  const id = normalizeRuntimeBrandId(runtime);
+  if (id === "unknown" && runtime) return genericRuntimeBrand(runtime) ?? RUNTIME_BRANDS.unknown;
+  return RUNTIME_BRANDS[id];
 }
 
 export function formatRuntimeModel(runtime: string | null | undefined, model?: string | null): string {
   const brand = runtimeBrand(runtime);
-  if (brand.id === "unknown") return model ?? "Runtime unknown";
+  if (brand === RUNTIME_BRANDS.unknown) return model ?? "Runtime unknown";
   return model ? `${brand.label} / ${model}` : brand.label;
 }

@@ -1,5 +1,6 @@
 import type { DiscoveredSession, RuntimeHint } from "./discovery-types.js";
 import { RigSpecCodec } from "./rigspec-codec.js";
+import { isRegisteredRuntime } from "./runtime-registry.js";
 import type { RigSpec, RigSpecPod, RigSpecPodMember } from "./types.js";
 
 const VALID_ID_CHARS = /^[a-zA-Z0-9\-_]+$/;
@@ -21,7 +22,8 @@ function mapRuntime(hint: RuntimeHint): string {
     case "claude-code": return "claude-code";
     case "codex": return "codex";
     case "terminal": return "terminal";
-    default: return "claude-code"; // unreachable — unknowns excluded before this
+    // A registered runtime matched by its descriptor paneCommands.
+    default: return isRegisteredRuntime(hint) ? hint : "claude-code"; // unknowns are excluded before this
   }
 }
 

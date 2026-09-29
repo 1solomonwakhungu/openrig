@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ActorMark, RuntimeBadge, RuntimeMark, ToolMark, isHumanActor } from "../src/components/graphics/RuntimeMark.js";
-import { normalizeRuntimeBrandId, runtimeBrand } from "../src/lib/runtime-brand.js";
+import { formatRuntimeModel, normalizeRuntimeBrandId, runtimeBrand } from "../src/lib/runtime-brand.js";
 import { normalizeToolBrandId, toolBrand } from "../src/lib/tool-brand.js";
 
 afterEach(() => cleanup());
@@ -14,6 +14,16 @@ describe("graphics runtime package", () => {
     expect(runtimeBrand("claude-code").label).toBe("Claude");
     expect(normalizeRuntimeBrandId("codex")).toBe("codex");
     expect(runtimeBrand("codex").label).toBe("Codex");
+  });
+
+  it("labels a registered runtime without a brand entry from its id", () => {
+    expect(runtimeBrand("gemini-cli")).toMatchObject({ id: "unknown", label: "Gemini Cli", shortLabel: "Gemini", tone: "neutral" });
+    expect(formatRuntimeModel("gemini-cli", "flash")).toBe("Gemini Cli / flash");
+    expect(runtimeBrand("Not A Runtime!").label).toBe("Unknown");
+    expect(formatRuntimeModel(null)).toBe("Runtime unknown");
+    render(<RuntimeBadge runtime="gemini-cli" compact />);
+    expect(screen.getByText("Gemini")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Gemini Cli" })).toBeTruthy();
   });
 
   it("normalizes tool brands for CMUX, tmux, VS Code, and screenshots", () => {

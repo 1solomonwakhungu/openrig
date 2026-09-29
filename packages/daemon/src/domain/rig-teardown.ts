@@ -10,6 +10,7 @@ import fs from "node:fs";
 import nodePath from "node:path";
 import { removeManagedBlocksFromFile, DEFAULT_CLAUDE_MANAGED_BLOCK_FILE } from "./managed-blocks.js";
 import { stopTranscriptRotation } from "./transcript-rotation.js";
+import { getRuntimeDescriptor } from "./runtime-registry.js";
 
 export interface TeardownResult {
   rigId: string;
@@ -220,9 +221,7 @@ export class RigTeardownOrchestrator {
     // #25: clean only the rig's selected Claude file; the other file is never touched.
     const targetPath = runtime === "claude-code"
       ? nodePath.join(cwd, this.deps.rigRepo.getRigClaudeManagedBlockFile(rigId) ?? DEFAULT_CLAUDE_MANAGED_BLOCK_FILE)
-      : runtime === "codex"
-        ? nodePath.join(cwd, "AGENTS.md")
-        : null;
+      : registeredGuidanceCleanupFile(runtime, cwd);
     if (!targetPath) {
       return;
     }
@@ -233,4 +232,12 @@ export class RigTeardownOrchestrator {
       deleteFile: (path) => fs.unlinkSync(path),
     }, targetPath);
   }
+}
+
+/** The registry-declared guidance file teardown strips for a runtime, or null
+ *  when the runtime has none or opts out (cleanupGuidanceOnTeardown: false). */
+function registeredGuidanceCleanupFile(runtime: string, cwd: string): string | null {
+  const descriptor = getRuntimeDescriptor(runtime);
+  if (!descriptor?.guidanceFile || descriptor.cleanupGuidanceOnTeardown === false) return null;
+  return nodePath.join(cwd, descriptor.guidanceFile);
 }

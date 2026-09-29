@@ -36,6 +36,10 @@ import { ClaudeResumeAdapter } from "./adapters/claude-resume.js";
 import { CodexResumeAdapter } from "./adapters/codex-resume.js";
 import { codexDaemonSupportProbe } from "./domain/codex-daemon-support.js";
 import { PiResumeAdapter } from "./adapters/pi-resume.js";
+import { createNodeFsOps } from "./adapters/node-fs-ops.js";
+import { listNativeProcesses } from "./domain/native-process-lineage.js";
+import { createRuntimeStopHook } from "./domain/process-tree-reaper.js";
+import { buildRuntimeAdapters, createCliRuntimeAdapters } from "./adapters/runtime-adapter-map.js";
 import { RigSpecExporter } from "./domain/rigspec-exporter.js";
 import { PodRepository } from "./domain/pod-repository.js";
 import { RigSpecPreflight } from "./domain/rigspec-preflight.js";
@@ -400,6 +404,23 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const deliveryGuard = new SeatDeliveryGuard(db, target => resolveGuardTarget(db, target));
   deliveryGuard.recoverActivation();
   tmuxAdapter.deliveryGuard = deliveryGuard;
+  // Registered runtimes that opt in (reapProcessTreeOnStop) reap the pane's
+  // process tree on every stop path; everything else stops exactly as before.
+  tmuxAdapter.stopHook = createRuntimeStopHook({
+    stateRoot: nodePath.join(OPENRIG_HOME, "state"),
+    readFile: (p: string) => { try { return fs.readFileSync(p, "utf-8"); } catch { return null; } },
+    resolveSessionRuntime: (sessionName: string) => {
+      const row = db.prepare(
+        "SELECT n.runtime AS runtime FROM sessions s JOIN nodes n ON n.id = s.node_id WHERE s.session_name = ? ORDER BY s.id DESC LIMIT 1",
+      ).get(sessionName) as { runtime: string | null } | undefined;
+      return row?.runtime ?? null;
+    },
+    reaper: {
+      getPanePid: (session) => tmuxAdapter.getPanePid(session),
+      listProcesses: listNativeProcesses,
+      signal: (pid, signal) => { process.kill(pid, signal); },
+    },
+  });
 
   // Slice 15 — Seat-activity service for the `terminal-active` primitive.
   // Lives at module scope so the projection chain (PsProjectionService,
@@ -521,6 +542,17 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const claudeManagedLaunch = new ClaudeManagedLaunch(db, { ...launchSessionEnv, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR }, {
     OPENRIG_CLAUDE_DISABLE_ALTERNATE_SCREEN: process.env.OPENRIG_CLAUDE_DISABLE_ALTERNATE_SCREEN,
   });
+  // One node-backed fsOps for every runtime adapter (adapters/node-fs-ops.ts).
+  const nodeFsOps = createNodeFsOps();
+  // Registered third-party CLI runtimes (adapters/cli/index.ts). Each adapter
+  // serves both the launch contract and restore-time resume, so it is built
+  // here, before the restore orchestrator.
+  const cliRuntimeAdapters = createCliRuntimeAdapters({
+    tmux: tmuxAdapter,
+    fsOps: nodeFsOps,
+    stateRoot: nodePath.join(OPENRIG_HOME, "state"),
+    homedir: os.homedir(),
+  });
   const claudeResume = new ClaudeResumeAdapter(tmuxAdapter, { claudeManagedLaunch });
   const codexResume = new CodexResumeAdapter(tmuxAdapter, { launchPath: process.env.PATH, detectDaemonSupport: codexDaemonSupportProbe(process.env.PATH) });
   // OPR.0.4.6.PI1 — the Pi seat-state root + the compiled runner entry (daemon
@@ -530,7 +562,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const piRunnerEntryPath = nodePath.resolve(import.meta.dirname, "./adapters/pi-runner.js");
   const piResume = new PiResumeAdapter(
     tmuxAdapter,
-    { readFile: (p: string) => fs.readFileSync(p, "utf-8"), writeFile: (p: string, c: string) => fs.writeFileSync(p, c, "utf-8"), exists: (p: string) => fs.existsSync(p), mkdirp: (p: string) => fs.mkdirSync(p, { recursive: true }) },
+    nodeFsOps,
     { stateRoot: piStateRoot, runnerEntryPath: piRunnerEntryPath },
   );
   // Services infrastructure (RigEnv) — created early so restore/bootstrap can use it
@@ -542,6 +574,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const restoreOrchestrator = new RestoreOrchestrator({
     db, rigRepo, sessionRegistry, eventBus, snapshotRepo, snapshotCapture,
     checkpointStore, nodeLauncher, tmuxAdapter, claudeResume, codexResume, piResume,
+    resumeAdapters: cliRuntimeAdapters,
     transcriptStore, serviceOrchestrator,
   });
 
@@ -669,16 +702,21 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
 
   const startupOrchestrator = new StartupOrchestrator({ db, sessionRegistry, eventBus, tmuxAdapter, readFile: (p: string) => fs.readFileSync(p, "utf-8") });
   const runtimeSettings = new ContextPackSettingsStore().resolveConfig();
-  const claudeAdapter = new ClaudeCodeAdapter({ tmux: tmuxAdapter, claudeManagedLaunch, fsOps: { readFile: (p: string) => fs.readFileSync(p, "utf-8"), writeFile: (p: string, c: string) => fs.writeFileSync(p, c, "utf-8"), exists: (p: string) => fs.existsSync(p), mkdirp: (p: string) => fs.mkdirSync(p, { recursive: true }), copyFile: (src: string, dest: string) => fs.copyFileSync(src, dest), listFiles: (dir: string) => { const r: string[] = []; function w(d: string, pre: string) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) w(nodePath.join(d, e.name), nodePath.join(pre, e.name)); else r.push(pre ? nodePath.join(pre, e.name) : e.name); } } w(dir, ""); return r; }, readdir: (dir: string) => fs.readdirSync(dir), statMode: (p: string) => fs.statSync(p).mode, chmod: (p: string, m: number) => fs.chmodSync(p, m), homedir: os.homedir() }, stateDir: OPENRIG_HOME, collectorAssetPath: nodePath.resolve(import.meta.dirname, "../assets/claude-statusline-context.cjs"), autoDriveProviderPrompts: runtimeSettings.recoveryAutoDriveProviderPrompts, activityRelayPath: nodePath.resolve(import.meta.dirname, "../assets/plugins/openrig-core/hooks/scripts/activity-relay.cjs"), claudeHooksManifestPath: nodePath.resolve(import.meta.dirname, "../assets/plugins/openrig-core/hooks/claude.json"), recordProjection: (targetPath: string, content: string) => projectionManifestStore.record({ targetPath, lastHash: hashContent(content), writtenAt: new Date().toISOString() }) });
-  const codexAdapter = new CodexRuntimeAdapter({ tmux: tmuxAdapter, fsOps: { readFile: (p: string) => fs.readFileSync(p, "utf-8"), writeFile: (p: string, c: string) => fs.writeFileSync(p, c, "utf-8"), exists: (p: string) => fs.existsSync(p), mkdirp: (p: string) => fs.mkdirSync(p, { recursive: true }), listFiles: (dir: string) => { const r: string[] = []; function w(d: string, pre: string) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) w(nodePath.join(d, e.name), nodePath.join(pre, e.name)); else r.push(pre ? nodePath.join(pre, e.name) : e.name); } } w(dir, ""); return r; }, statMode: (p: string) => fs.statSync(p).mode, chmod: (p: string, m: number) => fs.chmodSync(p, m), homedir: daemonHome }, codexHome, launchPath: process.env.PATH, detectDaemonSupport: codexDaemonSupportProbe(process.env.PATH), activityRelayPath: nodePath.resolve(import.meta.dirname, "../assets/plugins/openrig-core/hooks/scripts/activity-relay.cjs") });
+  const claudeAdapter = new ClaudeCodeAdapter({ tmux: tmuxAdapter, claudeManagedLaunch, fsOps: { ...nodeFsOps, homedir: os.homedir() }, stateDir: OPENRIG_HOME, collectorAssetPath: nodePath.resolve(import.meta.dirname, "../assets/claude-statusline-context.cjs"), autoDriveProviderPrompts: runtimeSettings.recoveryAutoDriveProviderPrompts, activityRelayPath: nodePath.resolve(import.meta.dirname, "../assets/plugins/openrig-core/hooks/scripts/activity-relay.cjs"), claudeHooksManifestPath: nodePath.resolve(import.meta.dirname, "../assets/plugins/openrig-core/hooks/claude.json"), recordProjection: (targetPath: string, content: string) => projectionManifestStore.record({ targetPath, lastHash: hashContent(content), writtenAt: new Date().toISOString() }) });
+  const codexAdapter = new CodexRuntimeAdapter({ tmux: tmuxAdapter, fsOps: { ...nodeFsOps, homedir: daemonHome }, codexHome, launchPath: process.env.PATH, detectDaemonSupport: codexDaemonSupportProbe(process.env.PATH), activityRelayPath: nodePath.resolve(import.meta.dirname, "../assets/plugins/openrig-core/hooks/scripts/activity-relay.cjs") });
   // OPR.0.4.6.PI1 — the RPC-first Pi adapter (runner-in-a-pane). Same fsOps
   // shape as the Codex adapter; seat isolation roots under piStateRoot.
-  const piAdapter = new PiRuntimeAdapter({ tmux: tmuxAdapter, fsOps: { readFile: (p: string) => fs.readFileSync(p, "utf-8"), writeFile: (p: string, c: string) => fs.writeFileSync(p, c, "utf-8"), exists: (p: string) => fs.existsSync(p), mkdirp: (p: string) => fs.mkdirSync(p, { recursive: true }), listFiles: (dir: string) => { const r: string[] = []; function w(d: string, pre: string) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) w(nodePath.join(d, e.name), nodePath.join(pre, e.name)); else r.push(pre ? nodePath.join(pre, e.name) : e.name); } } w(dir, ""); return r; } }, stateRoot: piStateRoot, runnerEntryPath: piRunnerEntryPath });
+  const piAdapter = new PiRuntimeAdapter({ tmux: tmuxAdapter, fsOps: nodeFsOps, stateRoot: piStateRoot, runnerEntryPath: piRunnerEntryPath });
   // OPR.0.5.1.1 — the stub runtime adapter (Pi-shaped node-script runner in a pane).
   // Same fsOps shape as Pi; the compiled runner entry lives in the daemon dist.
   const { StubRuntimeAdapter } = await import("./adapters/stub-runtime-adapter.js");
   const stubRunnerEntryPath = nodePath.resolve(import.meta.dirname, "./adapters/stub-runner.js");
-  const stubAdapter = new StubRuntimeAdapter({ tmux: tmuxAdapter, fsOps: { readFile: (p: string) => fs.readFileSync(p, "utf-8"), writeFile: (p: string, c: string) => fs.writeFileSync(p, c, "utf-8"), exists: (p: string) => fs.existsSync(p), mkdirp: (p: string) => fs.mkdirSync(p, { recursive: true }), listFiles: (dir: string) => { const r: string[] = []; function w(d: string, pre: string) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) w(nodePath.join(d, e.name), nodePath.join(pre, e.name)); else r.push(pre ? nodePath.join(pre, e.name) : e.name); } } w(dir, ""); return r; } }, runnerEntryPath: stubRunnerEntryPath });
+  const stubAdapter = new StubRuntimeAdapter({ tmux: tmuxAdapter, fsOps: nodeFsOps, runnerEntryPath: stubRunnerEntryPath });
+  const { TerminalAdapter } = await import("./adapters/terminal-adapter.js");
+  const runtimeAdapters = buildRuntimeAdapters(
+    { claudeCode: claudeAdapter, codex: codexAdapter, pi: piAdapter, stub: stubAdapter, terminal: new TerminalAdapter() },
+    cliRuntimeAdapters,
+  );
 
   // plugin-primitive Phase 3a slice 3.5 — ensure Codex feature flag
   // codex_hooks = true is set in ~/.codex/config.toml so plugin-shipped
@@ -858,7 +896,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     db, rigRepo, podRepo,
     sessionRegistry, eventBus, nodeLauncher, startupOrchestrator,
     fsOps: { readFile: (p: string) => fs.readFileSync(p, "utf-8"), exists: (p: string) => fs.existsSync(p) },
-    adapters: { "claude-code": claudeAdapter, "codex": codexAdapter, "pi": piAdapter, "stub": stubAdapter, "terminal": new (await import("./adapters/terminal-adapter.js")).TerminalAdapter() },
+    adapters: runtimeAdapters,
     tmuxAdapter,
     agentImageLibrary,
     continuityPolicyMaterializer,
@@ -944,6 +982,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const tmuxScanner = new TmuxDiscoveryScanner({ tmuxAdapter });
   const sessionFingerprinter = new SessionFingerprinter({
     cmuxAdapter, tmuxAdapter, fsExists: (p: string) => fs.existsSync(p),
+    listProcesses: listNativeProcesses,
   });
   const sessionEnricher = new SessionEnricher({
     fsExists: (p: string) => fs.existsSync(p),
@@ -1110,7 +1149,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     }),
     podInstantiator,
     podBundleSourceResolver,
-    runtimeAdapters: { "claude-code": claudeAdapter, "codex": codexAdapter, "pi": piAdapter, "stub": stubAdapter, "terminal": new (await import("./adapters/terminal-adapter.js")).TerminalAdapter() },
+    runtimeAdapters,
     transcriptStore,
     sessionTransport: (() => {
       const t = new SessionTransport({
