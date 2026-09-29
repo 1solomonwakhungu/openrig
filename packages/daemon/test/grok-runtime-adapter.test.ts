@@ -11,7 +11,7 @@ import { GROK_DESCRIPTOR, GROK_REGISTRATION, GROK_SPEC, grokSessionExists, valid
 import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
-import { LAUNCH_RECORD_FILE } from "../src/domain/runtime-capture.js";
+import { LAUNCH_RECORD_FILE, runDescriptorTokenCapture } from "../src/domain/runtime-capture.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs, mockTmux } from "./helpers/tui-cli-adapter-harness.js";
 
@@ -144,6 +144,24 @@ describe("grok adapter", () => {
     expect(await capture()).toBeNull(); // grok has not written it yet
     seedGrokSession(home, "/work/project", TOKEN);
     expect(await capture()).toBe(TOKEN);
+  });
+
+  it("two grok seats in one cwd each capture their own minted id (seat-scoped, not guarded)", async () => {
+    expect(GROK_DESCRIPTOR.captureIsSessionScoped).toBe(true);
+    const root = tmp();
+    const home = nodePath.join(root, "home");
+    const ids = { a: TOKEN, b: "0198a2f0-bbbb-7ccc-8ddd-eeeeeeeeeeee" };
+    const siblingAlwaysLive = { hasLiveSiblingSeat: () => "other@rig" };
+    for (const [name, id] of Object.entries(ids)) {
+      const seat = nodePath.join(root, "state", "grok", `${name}@rig`);
+      fs.mkdirSync(seat, { recursive: true });
+      fs.writeFileSync(nodePath.join(seat, LAUNCH_RECORD_FILE), JSON.stringify({ launchId: name, runtimeId: "grok", sessionName: `${name}@rig`, cwd: "/work/shared" }));
+      seedGrokSession(home, "/work/shared", id);
+      // No presetToken in this record, so only captureIsSessionScoped keeps the guard away.
+      const scoped = { ...GROK_DESCRIPTOR, captureResumeToken: () => id };
+      expect(await runDescriptorTokenCapture(scoped, { sessionName: `${name}@rig`, cwd: "/work/shared", seatStateDir: seat, homedir: home }, siblingAlwaysLive))
+        .toEqual({ outcome: "token", token: id });
+    }
   });
 
   it("uses the harness state root for the seat dir", () => {

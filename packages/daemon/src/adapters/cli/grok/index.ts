@@ -67,6 +67,10 @@ export const GROK_DESCRIPTOR: RuntimeDescriptor = {
     if (typeof preset !== "string" || !UUID_RE.test(preset)) return null;
     return grokSessionExists(grokHome(homedir), preset) ? preset : null;
   },
+  // Capture returns only the id this seat minted (its own launch.json), so
+  // pod-mates in the same cwd cannot confuse it: the sibling-seat guard does
+  // not apply.
+  captureIsSessionScoped: true,
   supportsFork: true,
   // grok reads AGENTS.md (also AGENT.md, CLAUDE.md) from cwd up to the repo root.
   guidanceFile: "AGENTS.md",

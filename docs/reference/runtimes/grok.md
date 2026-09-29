@@ -38,7 +38,7 @@ The seat runs `exec env GROK_DISABLE_AUTOUPDATER=1 BROWSER=true grok --no-alt-sc
 - The adapter mints the session UUID (`--session-id`) before launch, so the resume token is known at readiness and never confused with another seat in the same cwd.
 - Resume: `--resume <uuid>`. Before typing, the adapter checks that `~/.grok/sessions/<cwd group>/<uuid>/` exists (`GROK_HOME` overrides `~/.grok`); a missing session returns `retry_fresh`, so restore stops and asks instead of starting fresh. `No session found with id` in the pane maps to the same outcome.
 - Fork: `--resume <parent> --fork-session --session-id <new uuid>` (member `session_source` with `ref.kind: native_id`). The new id is the seat's token; the parent is never reported.
-- Late capture (adoption, the resume-metadata refresher, restore) returns this seat's minted id from its `launch.json` once grok has written that session.
+- Late capture (adoption, the resume-metadata refresher, restore) returns this seat's minted id from its `launch.json` once grok has written that session. Because it only ever returns the seat's own id, the descriptor is `captureIsSessionScoped`, and the sibling-seat guard does not block grok seats that share a cwd.
 
 ## Readiness
 
