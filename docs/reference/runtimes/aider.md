@@ -93,8 +93,11 @@ missing file would silently start an empty chat.
 
 ## Known limits
 
-- The pane's foreground process is the Python interpreter (`Python` on macOS),
-  which is too broad to identify aider. Pane-command fingerprinting is not used.
+- The pane's foreground process is the Python interpreter (`Python` on macOS).
+  Discovery identifies aider by the pane process tree's argv (the `aider` entry
+  script, or `python -m aider`) instead of the pane command.
+- A launch where `aider` is not on the pane's PATH, or that hits the Python 3.13
+  `audioop` import error, fails fast with `attention_required`.
 - `--restore-chat-history` replays the transcript into the model context; very
   long histories are summarized by aider, so a resumed seat may not see every
   earlier detail.

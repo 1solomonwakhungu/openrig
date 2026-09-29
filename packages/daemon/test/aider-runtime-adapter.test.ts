@@ -1,9 +1,11 @@
-// Hermetic tests for the Aider runtime pieces: launch argv and posture,
-// per-seat chat history token rules (validation, capture, resume check), and
-// pane patterns against live aider 0.86.2 captures. No real binary.
+// Hermetic tests for the Aider runtime adapter: the shared TUI CLI contract
+// suite, then aider specifics (launch argv and posture, per-seat chat history
+// token rules for validation, capture, and the resume check, and pane patterns
+// against live aider 0.86.2 captures). No real binary, no network.
 
 import nodePath from "node:path";
-import { readFileSync } from "node:fs";
+import os from "node:os";
+import fs, { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
@@ -12,6 +14,13 @@ import {
 } from "../src/adapters/cli/aider/launch.js";
 import { AIDER_READY_PATTERNS, AIDER_GATE_PATTERNS, AIDER_ERROR_PATTERNS } from "../src/adapters/cli/aider/patterns.js";
 import { ATTENTION_REQUIRED_READINESS_CODES } from "../src/domain/runtime-adapter.js";
+import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
+import { AIDER_DESCRIPTOR, AIDER_REGISTRATION } from "../src/adapters/cli/aider/index.js";
+import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
+import {
+  HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs, mockTmux,
+} from "./helpers/tui-cli-adapter-harness.js";
 
 const FIXTURES = nodePath.join(nodePath.dirname(fileURLToPath(import.meta.url)), "fixtures", "cli-panes", "aider");
 const pane = (name: string) => readFileSync(nodePath.join(FIXTURES, name), "utf8");
@@ -147,5 +156,110 @@ describe("aider pane patterns", () => {
 
   it("any pending yes/no confirmation at the tail gates", () => {
     expect(classify("Run shell command? (Y)es/(N)o/(D)on't ask again [Yes]: ")).toBe("gate:trust_gate");
+  });
+});
+
+// ── adapter (TUI CLI base + contract) ───────────────────────────────────────
+
+const HARNESS_SEAT = `${HARNESS_STATE_ROOT}/aider/${HARNESS_SESSION}`;
+const HARNESS_CHAT = `${HARNESS_SEAT}/aider.chat.history.md`;
+const PYTHON = "Python";
+const CONTRACT_CHAT = nodePath.join(os.tmpdir(), "openrig-aider-contract", "aider.chat.history.md");
+
+runTuiCliAdapterContract({
+  registration: AIDER_REGISTRATION,
+  readyScreen: pane("ready.txt"),
+  runningCommand: PYTHON,
+  modelExample: "sonnet",
+  gateScreens: [
+    { screen: pane("missing-api-key.txt"), code: "login_required" },
+    { screen: pane("no-git-repo.txt"), code: "trust_gate" },
+  ],
+  earlyExit: {
+    screen: "Traceback (most recent call last):\n    import pyaudioop as audioop\nModuleNotFoundError: No module named 'pyaudioop'",
+    recovery: "attention_required",
+  },
+  // Resume legs run on the real filesystem, so the valid token lives under the
+  // OS temp dir (seeded by seedResumeTarget).
+  validResumeToken: CONTRACT_CHAT,
+  invalidResumeToken: "relative/history.md",
+  missingResumeToken: "/openrig-home/state/aider/gone@harness-rig/aider.chat.history.md",
+  seedResumeTarget: ({ fs: seatFs, token }) => {
+    seatFs.mkdirp(nodePath.dirname(token));
+    seatFs.writeFile(token, "# aider chat started at 2026-09-29 12:19:22\n");
+  },
+  seedSession: ({ seatStateDir }) => {
+    const file = nodePath.join(seatStateDir, "aider.chat.history.md");
+    fs.mkdirSync(seatStateDir, { recursive: true });
+    fs.writeFileSync(file, "\n# aider chat started at 2026-09-29 12:19:22\n");
+    return file;
+  },
+});
+
+describe("aider adapter", () => {
+  function launchRig(frames = [{ command: PYTHON, content: pane("ready.txt") }], env: NodeJS.ProcessEnv = {}, files: Record<string, string> = {}) {
+    const tmuxPane = mockTmux([atShell(), ...frames]);
+    const seatFs = memFs(files);
+    const adapter = AIDER_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: seatFs, env }));
+    return { adapter, pane: tmuxPane, fs: seatFs };
+  }
+  const q = (argv: string[]) => argv.map((a) => `'${a}'`).join(" ");
+
+  it("is registered under runtime: aider", () => {
+    expect(getRuntimeDescriptor("aider")).toBe(AIDER_DESCRIPTOR);
+  });
+
+  it("types the exact floor launch with no env prefix", async () => {
+    const { adapter, pane: p } = launchRig();
+    expect((await adapter.launchHarness(harnessBinding({ model: "sonnet" }), { name: "x" })).ok).toBe(true);
+    expect(p.typed).toEqual([`exec ${q(buildAiderArgv({ posture: "floor", seatStateDir: HARNESS_SEAT, model: "sonnet" }))}`]);
+    expect(p.typed[0]).not.toContain("--yes-always");
+    expect(p.typed[0]).not.toContain("BROWSER");
+  });
+
+  it("full_bypass types --yes-always behind BROWSER=true", async () => {
+    for (const [binding, env] of [[harnessBinding(), { OPENRIG_YOLO: "1" }], [harnessBinding({ launchPosture: "full_bypass" }), {}]] as const) {
+      const { adapter, pane: p } = launchRig(undefined, env);
+      await adapter.launchHarness(binding, { name: "x" });
+      expect(p.typed[0]).toBe(`exec env 'BROWSER=true' ${q(buildAiderArgv({ posture: "full_bypass", seatStateDir: HARNESS_SEAT }))}`);
+    }
+  });
+
+  it("resumes with --restore-chat-history when the history file exists", async () => {
+    const { adapter, pane: p } = launchRig(undefined, {}, { [HARNESS_CHAT]: "# aider chat started\n" });
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: HARNESS_CHAT });
+    expect(result).toMatchObject({ ok: true, resumeToken: HARNESS_CHAT, resumeType: "aider_chat_history_file" });
+    expect(p.typed[0]).toContain("'--restore-chat-history'");
+  });
+
+  it("refuses a vanished history file as retry_fresh before typing", async () => {
+    const { adapter, pane: p } = launchRig();
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: HARNESS_CHAT });
+    expect(result).toMatchObject({ ok: false, recovery: "retry_fresh" });
+    expect(p.typed).toEqual([]);
+  });
+
+  it("fails fast when aider is not installed", async () => {
+    const { adapter } = launchRig([atShell("$ env 'BROWSER=true' 'aider'\nenv: aider: No such file or directory\n$ ")], { OPENRIG_YOLO: "1" });
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("not installed") });
+  });
+
+  it("merges guidance into AGENTS.md (which the launch --read loads) and skips skills", async () => {
+    expect(AIDER_DESCRIPTOR.guidanceFile).toBe("AGENTS.md");
+    expect(buildAiderArgv({ posture: "floor", seatStateDir: SEAT }).join(" ")).toContain("--read AGENTS.md");
+    expect(AIDER_DESCRIPTOR.skillsDir).toBeUndefined();
+  });
+
+  it.each([
+    // Live ps line on macOS (uv tool install, Homebrew Python 3.12).
+    ["/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /Users/u/.local/bin/aider --model sonnet", true],
+    ["/usr/bin/python3.12 /home/u/.local/bin/aider --no-check-update", true],
+    ["python3 -m aider --model sonnet", true],
+    ["/home/u/.local/bin/aider", true],
+    ["python3 /opt/aider-tools/other.py", false],
+    ["vim aider.md", false],
+  ])("processMatch %j -> %s", (command, expected) => {
+    expect(processMatches(command, AIDER_DESCRIPTOR.processMatch!)).toBe(expected);
   });
 });

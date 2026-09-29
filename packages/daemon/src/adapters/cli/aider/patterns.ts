@@ -50,6 +50,15 @@ export const AIDER_GATE_PATTERNS: readonly AiderGatePattern[] = [
   },
 ];
 
-/** No fatal startup text is known that leaves aider running; aider exits on
- *  fatal errors and the shell-foreground guard reports that. */
-export const AIDER_ERROR_PATTERNS: readonly AiderErrorPattern[] = [];
+export const AIDER_ERROR_PATTERNS: readonly AiderErrorPattern[] = [
+  {
+    // zsh, bash, and env (the full_bypass launch is prefixed with `env`).
+    pattern: /command not found: aider|aider: command not found|env: [\u2018']?aider[\u2019']?: No such file or directory/,
+    reason: "aider is not installed or not on the pane's PATH (python -m pip install aider-install && aider-install)",
+  },
+  {
+    // aider 0.86 imports audioop, which Python 3.13 removed (seen live).
+    pattern: /ModuleNotFoundError: No module named '(?:pyaudioop|audioop)'/,
+    reason: "aider cannot start on this Python (audioop was removed in 3.13); reinstall on Python 3.12, e.g. uv tool install --python 3.12 aider-chat",
+  },
+];
