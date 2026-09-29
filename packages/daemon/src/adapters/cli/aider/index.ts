@@ -3,11 +3,13 @@
 
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import { createNodeFsOps } from "../../node-fs-ops.js";
+import { seatStateDirFor } from "../../../domain/runtime-capture.js";
 import type { CliRuntimeRegistration } from "../types.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import {
   AIDER_BINARY, AIDER_GUIDANCE_FILE, AIDER_INSTALL_HINT, AIDER_RESUME_TYPE, AIDER_RUNTIME_ID,
-  aiderLaunchEnv, buildAiderArgv, captureAiderChatHistory, checkAiderResumeTarget, validateAiderChatHistoryToken,
+  aiderLaunchEnv, buildAiderArgv, captureAiderChatHistory, checkAiderResumeTarget, mintAiderChatHistoryFile,
+  validateAiderChatHistoryToken,
 } from "./launch.js";
 import { AIDER_ERROR_PATTERNS, AIDER_GATE_PATTERNS, AIDER_READY_PATTERNS } from "./patterns.js";
 
@@ -19,8 +21,9 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   installHint: AIDER_INSTALL_HINT,
   resumeType: AIDER_RESUME_TYPE,
   validateResumeToken: validateAiderChatHistoryToken,
-  // The seat's own chat history file: aider writes its header at startup, so
-  // this normally succeeds right after launch readiness.
+  // The history file minted for the seat's latest fresh launch (launch.json
+  // presetToken). The base already reports the minted token at launch; this
+  // covers late capture (refresher, restore).
   captureResumeToken: ({ seatStateDir }) =>
     captureAiderChatHistory({ fs: createNodeFsOps(), seatStateDir }) ?? null,
   supportsFork: false,
@@ -31,21 +34,29 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   processMatch: "aider",
 };
 
-export const AIDER_SPEC: TuiCliRuntimeSpec = {
-  descriptor: AIDER_DESCRIPTOR,
-  buildLaunchCommand: ({ binding, posture, resumeToken, forkSource, seatStateDir }) =>
-    buildAiderArgv({ model: binding.model, posture, seatStateDir, resumeToken, forkSource }),
-  env: { set: ({ posture }) => aiderLaunchEnv(posture) },
-  validateResumeTarget: ({ token, fs }) => {
-    const checked = checkAiderResumeTarget(token, { fs });
-    return checked.ok ? { ok: true } : { ok: false, reason: checked.error, recovery: checked.recovery };
-  },
-  readyPatterns: AIDER_READY_PATTERNS,
-  gatePatterns: AIDER_GATE_PATTERNS,
-  errorPatterns: AIDER_ERROR_PATTERNS,
-};
+/** The aider spec for a daemon state root. `newId` is injectable for tests. */
+export function createAiderSpec(stateRoot: string, newId?: () => string): TuiCliRuntimeSpec {
+  return {
+    descriptor: AIDER_DESCRIPTOR,
+    buildLaunchCommand: ({ binding, posture, resumeToken, sessionToken, forkSource, seatStateDir }) =>
+      buildAiderArgv({ model: binding.model, posture, seatStateDir, resumeToken, sessionToken, forkSource }),
+    // Every fresh launch writes a new history file, so "fresh" stays fresh on
+    // a later restore; the minted path is the launch's resume token.
+    mintSessionToken: ({ binding }) => binding.tmuxSession
+      ? mintAiderChatHistoryFile(seatStateDirFor(stateRoot, AIDER_DESCRIPTOR.id, binding.tmuxSession), newId?.())
+      : undefined,
+    env: { set: ({ posture }) => aiderLaunchEnv(posture) },
+    validateResumeTarget: ({ token, fs }) => {
+      const checked = checkAiderResumeTarget(token, { fs });
+      return checked.ok ? { ok: true } : { ok: false, reason: checked.error, recovery: checked.recovery };
+    },
+    readyPatterns: AIDER_READY_PATTERNS,
+    gatePatterns: AIDER_GATE_PATTERNS,
+    errorPatterns: AIDER_ERROR_PATTERNS,
+  };
+}
 
 export const AIDER_REGISTRATION: CliRuntimeRegistration = {
   descriptor: AIDER_DESCRIPTOR,
-  createAdapter: (deps) => new TuiCliRuntimeAdapter(AIDER_SPEC, deps),
+  createAdapter: (deps) => new TuiCliRuntimeAdapter(createAiderSpec(deps.stateRoot), deps),
 };

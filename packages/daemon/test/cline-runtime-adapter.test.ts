@@ -13,7 +13,7 @@ import {
   buildClineArgv, validateClineSessionId, CLINE_LAUNCH_ENV, CLINE_MODEL_UNSUPPORTED_ERROR,
 } from "../src/adapters/cli/cline/launch.js";
 import {
-  clineSessionsDir, clineSessionMetadataPath, checkClineResumeTarget, findClineSessionForLaunch,
+  clineLaunchEnv, clineSessionsDir, clineSessionMetadataPath, checkClineResumeTarget, findClineSessionForLaunch,
   type ClineSessionFsOps,
 } from "../src/adapters/cli/cline/sessions.js";
 import { CLINE_READY_PATTERNS, CLINE_GATE_PATTERNS, CLINE_ERROR_PATTERNS } from "../src/adapters/cli/cline/patterns.js";
@@ -313,6 +313,16 @@ describe("cline adapter", () => {
     const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: VALID_ID });
     expect(result).toMatchObject({ ok: true, resumeToken: VALID_ID, resumeType: "cline_session_id" });
     expect(p.typed[0]).toContain(`'--id' '${VALID_ID}'`);
+  });
+
+  it("the resume check looks where the launched cline writes (adapter env plus launch env)", async () => {
+    const files = { [`/data/cline/sessions/${VALID_ID}/${VALID_ID}.json`]: "{}" };
+    const { adapter, pane: p } = launchRig(undefined, { CLINE_DATA_DIR: "/data/cline" }, files);
+    expect(await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: VALID_ID })).toMatchObject({ ok: true });
+    expect(p.typed[0]).toContain(`'--id' '${VALID_ID}'`);
+    const home = launchRig(undefined, {}, files);
+    expect(await home.adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: VALID_ID })).toMatchObject({ ok: false, recovery: "retry_fresh" });
+    expect(clineLaunchEnv({ CLINE_DATA_DIR: "/d" })).toMatchObject({ CLINE_DATA_DIR: "/d", CLINE_NO_AUTO_UPDATE: "1" });
   });
 
   it("maps the in-TUI unknown-session error to retry_fresh", async () => {

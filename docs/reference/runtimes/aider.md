@@ -41,7 +41,7 @@ Every launch passes:
 
 ```
 aider --no-check-update --no-show-release-notes --no-analytics --no-gitignore \
-  --chat-history-file <seat state>/aider.chat.history.md \
+  --chat-history-file <seat state>/aider.chat.history.<launch id>.md \
   --input-history-file <seat state>/aider.input.history \
   --read AGENTS.md
 ```
@@ -74,12 +74,18 @@ files live in the seat state dir, not the repo.
 
 ## Resume token
 
-Resume type `aider_chat_history_file`: the absolute path of the seat's chat
-history file. Aider has no session ids; its only continuation is replaying that
-file with `--restore-chat-history`. Aider writes the file's header at startup,
-so the token is captured right after launch. If the file is gone at resume
-time, the resume reports `retry_fresh` (stop and ask), because restoring from a
-missing file would silently start an empty chat.
+Resume type `aider_chat_history_file`: the absolute path of a chat history
+file in the seat state dir. Aider has no session ids; its only continuation is
+replaying that file with `--restore-chat-history`.
+
+Every fresh launch gets a new file, `aider.chat.history.<launch id>.md`, minted
+before launch and reported as the launch's resume token. A fresh start therefore
+stays fresh: a later restore replays only the conversation since that launch,
+never one from before it. A resume keeps writing to the file it restored.
+Earlier files stay in the seat state dir until the seat is removed.
+
+If the file is gone at resume time, the resume reports `retry_fresh` (stop and
+ask), because restoring from a missing file would silently start an empty chat.
 
 ## Guidance and skills
 

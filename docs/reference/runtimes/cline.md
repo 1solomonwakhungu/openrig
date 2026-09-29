@@ -79,10 +79,21 @@ CLI session whose `cwd` is the seat cwd and which started at or after the seat's
 launch.
 
 Cline's shared background hub daemon writes these files, not the TUI process,
-so they cannot be tied to one seat by pid or by a per-seat data dir. When two
-matching sessions exist (two Cline seats in the same cwd, or one seat that
-started a second task before capture ran), capture records nothing rather than
-guess.
+and the metadata carries nothing seat-specific (its `pid` is the hub's), so a
+session cannot be tied to one seat by pid or by a per-seat data dir. The match
+is therefore guarded:
+
+- When two matching sessions exist (two Cline seats in the same cwd, or one
+  seat that started a second task before capture ran), capture records nothing
+  rather than guess.
+- Late capture is skipped while another live OpenRig seat of the same runtime
+  shares the cwd, so a pod-mate's single session is never claimed.
+- Not guarded: a session the operator starts by hand with `cline` in the seat's
+  cwd, after the seat launched and before the seat's first prompt, matches the
+  same filters and can be captured as the seat's token. A later restore would
+  then continue the operator's conversation. Avoid running `cline` by hand in a
+  seat's cwd; if you did, set the seat's correct session id with
+  `rig seat set-resume-token <session>` before restoring.
 
 ## Guidance and skills
 
@@ -96,6 +107,8 @@ guess.
 
 - No per-seat model (see "Model selection"). All cline seats on a host share
   the operator's Cline provider and model.
+- A cline session the operator starts by hand in a seat's cwd can be captured
+  as that seat's resume token (see "Resume token").
 - The pane's foreground process is `node` (the npm launcher). Discovery
   identifies Cline by the pane process tree's argv (`.../cline/bin/cline` or
   `.../bin/.cline`) instead of the pane command.

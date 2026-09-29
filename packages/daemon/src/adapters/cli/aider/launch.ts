@@ -9,14 +9,17 @@
 //   `--no-gitignore` stops aider asking to add .aider* to the repo .gitignore;
 //   the seat's history files live in the seat state dir, not the repo.
 // - Aider has no session ids. Its only continuation is the chat history file
-//   plus `--restore-chat-history`, so each seat gets its own history file and
-//   that file's absolute path is the resume token.
+//   plus `--restore-chat-history`. Each fresh launch gets its own history file
+//   in the seat state dir (minted before launch, so a later restore never
+//   brings back a conversation from before a fresh start), and that file's
+//   absolute path is the resume token.
 // - Aider never reads AGENTS.md on its own; `--read AGENTS.md` loads the
 //   managed guidance file as read-only context. A missing file prints
 //   "Read-only file ... does not exist. Skipping." and aider carries on.
 // - `--yes-always` is the auto-approve flag. No fork primitive.
 
 import nodePath from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const AIDER_RUNTIME_ID = "aider";
 export const AIDER_BINARY = "aider";
@@ -25,8 +28,12 @@ export const AIDER_GUIDANCE_FILE = "AGENTS.md";
 export const AIDER_INSTALL_HINT =
   "python -m pip install aider-install && aider-install (or: uv tool install --python 3.12 aider-chat)";
 
+/** Fallback history file when no per-launch file was minted (pure argv use). */
 export const AIDER_CHAT_HISTORY_FILE = "aider.chat.history.md";
+/** Prompt recall (up-arrow) history, shared across the seat's launches. */
 export const AIDER_INPUT_HISTORY_FILE = "aider.input.history";
+
+const LAUNCH_RECORD_FILE = "launch.json";
 
 export type AiderLaunchPosture = "floor" | "full_bypass";
 
@@ -42,6 +49,8 @@ export interface AiderArgvInput {
   seatStateDir: string;
   /** A validated chat history file path (resume). */
   resumeToken?: string;
+  /** The per-launch history file minted for a fresh launch. */
+  sessionToken?: string;
   forkSource?: AiderForkRef;
 }
 
@@ -52,14 +61,20 @@ export function aiderSeatPaths(seatStateDir: string): { chatHistoryFile: string;
   };
 }
 
+/** A new history file for one fresh launch: <seat>/aider.chat.history.<id>.md. */
+export function mintAiderChatHistoryFile(seatStateDir: string, id: string = randomUUID()): string {
+  return nodePath.join(seatStateDir, `aider.chat.history.${id}.md`);
+}
+
 export function buildAiderArgv(input: AiderArgvInput): string[] {
   if (input.forkSource) {
     throw new Error("aider has no native fork primitive; remove session_source for aider members");
   }
   const seat = aiderSeatPaths(input.seatStateDir);
   let chatHistoryFile = seat.chatHistoryFile;
-  if (input.resumeToken !== undefined) {
-    const validation = validateAiderChatHistoryToken(input.resumeToken);
+  const token = input.resumeToken ?? input.sessionToken;
+  if (token !== undefined) {
+    const validation = validateAiderChatHistoryToken(token);
     if (!validation.ok) throw new Error(validation.error);
     chatHistoryFile = validation.token;
   }
@@ -136,10 +151,23 @@ export function checkAiderResumeTarget(token: string, ctx: { fs: AiderFsOps }): 
   return { ok: true };
 }
 
-/** Token capture: the seat's history file, once aider has written it (aider
- *  writes the "# aider chat started at" header at startup). */
-export function captureAiderChatHistory(ctx: { fs: AiderFsOps; seatStateDir: string }): string | undefined {
-  const { chatHistoryFile } = aiderSeatPaths(ctx.seatStateDir);
-  if (!ctx.fs.exists(chatHistoryFile)) return undefined;
-  return validateAiderChatHistoryToken(chatHistoryFile).ok ? chatHistoryFile : undefined;
+export interface AiderCaptureFsOps extends AiderFsOps {
+  readFile(path: string): string;
+}
+
+/** Token capture: the history file minted for the seat's latest fresh launch
+ *  (the base records it as launch.json presetToken), once aider has written
+ *  it (aider writes the "# aider chat started at" header at startup). Only a
+ *  file inside the seat's own state dir is accepted. Read-only; never throws. */
+export function captureAiderChatHistory(ctx: { fs: AiderCaptureFsOps; seatStateDir: string }): string | undefined {
+  let preset: unknown;
+  try {
+    preset = (JSON.parse(ctx.fs.readFile(nodePath.join(ctx.seatStateDir, LAUNCH_RECORD_FILE))) as { presetToken?: unknown }).presetToken;
+  } catch {
+    return undefined;
+  }
+  if (typeof preset !== "string") return undefined;
+  const validation = validateAiderChatHistoryToken(preset);
+  if (!validation.ok || nodePath.dirname(validation.token) !== nodePath.resolve(ctx.seatStateDir)) return undefined;
+  return ctx.fs.exists(validation.token) ? validation.token : undefined;
 }

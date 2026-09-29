@@ -10,7 +10,7 @@ import {
   CLINE_BINARY, CLINE_GUIDANCE_FILE, CLINE_INSTALL_HINT, CLINE_LAUNCH_ENV, CLINE_RESUME_TYPE, CLINE_RUNTIME_ID,
   buildClineArgv, validateClineSessionId,
 } from "./launch.js";
-import { checkClineResumeTarget, clineSessionsDir, findClineSessionForLaunch } from "./sessions.js";
+import { checkClineResumeTarget, clineLaunchEnv, clineSessionsDir, findClineSessionForLaunch } from "./sessions.js";
 import { CLINE_ERROR_PATTERNS, CLINE_GATE_PATTERNS, CLINE_READY_PATTERNS } from "./patterns.js";
 
 export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
@@ -29,7 +29,7 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
     if (!cwd || !launchStartedAt) return null;
     const found = findClineSessionForLaunch({
       fs: createNodeFsOps(),
-      sessionsDir: clineSessionsDir(process.env, homedir),
+      sessionsDir: clineSessionsDir(clineLaunchEnv(), homedir),
       cwd,
       launchStartedAt,
     });
@@ -47,21 +47,25 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   reapProcessTreeOnStop: false,
 };
 
-export const CLINE_SPEC: TuiCliRuntimeSpec = {
-  descriptor: CLINE_DESCRIPTOR,
-  buildLaunchCommand: ({ binding, posture, resumeToken, forkSource }) =>
-    buildClineArgv({ model: binding.model, posture, resumeToken, forkSource }),
-  env: { set: () => ({ ...CLINE_LAUNCH_ENV }) },
-  validateResumeTarget: ({ token, homedir, fs }) => {
-    const checked = checkClineResumeTarget(token, { fs, env: process.env, homedir });
-    return checked.ok ? { ok: true } : { ok: false, reason: checked.error, recovery: checked.recovery };
-  },
-  readyPatterns: CLINE_READY_PATTERNS,
-  gatePatterns: CLINE_GATE_PATTERNS,
-  errorPatterns: CLINE_ERROR_PATTERNS,
-};
+/** The cline spec for an adapter env (the env the daemon launches seats
+ *  from; process.env in production). */
+export function createClineSpec(env: NodeJS.ProcessEnv = process.env): TuiCliRuntimeSpec {
+  return {
+    descriptor: CLINE_DESCRIPTOR,
+    buildLaunchCommand: ({ binding, posture, resumeToken, forkSource }) =>
+      buildClineArgv({ model: binding.model, posture, resumeToken, forkSource }),
+    env: { set: () => ({ ...CLINE_LAUNCH_ENV }) },
+    validateResumeTarget: ({ token, homedir, fs }) => {
+      const checked = checkClineResumeTarget(token, { fs, env, homedir });
+      return checked.ok ? { ok: true } : { ok: false, reason: checked.error, recovery: checked.recovery };
+    },
+    readyPatterns: CLINE_READY_PATTERNS,
+    gatePatterns: CLINE_GATE_PATTERNS,
+    errorPatterns: CLINE_ERROR_PATTERNS,
+  };
+}
 
 export const CLINE_REGISTRATION: CliRuntimeRegistration = {
   descriptor: CLINE_DESCRIPTOR,
-  createAdapter: (deps) => new TuiCliRuntimeAdapter(CLINE_SPEC, deps),
+  createAdapter: (deps) => new TuiCliRuntimeAdapter(createClineSpec(deps.env), deps),
 };

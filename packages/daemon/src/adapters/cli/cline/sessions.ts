@@ -16,7 +16,7 @@
 // task); capture then returns nothing rather than guess.
 
 import nodePath from "node:path";
-import { validateClineSessionId } from "./launch.js";
+import { CLINE_LAUNCH_ENV, validateClineSessionId } from "./launch.js";
 
 export interface ClineSessionFsOps {
   readFile(path: string): string;
@@ -28,6 +28,13 @@ export interface ClineSessionFsOps {
 /** Tolerated clock skew between the daemon's launch timestamp and the hub's
  *  started_at (both are local wall clock; the hub may round). */
 export const CLINE_CAPTURE_SKEW_MS = 5_000;
+
+/** The env a managed cline launch sees: the pane env (inherited from the
+ *  daemon) plus the additive launch env. Capture and the resume check resolve
+ *  the sessions dir from this, so they look where the launched cline writes. */
+export function clineLaunchEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...base, ...CLINE_LAUNCH_ENV };
+}
 
 export function clineSessionsDir(env: NodeJS.ProcessEnv, homedir: string): string {
   const sessionDir = env.CLINE_SESSION_DATA_DIR?.trim();
@@ -55,7 +62,7 @@ export function checkClineResumeTarget(
 ): ClineResumeTargetResult {
   const validation = validateClineSessionId(sessionId);
   if (!validation.ok) return { ok: false, error: validation.error, recovery: "retry_fresh" };
-  const metadata = clineSessionMetadataPath(clineSessionsDir(ctx.env, ctx.homedir), validation.token);
+  const metadata = clineSessionMetadataPath(clineSessionsDir(clineLaunchEnv(ctx.env), ctx.homedir), validation.token);
   if (!ctx.fs.exists(metadata)) {
     return { ok: false, error: "the persisted cline session no longer exists", recovery: "retry_fresh" };
   }
