@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GROK_DESCRIPTOR, GROK_REGISTRATION, GROK_SPEC, grokSessionExists, validateGrokSessionId } from "../src/adapters/cli/grok/index.js";
 import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
 import { LAUNCH_RECORD_FILE } from "../src/domain/runtime-capture.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs, mockTmux } from "./helpers/tui-cli-adapter-harness.js";
@@ -110,6 +111,14 @@ describe("grok adapter", () => {
     expect(result).toEqual({ ok: true, resumeToken: child, resumeType: "grok_session_id" });
     const refused = await launch().adapter.launchHarness(harnessBinding(), { name: "x", forkSource: { kind: "name", value: "t" } });
     expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('ref.kind="name" is not supported') });
+  });
+
+  it("discovery matches the grok program path, never the installer's agent symlink", () => {
+    expect(processMatches("/Users/x/.grok/bin/grok --no-alt-screen --trust", GROK_DESCRIPTOR.processMatch!)).toBe(true);
+    expect(processMatches("grok", GROK_DESCRIPTOR.processMatch!)).toBe(true);
+    expect(processMatches("/Users/x/.grok/bin/agent", GROK_DESCRIPTOR.processMatch!)).toBe(false);
+    expect(processMatches("agent --resume abc", GROK_DESCRIPTOR.processMatch!)).toBe(false);
+    expect(processMatches("vim grok-notes.md", GROK_DESCRIPTOR.processMatch!)).toBe(false);
   });
 
   it("validates session ids as UUIDs", () => {

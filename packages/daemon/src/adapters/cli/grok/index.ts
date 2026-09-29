@@ -71,8 +71,12 @@ export const GROK_DESCRIPTOR: RuntimeDescriptor = {
   guidanceFile: "AGENTS.md",
   // Project skills (loaded once the folder is trusted).
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".grok", "skills"),
-  // A native (Rust) binary: the pane's foreground command is `grok`.
+  // A native (Rust) binary. On macOS tmux reports the symlink target's name
+  // (grok-<version>-macos-aarch64) as the pane command, so discovery also
+  // matches the program path: `.../bin/grok` matches, the installer's
+  // `agent` symlink does not.
   paneCommands: ["grok"],
+  processMatch: "grok",
   // Verified: no grok process survived tmux kill-server in the isolated probe.
   reapProcessTreeOnStop: false,
 };

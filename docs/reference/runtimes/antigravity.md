@@ -58,7 +58,7 @@ agy draws a full-screen TUI on the terminal's alternate screen; the base adapter
 
 - The trust prompt has no known pre-trust flag; a seat in an untrusted project stops at `trust_gate` until someone answers it once.
 - agy shares `~/.gemini/` with Gemini CLI (global `GEMINI.md`, `AGENTS.md`, rules).
-- Whether agy's process survives `tmux kill-session` was not verified; the adapter does not opt into process-tree reaping.
+- Whether agy's process survives `tmux kill-session` was not verified, so the adapter opts into process-tree reaping on stop (PID-scoped, never by name) until it is.
 
 ## Verified versus derived
 
@@ -74,8 +74,8 @@ Derived from strings in the agy binary (never seen in a live pane):
 
 | String | Adapter use |
 |---|---|
-| `? for shortcuts` | ready (with no `initializing...` on screen) |
-| `initializing...` | not ready |
+| `? for shortcuts` | ready, only with none of the not-ready markers below on screen |
+| `initializing...`, `Esc to cancel`, `to navigate`, `(y/n)`, `Yes, allow`, `No, deny`, `Welcome to`, `Action required` | not ready: a dialog, prompt, picker, or onboarding panel is up (even with the status line visible) |
 | `Do you trust the contents of this project?` | `trust_gate` |
 | `Select login method:`, `Other sign-in options` | `login_required` |
 | `Authentication required. Please visit the URL to log in:`, `Waiting for authentication (timeout 60s)...` | `login_required` |
@@ -88,5 +88,5 @@ Derived from strings in the agy binary (never seen in a live pane):
 Not verified, carried as residual risk:
 
 - The idle (ready) screen, the placement of the status line, and every gate screen. agy authenticates through the OS keyring, which a throwaway `HOME` does not isolate from the owner's account, so the TUI was not launched.
-- Because of that, readiness is strict and fails toward `attention_required` with pane evidence: a screen the adapter does not recognize times out as attention, never as ready. The first real launch should confirm the ready string and adjust `ANTIGRAVITY_READY_RE` if needed.
-- When the conversation file is created (first prompt versus launch), and whether agy survives `tmux kill-session`.
+- Because of that, readiness is strict and fails toward `attention_required` with pane evidence: a screen the adapter does not recognize times out as attention, never as ready. The not-ready markers catch the dialogs agy's strings reveal; a dialog worded differently that still shows `? for shortcuts` would read as ready, which is the remaining risk. The first real launch should confirm the ready string and the markers and adjust `ANTIGRAVITY_READY_RE` / `ANTIGRAVITY_NOT_READY_RE` if needed.
+- When the conversation file is created (first prompt versus launch), and whether agy survives `tmux kill-session` (reaping covers it meanwhile).

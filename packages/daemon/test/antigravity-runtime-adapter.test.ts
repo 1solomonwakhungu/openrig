@@ -8,7 +8,7 @@ import os from "node:os";
 import nodePath from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ANTIGRAVITY_DESCRIPTOR, ANTIGRAVITY_REGISTRATION, ANTIGRAVITY_SPEC, antigravityAppDir, antigravityConversationPath,
+  ANTIGRAVITY_DESCRIPTOR, ANTIGRAVITY_READY_RE, ANTIGRAVITY_REGISTRATION, ANTIGRAVITY_SPEC, antigravityAppDir, antigravityConversationPath,
   validateAntigravityConversationId,
 } from "../src/adapters/cli/antigravity/index.js";
 import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
@@ -98,6 +98,28 @@ describe("antigravity adapter", () => {
       const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
       expect(result).toMatchObject({ ok: false, recovery: "attention_required", evidence: expect.stringContaining(content.split("\n")[1]!.trim()) });
     }
+  });
+
+  it("never reads a dialog as ready, even with the status line visible", async () => {
+    const dialogs = [
+      "  Generating... (Enter/Esc to cancel)\n  ? for shortcuts",
+      "  Select a model\n  ↑/↓ to navigate\n  ? for shortcuts",
+      "  Discard changes? (y/n)\n  ? for shortcuts",
+      "  Allow agy to create files here?\n  > Yes, allow creation\n    No, deny creation\n  ? for shortcuts",
+      "  Welcome to Antigravity CLI\n  ? for shortcuts",
+      "  Action required\n  ? for shortcuts",
+    ];
+    for (const content of dialogs) {
+      expect(ANTIGRAVITY_READY_RE.test(content), content).toBe(false);
+      const pane = mockTmux([atShell(), { command: "agy", content }]);
+      const adapter = new TuiCliRuntimeAdapter(ANTIGRAVITY_SPEC, harnessDeps({ tmux: pane.tmux, fsOps: memFs() }));
+      expect(await adapter.launchHarness(harnessBinding(), { name: "x" })).toMatchObject({ ok: false, recovery: "attention_required" });
+    }
+    expect(ANTIGRAVITY_READY_RE.test(READY)).toBe(true);
+  });
+
+  it("reaps the process tree on stop until survival is verified", () => {
+    expect(ANTIGRAVITY_DESCRIPTOR.reapProcessTreeOnStop).toBe(true);
   });
 
   it("validates conversation ids as UUIDs", () => {

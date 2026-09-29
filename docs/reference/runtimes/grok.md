@@ -51,6 +51,7 @@ The seat runs `exec env GROK_DISABLE_AUTOUPDATER=1 BROWSER=true grok --no-alt-sc
 
 ## Guidance and skills
 
+- Identity: the pane command is `grok`, but on macOS tmux reports the symlink target's name (`grok-<version>-macos-aarch64`), so discovery also matches the program path (`processMatch: "grok"`): `~/.grok/bin/grok` matches, and the installer's `~/.grok/bin/agent` symlink never does.
 - Guidance merges as managed blocks into `<cwd>/AGENTS.md` (grok reads `AGENTS.md`, `AGENT.md`, and `CLAUDE.md` from the cwd up to the repo root), with the `rig-role` skip. Teardown removes the blocks.
 - Skills project into `<cwd>/.grok/skills/`. grok loads project skills only for a trusted folder, which `--trust` provides.
 

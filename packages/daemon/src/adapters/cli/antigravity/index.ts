@@ -72,8 +72,16 @@ function siblingSharesCwd(seatStateDir: string, cwd: string, launchStartedAt: Da
   });
 }
 
-/** Ready: the `? for shortcuts` status line, and no `initializing...` state on screen. */
-export const ANTIGRAVITY_READY_RE = /^(?![\s\S]*initializing\.\.\.)[\s\S]*\? for shortcuts/;
+/**
+ * Screen text that means a dialog, prompt, or onboarding panel is up, even if
+ * the `? for shortcuts` footer is visible. All from agy 1.1.27 binary strings.
+ * Residual risk: the live screens were never observed (see the runtime doc);
+ * a dialog agy words differently is not caught here and would read as ready.
+ */
+export const ANTIGRAVITY_NOT_READY_RE = /initializing\.\.\.|esc to cancel|to navigate|\(y\/n\)|Yes, allow|No, deny|Welcome to|Action required/i;
+
+/** Ready: the `? for shortcuts` status line with no dialog marker on screen. */
+export const ANTIGRAVITY_READY_RE = new RegExp(`^(?![\\s\\S]*(?:${ANTIGRAVITY_NOT_READY_RE.source}))[\\s\\S]*\\? for shortcuts`, "i");
 
 export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
   id: "antigravity",
@@ -110,6 +118,9 @@ export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".agents", "skills"),
   // A native (Go) binary: the pane's foreground command is `agy`.
   paneCommands: ["agy"],
+  // Survival after kill-session is unverified, so reap the pane's process
+  // tree on stop (PID-scoped; never by name).
+  reapProcessTreeOnStop: true,
 };
 
 export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
