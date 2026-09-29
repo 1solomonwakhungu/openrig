@@ -118,6 +118,36 @@ describe("RestoreOrchestrator", () => {
     });
   }
 
+  /** Sessions of a node still live after restore (not superseded or exited). */
+  function liveSessionsFor(nodeId: string): string[] {
+    return (db.prepare("SELECT status FROM sessions WHERE node_id = ?").all(nodeId) as Array<{ status: string }>)
+      .map((row) => row.status)
+      .filter((status) => status !== "superseded" && status !== "exited");
+  }
+
+  function podAwareRetryFreshCase(runtime: string, resumeType: string, error: string) {
+    const rig = rigRepo.createRig("test-rig");
+    db.prepare("INSERT INTO pods (id, rig_id, label) VALUES (?, ?, ?)").run(`pod-${runtime}-rf`, rig.id, "Dev");
+    const node = rigRepo.addNode(rig.id, "dev.impl", { runtime, podId: `pod-${runtime}-rf` });
+    const session = sessionRegistry.registerSession(node.id, "dev-impl@test-rig");
+    sessionRegistry.updateStatus(session.id, "running");
+    sessionRegistry.updateResumeToken(session.id, resumeType, "gone-token");
+    db.prepare("INSERT INTO node_startup_context (node_id, projection_entries_json, resolved_files_json, startup_actions_json, runtime) VALUES (?, ?, ?, ?, ?)").run(node.id, "[]", "[]", "[]", runtime);
+    const snap = snapshotCapture.captureSnapshot(rig.id, "test");
+    sessionRegistry.updateStatus(session.id, "exited");
+    db.prepare("DELETE FROM bindings WHERE node_id = ?").run(node.id);
+    const launchHarness = vi.fn(async () => ({ ok: false as const, error, recovery: "retry_fresh" as const }));
+    const adapter = {
+      runtime,
+      listInstalled: vi.fn(async () => []),
+      project: vi.fn(async () => ({ projected: [], skipped: [], failed: [] })),
+      deliverStartup: vi.fn(async () => ({ delivered: 0, failed: [] })),
+      checkReady: vi.fn(async () => ({ ready: true })),
+      launchHarness,
+    };
+    return { node, snap, launchHarness, adapter };
+  }
+
   function seedRigAndSnapshot(opts?: {
     edges?: { sourceLogical: string; targetLogical: string; kind: string }[];
     nodes?: { logicalId: string; role: string; runtime: string; cwd?: string }[];
@@ -1827,7 +1857,7 @@ describe("RestoreOrchestrator", () => {
     }
   });
 
-  it("pod-aware Claude restore fails when resume launch proves the saved session is gone", async () => {
+  it("pod-aware Claude restore stops at awaiting-decision when resume launch proves the saved session is gone", async () => {
     const rig = rigRepo.createRig("test-rig");
     db.prepare("INSERT INTO pods (id, rig_id, label) VALUES (?, ?, ?)").run("pod-claude-retry", rig.id, "Dev");
     const node = rigRepo.addNode(rig.id, "dev.impl", { runtime: "claude-code", podId: "pod-claude-retry" });
@@ -1857,10 +1887,57 @@ describe("RestoreOrchestrator", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id);
-      expect(nodeResult!.status).toBe("failed");
+      // retry_fresh on a requested pod-aware resume: the documented stop-and-ask.
+      expect(nodeResult!.status).toBe("awaiting-decision");
+      expect(nodeResult!.error).toContain("resume attempted but failed");
       expect(nodeResult!.error).toContain("Harness launch failed");
+      expect(liveSessionsFor(node.id)).toEqual([]);
       expect(launchHarness).toHaveBeenCalledTimes(1);
       expect(launchHarness.mock.calls[0]![1].resumeToken).toBe("stale-claude-token");
+    }
+  });
+
+  it.each([
+    ["pi", "pi_session_file", "pi resume: the persisted session file no longer exists"],
+    ["gemini", "gemini_session_id", "gemini resume: no stored session with that id"],
+  ])("pod-aware %s restore maps a retry_fresh resume refusal to awaiting-decision with zero sessions", async (runtime, resumeType, error) => {
+    const { node, snap, launchHarness, adapter } = podAwareRetryFreshCase(runtime, resumeType, error);
+    const tmux = mockTmux();
+    const orch = createOrchestrator({ tmux });
+    const result = await orch.restore(snap.id, { adapters: { [runtime]: adapter } });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id)!;
+      expect(nodeResult.status).toBe("awaiting-decision");
+      expect(nodeResult.error).toContain("resume attempted but failed");
+      expect(nodeResult.error).toContain(error);
+      expect(launchHarness).toHaveBeenCalledTimes(1); // no silent fresh launch
+      expect(liveSessionsFor(node.id)).toEqual([]);
+      expect(tmux.killSession).toHaveBeenCalled(); // the blank launched session is rolled back
+    }
+  });
+
+  it("pod-aware restore keeps a resume failure without a recovery hint as failed", async () => {
+    const { node, snap, adapter } = podAwareRetryFreshCase("gemini", "gemini_session_id", "boom");
+    adapter.launchHarness.mockImplementation(async () => ({ ok: false as const, error: "gemini launch: config write failed" }) as never);
+    const result = await createOrchestrator().restore(snap.id, { adapters: { gemini: adapter } });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id)!;
+      expect(nodeResult.status).toBe("failed");
+      expect(nodeResult.error).toContain("Harness launch failed");
+    }
+  });
+
+  it("pod-aware restore keeps attention_required as attention, not awaiting-decision", async () => {
+    const { node, snap, adapter } = podAwareRetryFreshCase("gemini", "gemini_session_id", "boom");
+    adapter.launchHarness.mockImplementation(async () => ({ ok: false as const, error: "trust dialog", recovery: "attention_required" as const, evidence: "Do you trust this folder?" }) as never);
+    const result = await createOrchestrator().restore(snap.id, { adapters: { gemini: adapter } });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id)!;
+      expect(nodeResult.status).toBe("attention_required");
+      expect(nodeResult.attentionEvidence).toBe("Do you trust this folder?");
     }
   });
 
@@ -1897,7 +1974,7 @@ describe("RestoreOrchestrator", () => {
     }
   });
 
-  it("pod-aware Codex restore fails when resume launch proves the saved session is gone", async () => {
+  it("pod-aware Codex restore stops at awaiting-decision when resume launch proves the saved session is gone", async () => {
     const rig = rigRepo.createRig("test-rig");
     db.prepare("INSERT INTO pods (id, rig_id, label) VALUES (?, ?, ?)").run("pod-codex-retry", rig.id, "Dev");
     const node = rigRepo.addNode(rig.id, "dev.impl", { runtime: "codex", podId: "pod-codex-retry" });
@@ -1927,8 +2004,11 @@ describe("RestoreOrchestrator", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id);
-      expect(nodeResult!.status).toBe("failed");
+      // retry_fresh on a requested pod-aware resume: the documented stop-and-ask.
+      expect(nodeResult!.status).toBe("awaiting-decision");
+      expect(nodeResult!.error).toContain("resume attempted but failed");
       expect(nodeResult!.error).toContain("Harness launch failed");
+      expect(liveSessionsFor(node.id)).toEqual([]);
       expect(launchHarness).toHaveBeenCalledTimes(1);
       expect(launchHarness.mock.calls[0]![1].resumeToken).toBe("stale-codex-token");
     }
@@ -1964,15 +2044,18 @@ describe("RestoreOrchestrator", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id);
-      expect(nodeResult!.status).toBe("failed");
+      // retry_fresh on a requested pod-aware resume: the documented stop-and-ask.
+      expect(nodeResult!.status).toBe("awaiting-decision");
+      expect(nodeResult!.error).toContain("resume attempted but failed");
       expect(nodeResult!.error).toContain("Harness launch failed");
+      expect(liveSessionsFor(node.id)).toEqual([]);
       expect(result.result.warnings).not.toContain("Node dev.impl: resume was unavailable; launched fresh instead.");
       expect(launchHarness).toHaveBeenCalledTimes(1);
       expect(launchHarness.mock.calls[0]![1].resumeToken).toBe("stable-codex-token");
     }
   });
 
-  it("pod-aware Codex restore fails requested resume even when a checkpoint exists", async () => {
+  it("pod-aware Codex restore stops at awaiting-decision for a gone session even when a checkpoint exists", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rigged-codex-restore-"));
     try {
       const rig = rigRepo.createRig("test-rig");
@@ -2008,8 +2091,9 @@ describe("RestoreOrchestrator", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id);
-        expect(nodeResult!.status).toBe("failed");
-        expect(nodeResult!.error).toContain("Harness launch failed");
+        expect(nodeResult!.status).toBe("awaiting-decision");
+        expect(nodeResult!.error).toContain("resume attempted but failed");
+        expect(liveSessionsFor(node.id)).toEqual([]);
         expect(launchHarness).toHaveBeenCalledTimes(1);
       }
     } finally {

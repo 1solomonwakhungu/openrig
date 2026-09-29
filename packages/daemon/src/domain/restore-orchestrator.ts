@@ -1461,6 +1461,20 @@ export class RestoreOrchestrator {
               };
             }
             if (isPodAware && resumeRequested) {
+              // The adapter proved the resume target is gone (retry_fresh), and
+              // fresh fallback is disabled for a requested resume. That is the
+              // documented stop-and-ask, same as the legacy path: roll back to
+              // zero sessions and present the decision, never a silent fresh
+              // start and never a blank session left behind.
+              if (startupResult.recovery === "retry_fresh") {
+                await this.rollbackToZeroSession(node.id, sessionName, launchResult.session.id, priorState);
+                return {
+                  nodeId: node.id,
+                  logicalId: node.logicalId,
+                  status: "awaiting-decision",
+                  error: `Original session unresumable: resume attempted but failed. The blank session was rolled back; no session is running. Re-run with --fresh ${node.logicalId} for a deliberate fresh-primed seat, or check the harness state manually. (${startupResult.errors.join("; ")})`,
+                };
+              }
               return {
                 nodeId: node.id,
                 logicalId: node.logicalId,
