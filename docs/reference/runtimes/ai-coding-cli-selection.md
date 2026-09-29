@@ -1,8 +1,10 @@
 # AI coding CLI selection for native runtime adapters
 
-This page records why OpenRig ships native runtime adapters for the ten CLIs below, beyond the
-built-in Claude Code, Codex, and Pi adapters. It is a point-in-time ranking, not a product
-endorsement.
+This page records why the ten CLIs below were selected as targets for native OpenRig runtime
+adapters, in addition to the existing Claude Code, Codex, and Pi adapters. It is a point-in-time
+ranking, not a product endorsement, and selection does not by itself mean an adapter is available:
+check the supported runtime list in [rig-spec.md](../rig-spec.md) for what your installed version
+provides.
 
 - Retrieved: 2026-09-29. Download windows are the 30 days ending 2026-09-27 or 2026-09-28 unless noted.
 - Scope: interactive AI coding agents that run in a terminal and can be driven inside a tmux pane.
@@ -17,15 +19,15 @@ endorsement.
 | 1 | OpenCode | `opencode` | 1.000 | 9,101,061 | 17,952 | 210,809 | Active; vendor claims 16M monthly devs |
 | 2 | GitHub Copilot CLI | `copilot` | 0.814 | 9,020,225 | 8,509 | 11,223 (issue repo, closed source) | Active |
 | 3 | Gemini CLI | `gemini` | 0.802 | 1,530,255 | 2,952 | 107,186 | Consumer logins shut off 2026-06-18; API key and enterprise only; Homebrew formula deprecated |
-| 4 | Cursor CLI | `agent` (alias `cursor-agent`) | 0.588 | ~352,000 (estimated from Homebrew) | 701 | n/a (closed) | Active; curl installer only |
+| 4 | Cursor CLI | `agent` (alias `cursor-agent`) | 0.589 | ~359,384 (imputed: Homebrew 701 x 512.7) | 701 | n/a (closed) | Active; curl installer only |
 | 5 | Kilo CLI | `kilo` | 0.571 | 142,651 | n/a (no core formula) | 27,442 | Active; now an OpenCode fork |
 | 6 | Cline CLI | `cline` | 0.561 | 284,713 | 71 | 69,555 (shared with extension) | Active; CLI 3.x |
-| 7 | Antigravity CLI | `agy` | 0.558 | 220,688 (GitHub release assets, update-inflated) | 3,531 | 2,417 | Active; Google's successor to Gemini CLI |
+| 7 | Antigravity CLI | `agy` | 0.558 | 220,688 (217,157 GitHub release asset downloads + 3,531 Homebrew cask; release count includes self-updates) | 3,531 | 2,417 | Active; Google's successor to Gemini CLI |
 | 8 | Qwen Code | `qwen` | 0.555 | 264,669 | 2,332 | 28,222 | Active; Gemini CLI fork |
 | 9 | Aider | `aider` | 0.549 | 267,807 | 286 | 49,276 | Slowing; last push 2026-05-22 |
 | 10 | Grok Build | `grok` | 0.509 | 257,943 | 519 | 27,152 | Active; v1.0.44; SuperGrok / X Premium+ subscription or XAI_API_KEY |
 
-Runners-up (11 to 22): Goose 0.481, Kiro CLI 0.479, Kimi Code 0.458, Crush 0.452, Open Interpreter 0.413, Mistral Vibe 0.370, Muse Code 0.359, Continue CLI 0.354, Factory Droid 0.335, Amp 0.327, Auggie 0.295, Junie CLI 0.019.
+Runners-up (11 to 22): Goose 0.481, Kiro CLI 0.480, Kimi Code 0.458, Crush 0.452, Open Interpreter 0.413, Mistral Vibe 0.370, Muse Code 0.361, Continue CLI 0.354, Factory Droid 0.335, Amp 0.327, Auggie 0.295, Junie CLI 0.019.
 
 Positions 8 to 13 are separated by less than 0.10 and should be read as a tier, not a strict order. The top 3 are clearly separated from everything else.
 
@@ -42,15 +44,44 @@ Four signals, each log10-scaled and min-max normalized across the 22 evaluated c
 
 Missing signals (closed source so no stars, no homebrew-core formula) are treated as missing, and the remaining weights are renormalized, rather than scored as zero.
 
-Estimated values: for three curl-installer tools with no package-registry footprint (Cursor CLI, Kiro CLI, Muse Code), D is imputed as Homebrew 30d x 502, the median D/H ratio across tools that have both. These rows are marked "~". Sanity check: Grok Build was first imputed this way at ~263,000 before its npm package (`@xai-official/grok`) was found; the measured value is 257,943, within 2%. Even so, this is the weakest part of the ranking, and Cursor CLI in particular could plausibly sit anywhere from #4 to #12.
+Estimated values: for three curl-installer tools with no package-registry footprint (Cursor CLI, Kiro CLI, Muse Code), D is imputed as Homebrew 30d x 512.7, the median D/H ratio over the 12 tools that have both a measured D and a Homebrew count (Grok Build is held out because it served as the validation case). This gives Cursor CLI ~359,384, Kiro CLI ~366,048, and Muse Code ~90,743; these rows are marked "~". Validation: before its npm package (`@xai-official/grok`) was found, Grok Build was imputed at ~263,000; the measured D is 257,943, within 2%. Even so, this is the weakest part of the ranking, and Cursor CLI in particular could plausibly sit anywhere from #4 to #12.
 
 Known biases in measured data:
 - npm counts include CI, Docker builds, and auto-update pulls. OpenCode and Copilot CLI both self-update, which inflates them relative to tools that are installed once. Platform-specific optional dependencies are separate packages and are not double counted in the top-level package number.
-- Mistral Vibe's PyPI count (5,292,621/month) is 97% Linux (5,156,715) with only 14,902 macOS+Windows downloads, which looks like CI or image-build traffic. It was adjusted to 69,842 by applying Aider's desktop share (21.4%). Raw number reported for transparency.
+- Mistral Vibe's PyPI count (5,292,621/month) is 97% Linux (5,156,715) with only 14,902 macOS+Windows downloads, which looks like CI or image-build traffic. It was adjusted to 69,643 by dividing its macOS+Windows downloads by Aider's macOS+Windows share, both taken from the same pypistats `/system` endpoint and window (Aider: 59,165 of 276,502 = 21.40%). Adding the Homebrew formula's 230 gives D = 69,873. Raw number reported for transparency.
 - Antigravity CLI's GitHub release count covers 20 releases in 30 days and includes the self-updater, so it overstates new installs.
 - Homebrew analytics are opt-out and macOS-heavy; they undercount Linux and Windows users.
 
-Scoring script inputs are reproduced in the raw data table below so the ranking can be recomputed.
+The exact scoring inputs are in the "Scoring inputs" table below, and the script is `score.py` in the same directory; running it reproduces every score.
+
+## Scoring inputs (exact values fed to score.py)
+
+D = 30-day installs summed across measurable channels ("~" = imputed); H = Homebrew 30d; S = GitHub stars; V = vendor-claim bucket. "n/a" = signal absent, weight renormalized.
+
+| # | CLI | Score | D | H | S | V |
+|---|---|---|---|---|---|---|
+| 1 | OpenCode | 1.000 | 9,101,061 | 17,952 | 210,809 | 1.0 |
+| 2 | GitHub Copilot CLI | 0.814 | 9,020,225 | 8,509 | 11,223 | 0.5 |
+| 3 | Gemini CLI | 0.802 | 1,530,255 | 2,952 | 107,186 | 0.75 |
+| 4 | Cursor CLI | 0.589 | ~359,384 | 701 | n/a | 0.5 |
+| 5 | Kilo CLI | 0.571 | 142,651 | n/a | 27,442 | 0.5 |
+| 6 | Cline CLI | 0.561 | 284,713 | 71 | 69,555 | 0.5 |
+| 7 | Antigravity CLI | 0.558 | 220,688 | 3,531 | 2,417 | 0.5 |
+| 8 | Qwen Code | 0.555 | 264,669 | 2,332 | 28,222 | 0.0 |
+| 9 | Aider | 0.549 | 267,807 | 286 | 49,276 | 0.25 |
+| 10 | Grok Build | 0.509 | 257,943 | 519 | 27,152 | 0.0 |
+| 11 | Goose | 0.481 | 60,454 | 1,156 | 54,772 | 0.0 |
+| 12 | Kiro CLI | 0.480 | ~366,048 | 714 | 4,340 | 0.0 |
+| 13 | Kimi Code | 0.458 | 154,794 | 793 | 7,736 | 0.0 |
+| 14 | Crush | 0.452 | 93,561 | n/a | 28,361 | 0.0 |
+| 15 | Open Interpreter | 0.413 | 29,140 | n/a | 68,474 | 0.0 |
+| 16 | Mistral Vibe | 0.370 | 69,873 | 230 | 5,018 | 0.0 |
+| 17 | Muse Code | 0.361 | ~90,743 | 177 | n/a | 0.0 |
+| 18 | Continue CLI | 0.354 | 16,709 | n/a | 36,062 | 0.0 |
+| 19 | Factory Droid | 0.335 | 82,269 | 102 | n/a | 0.0 |
+| 20 | Amp | 0.327 | 204,129 | 16 | n/a | 0.0 |
+| 21 | Auggie | 0.295 | 123,463 | n/a | 283 | 0.0 |
+| 22 | Junie CLI | 0.019 | 1,063 | n/a | 464 | 0.0 |
 
 ## Raw measured data (retrieved 2026-09-29)
 
@@ -69,7 +100,7 @@ Scoring script inputs are reproduced in the raw data table below so the ranking 
 | Auggie | npm `@augmentcode/auggie` | 123,463 | 36,512 | none | 283 (augmentcode/auggie, docs/issues repo) | None found |
 | Crush | npm `@charmland/crush` + GitHub release assets | 27,060 + 66,501 = 93,561 | 8,692 (npm) | only in charmbracelet tap (no analytics) | 28,361 | None found |
 | Factory Droid | npm `droid` + `@factory/cli` | 44,726 + 37,441 = 82,167 | 10,461 + 10,060 | cask `droid` 102 / 615 | closed (Factory-AI/factory has 37) | None found |
-| Mistral Vibe | PyPI `mistral-vibe` | 5,292,621 raw; 69,842 adjusted | 678,917 raw | formula `mistral-vibe` 230 / 3,435 | 5,018 | None found |
+| Mistral Vibe | PyPI `mistral-vibe` | 5,292,621 raw; 69,643 adjusted (D with Homebrew: 69,873) | 678,917 raw | formula `mistral-vibe` 230 / 3,435 | 5,018 | None found |
 | Goose | GitHub release CLI assets aaif-goose/goose (repo moved from block/goose) | 59,298 | n/a | formula `block-goose-cli` 1,156 / 5,835 | 54,772 | None found |
 | Open Interpreter | PyPI `open-interpreter` | 29,140 | 6,074 | none | 68,474 | None found |
 | Continue CLI | npm `@continuedev/cli` (`cn`) | 16,709 | 5,931 | none | 36,062 (shared with extension) | None found |
@@ -122,7 +153,7 @@ Sources for vendor claims and status:
 
 ## Adapter facts for the top 10
 
-These facts were gathered for adapter design on 2026-09-29 and are refined in each runtime page under this directory. Verified against current releases. Methods: `--help` output from the npm package run in a scratch directory; source read via `gh api` or a shallow clone; binary string inspection for closed-source tools. OpenCode, Kilo, and Copilot TUIs were also launched in an isolated tmux server with a throwaway home directory to capture the idle screen. Items not confirmed are marked "unverified".
+These facts were gathered as adapter design input on 2026-09-29 against the then-current releases. Where a runtime-specific page exists in this directory, it supersedes this matrix. Methods: `--help` output from the npm package run in a scratch directory; source read via `gh api` or a shallow clone; binary string inspection for closed-source tools. OpenCode, Kilo, and Copilot TUIs were also launched in an isolated tmux server with a throwaway home directory to capture the idle screen. Items not confirmed are marked "unverified".
 
 ### Cross-cutting adapter gotchas
 
