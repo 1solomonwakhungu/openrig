@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+                                   ██  ██ ██🬺🬏   ██  ██   ██🬺🬏     ████ ██     ██🬺🬏
+                                   ████🬺🬏 ▀▀██   ██  ▀▀ ██▀▀██   ██▀▀▀▀ ██     ▀▀██
+                                   ██  ██ ██████ 🬁🬬████ 🬁🬬██▀▀   🬁🬬████ 🬁🬬████ ██████
+                                   ▀▀  ▀▀ ▀▀▀▀▀▀   ▀▀▀▀   ▀▀       ▀▀▀▀   ▀▀▀▀ ▀▀▀▀▀▀
+
+
+                       ┃
+                       ┃  Ask anything... "Fix a TODO in the codebase"
+                       ┃
+                       ┃  Code  · Auto Free Kilo Gateway
+                       ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                       tab agents  ctrl+p commands
+
+
+
+
+
+
+
+
+                        ● Tip Use /review to review uncommitted changes, commits, branches, or PRs
+
+
+
+
+
+
+
+  /home/dev/project:main                                         7.8.1
+
