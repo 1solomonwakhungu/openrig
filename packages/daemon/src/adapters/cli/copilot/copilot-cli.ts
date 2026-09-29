@@ -10,12 +10,16 @@
 // - `--resume=<id>` reopens an exact session (bare `--resume` opens a picker,
 //   which a managed launch must never do).
 // - `--yolo` (= `--allow-all`) auto-approves tools, paths, and URLs, but does
-//   NOT skip the folder-trust modal. Only `trustedFolders` in
-//   <COPILOT_HOME>/settings.json does.
+//   NOT skip the folder-trust modal. `trustedFolders` in settings.json does,
+//   but Copilot moves that list into its self-managed config.json at startup
+//   and concurrent launches lose entries in that move, so OpenRig never writes
+//   it: the adapter answers the modal with "1. Yes" (this session only) under
+//   the base's guarded gate answer.
 // - There is no fork flag.
 
 import nodePath from "node:path";
 import type { ForkSource } from "../../../domain/runtime-adapter.js";
+import { unwrapBoxedLines, type TuiCliGatePattern } from "../tui-cli-runtime-adapter.js";
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 
 export const COPILOT_RUNTIME_ID = "copilot";
@@ -97,11 +101,30 @@ export const COPILOT_READY_PATTERNS: readonly RegExp[] = [
   /\/ commands\s*·\s*\? help/,
 ];
 
-export const COPILOT_GATE_PATTERNS: ReadonlyArray<{ pattern: RegExp; code: string; reason: string }> = [
+/** The folder a "Confirm folder trust" dialog names: the first path in the
+ *  boxed text after its title, with the CLI's hard wraps joined (at 80
+ *  columns a long path wraps mid-word inside the box). */
+export function copilotTrustDialogPath(screen: string): string | null {
+  const lines = screen.split("\n");
+  const title = lines.findIndex((line) => line.includes("Confirm folder trust"));
+  if (title < 0) return null;
+  const path = unwrapBoxedLines(lines.slice(title + 1)).find((text) => text.startsWith("/") || text.startsWith("~"));
+  return path ?? null;
+}
+
+export const COPILOT_GATE_PATTERNS: readonly TuiCliGatePattern[] = [
   {
     pattern: /Do you trust the files in this folder\?|Confirm folder trust/,
     code: "trust_gate",
     reason: "copilot is asking to trust the workspace folder",
+    // "1. Yes" trusts the folder for this session only; nothing is persisted.
+    answer: {
+      keys: ["Enter"],
+      expectOptionText: "Yes",
+      selectionMarker: "❯",
+      dialogPath: copilotTrustDialogPath,
+      describe: "trusted the seat's cwd for this Copilot session only",
+    },
   },
   {
     // Printed as the last message above the prompt (cwd line, rule, `❯`). It
@@ -152,10 +175,6 @@ export interface ReadOnlyFs {
 export function copilotHome(env: NodeJS.ProcessEnv, homedir: string): string {
   const override = env.COPILOT_HOME?.trim();
   return override ? override : nodePath.join(homedir, ".copilot");
-}
-
-export function copilotSettingsPath(home: string): string {
-  return nodePath.join(home, "settings.json");
 }
 
 export function copilotWorkspaceFile(home: string, sessionId: string): string {

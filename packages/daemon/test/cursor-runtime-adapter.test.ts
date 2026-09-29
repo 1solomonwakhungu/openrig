@@ -356,3 +356,23 @@ describe("Cursor adapter launch", () => {
   });
 });
 
+
+// ── 80x24 panes (the daemon's pane size) ───────────────────────────────────
+
+describe("Cursor patterns at 80x24", () => {
+  it("classify the live login screen and the synthesized 80-column screens", () => {
+    expect(classify(fixture("cursor-80-login.txt"))).toBe("login_required");
+    expect(classify(fixture("cursor-80-trust-synth.txt"))).toBe("trust_gate");
+    expect(classify(fixture("cursor-80-idle-synth.txt"))).toBe("ready");
+    expect(classify(fixture("cursor-80-followup-synth.txt"))).toBe("ready");
+    expect(classify(fixture("cursor-80-resumed-synth.txt"))).toBe("ready");
+  });
+
+  it("no fixture line is wider than 80 columns or taller than 24 rows", () => {
+    for (const name of ["cursor-80-login.txt", "cursor-80-trust-synth.txt", "cursor-80-idle-synth.txt", "cursor-80-followup-synth.txt", "cursor-80-resumed-synth.txt"]) {
+      const lines = fixture(name).replace(/\n$/, "").split("\n");
+      expect(lines.length, name).toBeLessThanOrEqual(24);
+      expect(Math.max(...lines.map((l) => [...l].length)), name).toBeLessThanOrEqual(80);
+    }
+  });
+});

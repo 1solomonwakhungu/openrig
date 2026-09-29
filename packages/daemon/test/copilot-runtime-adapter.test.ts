@@ -7,6 +7,7 @@ import fs, { readFileSync } from "node:fs";
 import nodePath from "node:path";
 import { describe, it, expect } from "vitest";
 import { COPILOT_REGISTRATION, COPILOT_SEAT_FILE, COPILOT_SPEC } from "../src/adapters/cli/copilot/index.js";
+import { unwrapBoxedLines } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import {
@@ -14,8 +15,8 @@ import {
 } from "./helpers/tui-cli-adapter-harness.js";
 import {
   buildCopilotArgv, validateCopilotSessionId, COPILOT_READY_PATTERNS, COPILOT_GATE_PATTERNS,
-  parseCopilotVersion, verifyCopilotVersionOutput, copilotHome, copilotSettingsPath, copilotWorkspaceFile,
-  parseCopilotWorkspaceYaml, copilotResumeTargetExists, captureCopilotSessionId,
+  parseCopilotVersion, verifyCopilotVersionOutput, copilotHome, copilotWorkspaceFile,
+  parseCopilotWorkspaceYaml, copilotResumeTargetExists, captureCopilotSessionId, copilotTrustDialogPath, COPILOT_ERROR_PATTERNS,
   type ReadOnlyFs,
 } from "../src/adapters/cli/copilot/copilot-cli.js";
 
@@ -128,7 +129,6 @@ describe("Copilot session store", () => {
   it("resolves COPILOT_HOME over the default and builds store paths", () => {
     expect(copilotHome({}, "/home/user")).toBe("/home/user/.copilot");
     expect(copilotHome({ COPILOT_HOME: " /data/copilot " }, "/home/user")).toBe("/data/copilot");
-    expect(copilotSettingsPath(HOME)).toBe(`${HOME}/settings.json`);
     expect(copilotWorkspaceFile(HOME, ID)).toBe(`${HOME}/session-state/${ID}/workspace.yaml`);
   });
 
@@ -241,24 +241,12 @@ describe("Copilot adapter launch", () => {
     expect(pane.typed[0]).toContain("--yolo");
   });
 
-  it("trusts the seat cwd in the owner settings, merge-only", async () => {
-    const files = harnessMemFs({ [SETTINGS]: JSON.stringify({ model: "gpt-5.4", trustedFolders: ["/elsewhere"] }) });
+  it("writes no Copilot config: only the seat state dir is touched", async () => {
+    const files = harnessMemFs({ [SETTINGS]: JSON.stringify({ trustedFolders: ["/elsewhere"] }) });
     await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
-    expect(JSON.parse(files.files[SETTINGS]!)).toEqual({ model: "gpt-5.4", trustedFolders: ["/elsewhere", HARNESS_CWD] });
-  });
-
-  it("honors COPILOT_HOME for the settings file", async () => {
-    const files = harnessMemFs();
-    await launch(files, { COPILOT_HOME: "/data/copilot" }).adapter.launchHarness(harnessBinding(), { name: "x" });
-    expect(JSON.parse(files.files["/data/copilot/settings.json"]!)).toEqual({ trustedFolders: [HARNESS_CWD] });
-    expect(files.files[SETTINGS]).toBeUndefined();
-  });
-
-  it("leaves an unparseable settings file untouched and still launches", async () => {
-    const files = harnessMemFs({ [SETTINGS]: "// user comment\n{ \"trustedFolders\": [] }" });
-    const result = await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
-    expect(result.ok).toBe(true);
-    expect(files.files[SETTINGS]).toBe("// user comment\n{ \"trustedFolders\": [] }");
+    expect(files.files[SETTINGS]).toBe(JSON.stringify({ trustedFolders: ["/elsewhere"] }));
+    const written = Object.keys(files.files).filter((f) => f !== SETTINGS);
+    expect(written.every((f) => f.startsWith(`${HARNESS_STATE_ROOT}/copilot/`))).toBe(true);
   });
 
   it("records the COPILOT_HOME the launch resolved; capture and the resume check use it", async () => {
@@ -301,5 +289,143 @@ describe("Copilot adapter launch", () => {
     expect(matches("node /usr/local/bin/opencode --prompt copilot")).toBe(false);
     expect(matches("gh copilot suggest")).toBe(false);
     expect(d.reapProcessTreeOnStop).toBe(true);
+  });
+});
+
+// ── 80x24 panes (the daemon's pane size) ───────────────────────────────────
+
+describe("Copilot patterns at 80x24", () => {
+  it("classify the live and derived 80-column screens", () => {
+    expect(classify(fixture("copilot-80-trust.txt"))).toBe("trust_gate");
+    expect(classify(fixture("copilot-80-idle-unauth.txt"))).toBe("login_required");
+    expect(classify(fixture("copilot-80-idle-derived.txt"))).toBe("ready");
+    expect(classify(fixture("copilot-80-after-login-derived.txt"))).toBe("ready");
+  });
+
+  it("the resume-missing error matches at 80 columns", () => {
+    expect(COPILOT_ERROR_PATTERNS.some((e) => e.pattern.test(fixture("copilot-80-resume-missing.txt")))).toBe(true);
+  });
+
+  it("no 80-column fixture is wider than 80 columns or taller than 24 rows", () => {
+    for (const name of ["copilot-80-trust.txt", "copilot-80-idle-unauth.txt", "copilot-80-idle-derived.txt", "copilot-80-after-login-derived.txt", "copilot-80-resume-missing.txt"]) {
+      const lines = fixture(name).replace(/\n$/, "").split("\n");
+      expect(lines.length, name).toBeLessThanOrEqual(24);
+      expect(Math.max(...lines.map((l) => [...l].length)), name).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("unwrapBoxedLines joins hard-wrapped box text and keeps rules and padded lines apart", () => {
+    expect(unwrapBoxedLines([
+      "│ ╭──────────╮ │",
+      "│ │ /repo/ab │ │",
+      "│ │ cd/efgh  │ │",
+      "│ ╰──────────╯ │",
+      "│ /repo-old    │",
+    ])).toEqual(["", "/repo/abcd/efgh", "", "/repo-old"]);
+  });
+
+  it("the trust dialog path is unwrapped from the box at 80 and 160 columns", () => {
+    expect(copilotTrustDialogPath(fixture("copilot-80-trust.txt"))).toBe(LONG_CWD);
+    expect(copilotTrustDialogPath(fixture("copilot-first-run.txt"))).toBe("/home/user/work");
+    expect(copilotTrustDialogPath(READY)).toBeNull();
+  });
+});
+
+// ── guarded trust answer (TuiCliGateAnswer) ─────────────────────────────────
+
+const LONG_CWD = "/Users/operator-home-u/Projects/openrig-wt/_tools/scratch-home/a-very-long-directory-name-for-wrapping-tests/another-deeply-nested-project-folder/work";
+
+describe("Copilot trust dialog answer", () => {
+  const TRUST = fixture("copilot-80-trust.txt");
+  const IDLE = fixture("copilot-80-idle-derived.txt");
+  const trustFrame = (content = TRUST) => ({ command: "copilot", content });
+  const readyFrame = { command: "copilot", content: IDLE };
+
+  function rig(frames: Array<{ command: string; content: string }>, session = HARNESS_SESSION) {
+    const files = harnessMemFs();
+    const pane = mockTmux([atShell(), ...frames]);
+    const adapter = COPILOT_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: files }));
+    const keys = () => (pane.tmux.sendKeys as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => c[1]);
+    const record = () => JSON.parse(files.files[nodePath.join(HARNESS_STATE_ROOT, "copilot", session, "launch.json")]!) as {
+      gateAnswers?: Array<{ code: string; option: string }>;
+    };
+    return { adapter, pane, files, keys, record };
+  }
+
+  it("answers the seat's own dialog once with the session-only option, records it, and becomes ready", async () => {
+    const r = rig([trustFrame(), readyFrame]);
+    const result = await r.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD }), { name: "x" });
+    expect(result.ok).toBe(true);
+    expect(r.keys()).toEqual([["Enter"]]);
+    expect(r.record().gateAnswers).toEqual([expect.objectContaining({ code: "trust_gate", option: "Yes" })]);
+  });
+
+  it("works under both postures", async () => {
+    const r = rig([trustFrame(), readyFrame]);
+    const result = await r.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD, launchPosture: "full_bypass" }), { name: "x" });
+    expect(result.ok).toBe(true);
+    expect(r.keys()).toEqual([["Enter"]]);
+  });
+
+  it("does not answer a dialog for a sibling folder that shares a prefix", async () => {
+    for (const cwd of [`${LONG_CWD}-old`, LONG_CWD.slice(0, -1)]) {
+      const r = rig([trustFrame(), readyFrame]);
+      const result = await r.adapter.launchHarness(harnessBinding({ cwd }), { name: "x" });
+      expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("different folder") });
+      expect(r.keys()).toEqual([]);
+    }
+  });
+
+  it("does not answer when the persistent option is selected", async () => {
+    const moved = TRUST.replace("❯ 1. Yes", "  1. Yes").replace("  2. Yes, and remember", "❯ 2. Yes, and remember");
+    expect(moved).not.toBe(TRUST);
+    const r = rig([trustFrame(moved), readyFrame]);
+    const result = await r.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD }), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("selected option") });
+    expect(r.keys()).toEqual([]);
+  });
+
+  it("fails as attention_required when the dialog is still there after the answer", async () => {
+    const r = rig([trustFrame()]);
+    const result = await r.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD }), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("still showing"), evidence: expect.any(String) });
+    expect(r.keys()).toEqual([["Enter"]]);
+  });
+
+  it("never answers a dialog left in the pane from before the launch", async () => {
+    const files = harnessMemFs();
+    const pane = mockTmux([atShell(`${TRUST}\n$ `), { command: "copilot", content: "starting" }]);
+    const adapter = COPILOT_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: files }));
+    const result = await adapter.launchHarness(harnessBinding({ cwd: LONG_CWD }), { name: "x" });
+    expect(result.ok).toBe(false);
+    expect((pane.tmux.sendKeys as unknown as { mock: { calls: unknown[] } }).mock.calls).toEqual([]);
+  });
+
+  it("never answers from checkReady", async () => {
+    const pane = mockTmux([trustFrame()]);
+    const adapter = COPILOT_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: harnessMemFs() }));
+    expect(await adapter.checkReady(harnessBinding({ cwd: LONG_CWD }))).toMatchObject({ ready: false, code: "trust_gate" });
+    expect((pane.tmux.sendKeys as unknown as { mock: { calls: unknown[] } }).mock.calls).toEqual([]);
+  });
+
+  it("concurrent launches each answer only their own folder and write no Copilot config", async () => {
+    const other = `${LONG_CWD.slice(0, -"work".length)}docs`;
+    const otherTrust = TRUST.replace("r/work   ", "r/docs   ");
+    expect(otherTrust).not.toBe(TRUST);
+    const a = rig([trustFrame(), readyFrame], "dev-a@harness-rig");
+    const b = rig([trustFrame(otherTrust), readyFrame], "dev-b@harness-rig");
+    const c = rig([trustFrame(otherTrust), readyFrame], "dev-c@harness-rig"); // dialog is b's folder, not c's
+    const [ra, rb, rc] = await Promise.all([
+      a.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD, tmuxSession: "dev-a@harness-rig" }), { name: "a" }),
+      b.adapter.launchHarness(harnessBinding({ cwd: other, tmuxSession: "dev-b@harness-rig" }), { name: "b" }),
+      c.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD, tmuxSession: "dev-c@harness-rig" }), { name: "c" }),
+    ]);
+    expect(ra.ok).toBe(true);
+    expect(rb.ok).toBe(true);
+    expect(rc).toMatchObject({ ok: false, recovery: "attention_required" });
+    expect([a.keys(), b.keys(), c.keys()]).toEqual([[["Enter"]], [["Enter"]], []]);
+    for (const r of [a, b, c]) {
+      expect(Object.keys(r.files.files).every((f) => f.startsWith(`${HARNESS_STATE_ROOT}/copilot/`))).toBe(true);
+    }
   });
 });

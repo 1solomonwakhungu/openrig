@@ -35,6 +35,8 @@ export interface LaunchRecord {
   presetToken?: string;
   /** Owner-config edits prepareLaunch made (owner-config.ts change records). */
   ownerConfigChanges?: unknown[];
+  /** Gates OpenRig answered during this launch (TuiCliGateAnswer). */
+  gateAnswers?: Array<{ code: string; option: string; describe: string; answeredAt: string }>;
 }
 
 /** Best-effort read of the seat's launch record. Null when absent or unreadable. */

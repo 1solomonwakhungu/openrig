@@ -1,0 +1,8 @@
+ ● Read README.md
+ Summarized the project layout and the build steps for the long-named
+ directory tree.
+
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ → Add a follow-up                                                          │
+ └────────────────────────────────────────────────────────────────────────────┘
+  Auto · 3%

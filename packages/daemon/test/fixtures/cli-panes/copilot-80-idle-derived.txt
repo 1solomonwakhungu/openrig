@@ -1,0 +1,20 @@
+ [Current]  Sessions   Issues   Pull requests   Gists
+
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot v1.0.89 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+
+
+ ● No copilot-instructions.md found. Run /init to generate.
+
+ ● Tip: /skills
+   └ Manage skills for enhanced capabilities
+
+
+ /Users/operator-home-u/Projects/openrig-wt/_tools/.../solo [⎇ main]
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+ ← open sidebar · / commands · ? help · tab next tab

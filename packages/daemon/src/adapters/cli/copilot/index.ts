@@ -2,11 +2,10 @@
 //
 // The adapter mints the session UUID (`--session-id`), so the resume token is
 // known at launch and never ambiguous between pod-mates sharing a cwd. Folder
-// trust is provisioned by adding the seat cwd to `trustedFolders` in the
-// owner's Copilot settings (merge-only), because `--yolo` does not skip the
-// trust modal. See copilot-cli.ts for the verified CLI facts.
+// trust is answered in the dialog for the session only (a guarded gate answer
+// in the base); OpenRig writes no Copilot config. See copilot-cli.ts for the
+// verified CLI facts.
 
-import fs from "node:fs";
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
@@ -15,9 +14,9 @@ import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
 import {
-  COPILOT_BINARY, COPILOT_ERROR_PATTERNS, COPILOT_PROCESS_MATCH, COPILOT_GATE_PATTERNS, COPILOT_GUIDANCE_FILE, COPILOT_READY_PATTERNS,
+  COPILOT_BINARY, COPILOT_ERROR_PATTERNS, COPILOT_GATE_PATTERNS, COPILOT_GUIDANCE_FILE, COPILOT_PROCESS_MATCH, COPILOT_READY_PATTERNS,
   COPILOT_RESUME_TYPE, COPILOT_RUNTIME_ID, COPILOT_SKILLS_SUBDIR, buildCopilotArgv, captureCopilotSessionId,
-  copilotHome, copilotResumeTargetExists, copilotSettingsPath, validateCopilotSessionId, verifyCopilotVersionOutput,
+  copilotHome, copilotResumeTargetExists, validateCopilotSessionId, verifyCopilotVersionOutput,
   type ReadOnlyFs,
 } from "./copilot-cli.js";
 
@@ -50,18 +49,6 @@ function seatCopilotHome(fsOps: Pick<CliAdapterFsOps, "exists" | "readFile">, se
     // Fall through to the daemon env.
   }
   return copilotHome(process.env, homedir);
-}
-
-/** The seat cwd as given plus its realpath, so a symlinked cwd is trusted too
- *  (same keys as the Claude adapter's workspace trust). */
-function trustKeys(cwd: string): string[] {
-  const keys = new Set([nodePath.resolve(cwd)]);
-  try {
-    keys.add(fs.realpathSync.native(cwd));
-  } catch {
-    // Best effort: a cwd that does not exist yet keeps the resolved key only.
-  }
-  return [...keys];
 }
 
 export const COPILOT_DESCRIPTOR: RuntimeDescriptor = {
@@ -107,13 +94,10 @@ export const COPILOT_SPEC: TuiCliRuntimeSpec = {
   buildLaunchCommand: ({ binding, posture, resumeToken, forkSource, sessionToken }) =>
     buildCopilotArgv({ model: binding.model, posture, resumeToken, newSessionId: sessionToken, forkSource }),
   mintSessionToken: ({ forkSource }) => (forkSource ? undefined : randomUUID()),
-  prepareLaunch: ({ binding, seatStateDir, fs: fsOps, env, homedir, mergeOwnerConfig }) => {
-    const home = copilotHome(env, homedir);
+  // Records where this launch's Copilot keeps its state; no Copilot config is written.
+  prepareLaunch: ({ seatStateDir, fs: fsOps, env, homedir }) => {
     fsOps.mkdirp(seatStateDir);
-    fsOps.writeFile(nodePath.join(seatStateDir, COPILOT_SEAT_FILE), `${JSON.stringify({ copilotHome: home })}\n`);
-    mergeOwnerConfig(copilotSettingsPath(home), "json", (config) => {
-      for (const key of trustKeys(binding.cwd)) config.addToList(["trustedFolders"], key);
-    });
+    fsOps.writeFile(nodePath.join(seatStateDir, COPILOT_SEAT_FILE), `${JSON.stringify({ copilotHome: copilotHome(env, homedir) })}\n`);
   },
   // Runs before prepareLaunch rewrites the seat file, so it reads the home
   // recorded by the launch that created the session.

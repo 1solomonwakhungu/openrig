@@ -1,0 +1,23 @@
+  ╰─╯╰─╯  Copilot v1.0.89 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+ ✗ Failed to read model provider attribution: Error: Not authenticated
+
+ ✗ Failed to read model provider attribution: Error: Not authenticated
+
+ ● No copilot-instructions.md found. Run /init to generate.
+
+ ● Tip: /skills
+   └ Manage skills for enhanced capabilities
+
+ ✗ Failed to read model provider attribution: Error: Not authenticated
+
+Please use /login to sign in to use Copilot
+ ● Signed in as octocat.
+
+ /Users/operator-home-u/Projects/openrig-wt/_tools/.../solo [⎇ main]
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+ ← open sidebar · / commands · ? help · tab next tab

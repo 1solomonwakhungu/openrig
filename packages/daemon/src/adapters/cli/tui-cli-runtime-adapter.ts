@@ -11,6 +11,7 @@
 // discipline note there): the descriptor arrives through the spec, and token
 // capture goes through the dependency-leaf domain/runtime-capture.ts.
 
+import fs from "node:fs";
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TmuxAdapter } from "../tmux.js";
@@ -80,7 +81,43 @@ export interface TuiCliGatePattern {
   /** Must be one of ATTENTION_REQUIRED_READINESS_CODES. */
   code: string;
   reason: string;
+  /** Answer this gate once during the seat's own launch instead of stopping,
+   *  when every guard holds (see TuiCliGateAnswer). Otherwise the gate stays
+   *  attention_required. */
+  answer?: TuiCliGateAnswer;
 }
+
+/**
+ * A guarded automatic answer to a folder-trust style dialog. The base sends
+ * `keys` only when all of these hold, and otherwise leaves the gate to the
+ * operator:
+ *  1. it is the seat's own launch wait, and the dialog is on lines this launch
+ *     printed (after the positional baseline), never in older scrollback or in
+ *     checkReady;
+ *  2. `dialogPath` extracts a path from the dialog and, normalized, it equals
+ *     the seat cwd (or its realpath) exactly: no prefix or substring match;
+ *  3. the option currently selected on screen (the line carrying
+ *     `selectionMarker`) reads exactly `expectOptionText`, so the cursor
+ *     position is verified, never assumed;
+ *  4. it has not been answered yet in this launch. If the gate is still on
+ *     screen after the answer settles, the launch fails as attention_required.
+ * Each answer is logged and recorded in the seat's launch.json (gateAnswers).
+ */
+export interface TuiCliGateAnswer {
+  /** tmux keys that choose the selected option, e.g. ["Enter"]. */
+  keys: readonly string[];
+  /** The selected option's text, after the marker and any "1." numbering. */
+  expectOptionText: string;
+  /** Marks the selected option. Default "❯". */
+  selectionMarker?: string;
+  /** The folder the dialog names, unwrapped from the CLI's layout, or null. */
+  dialogPath(screen: string): string | null;
+  /** What the answer means, for the log and the launch record. */
+  describe: string;
+}
+
+/** Polls the gate may keep showing after an answer before it counts as not taken. */
+const ANSWER_SETTLE_POLLS = 3;
 
 export interface TuiCliErrorPattern {
   pattern: RegExp;
@@ -163,7 +200,7 @@ export interface TuiCliRuntimeSpec {
 
 type PaneState =
   | { kind: "ready" }
-  | { kind: "gate"; code: string; reason: string }
+  | { kind: "gate"; gate: TuiCliGatePattern }
   | { kind: "error"; pattern: TuiCliErrorPattern }
   | { kind: "at_shell" }
   | { kind: "pending" };
@@ -199,6 +236,9 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     for (const gate of spec.gatePatterns ?? []) {
       if (!ATTENTION_REQUIRED_READINESS_CODES.has(gate.code)) {
         throw new Error(`${spec.descriptor.id}: gate code "${gate.code}" is not an attention-required readiness code`);
+      }
+      if (gate.answer && (gate.answer.keys.length === 0 || !gate.answer.expectOptionText.trim())) {
+        throw new Error(`${spec.descriptor.id}: gate "${gate.code}" answer needs keys and expectOptionText`);
       }
     }
     for (const name of spec.env?.allow ?? []) {
@@ -381,7 +421,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     }
 
     const launchStartedAt = this.now();
-    this.writeLaunchRecord(seatStateDir, {
+    const record: LaunchRecord = {
       launchId: randomUUID(),
       runtimeId: id,
       sessionName,
@@ -390,7 +430,8 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       mode,
       ...(sessionToken ? { presetToken: sessionToken } : {}),
       ...(ownerConfigChanges.length ? { ownerConfigChanges } : {}),
-    });
+    };
+    this.writeLaunchRecord(seatStateDir, record);
 
     // Mark where this launch's output starts, so ready, gate, and error text
     // left in a reused pane's scrollback never counts.
@@ -402,7 +443,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     const sent = await this.tmux.sendShellCommand(sessionName, command);
     if (!sent.ok) return { ok: false, error: `Failed to send launch command: ${sent.message}` };
 
-    const waited = await this.waitForReady(sessionName, window);
+    const waited = await this.waitForReady(sessionName, window, { binding, seatStateDir, record });
     if (!waited.ok) return waited;
 
     const appliedLaunch = this.spec.observeLaunch?.(input);
@@ -435,7 +476,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     const { state } = await this.readPane(binding.tmuxSession);
     switch (state.kind) {
       case "ready": return { ready: true };
-      case "gate": return { ready: false, reason: state.reason, code: state.code };
+      case "gate": return { ready: false, reason: state.gate.reason, code: state.gate.code };
       case "error": return { ready: false, reason: state.pattern.reason, code: state.pattern.code ?? "runtime_error" };
       case "at_shell":
         return { ready: false, reason: `the pane is back at a shell (${this.runtime} process gone)`, code: "runtime_exited" };
@@ -562,17 +603,40 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     }
   }
 
-  private async waitForReady(sessionName: string, window: LaunchWindow): Promise<{ ok: true } | LaunchFailure> {
+  private async waitForReady(
+    sessionName: string,
+    window: LaunchWindow,
+    launch: { binding: NodeBinding; seatStateDir: string; record: LaunchRecord },
+  ): Promise<{ ok: true } | LaunchFailure> {
     const timeoutMs = this.spec.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT_MS;
     const pollMs = this.spec.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     const attempts = Math.max(1, Math.ceil(timeoutMs / pollMs));
     let sawRuntime = false;
+    let answered = null as { gate: TuiCliGatePattern; pollsSince: number } | null;
     let last: { state: PaneState; content: string } = { state: { kind: "pending" }, content: "" };
     for (let attempt = 0; attempt < attempts; attempt++) {
       last = await this.readPane(sessionName, window);
       const { state, content } = last;
       if (state.kind === "ready") return { ok: true };
-      if (state.kind === "gate") return this.failure(state.reason, "attention_required", content);
+      if (state.kind === "gate") {
+        if (answered?.gate === state.gate) {
+          // The answer was sent once; give the dialog a few polls to close.
+          answered.pollsSince++;
+          if (answered.pollsSince >= ANSWER_SETTLE_POLLS) {
+            return this.failure(`${state.gate.reason} (still showing after OpenRig answered it)`, "attention_required", content);
+          }
+        } else if (state.gate.answer && !answered) {
+          const fresh = window.line === null ? freshLines(content, window.lines) : content;
+          const refusal = this.answerRefusal(state.gate, state.gate.answer, fresh, launch.binding);
+          if (refusal) return this.failure(`${state.gate.reason} (not answered automatically: ${refusal})`, "attention_required", content);
+          const sent = await this.tmux.sendKeys(sessionName, [...state.gate.answer.keys]);
+          if (!sent.ok) return this.failure(`${state.gate.reason} (sending the answer failed: ${sent.message})`, "attention_required", content);
+          answered = { gate: state.gate, pollsSince: 0 };
+          this.recordGateAnswer(launch, state.gate, state.gate.answer);
+        } else {
+          return this.failure(state.gate.reason, "attention_required", content);
+        }
+      }
       if (state.kind === "error") return this.failure(state.pattern.reason, state.pattern.recovery ?? "attention_required", content);
       if (state.kind === "at_shell") {
         // Right after typing the pane is still at the shell, so a shell alone
@@ -595,6 +659,35 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       ? "the pane is still at a shell (the CLI exited or never started)"
       : "timed out waiting for the CLI to report ready";
     return this.failure(why, "attention_required", last.content);
+  }
+
+  /** Why a gate answer must not be sent, or null when every guard holds. */
+  private answerRefusal(gate: TuiCliGatePattern, answer: TuiCliGateAnswer, fresh: string, binding: NodeBinding): string | null {
+    if (!gate.pattern.test(fresh)) return "the dialog is not in this launch's output";
+    let named: string | null;
+    try {
+      named = answer.dialogPath(fresh);
+    } catch {
+      named = null;
+    }
+    if (!named) return "the dialog does not name a folder OpenRig could read";
+    const folder = normalizeDialogPath(named, this.homedir);
+    if (!cwdKeys(binding.cwd).includes(folder)) return "the dialog names a different folder than the seat's cwd";
+    const selected = selectedOptions(fresh, answer.selectionMarker ?? "❯");
+    if (selected.length !== 1) return "the selected option could not be read";
+    if (selected[0] !== answer.expectOptionText.trim()) return `the selected option is "${selected[0]}", not "${answer.expectOptionText.trim()}"`;
+    return null;
+  }
+
+  private recordGateAnswer(
+    launch: { seatStateDir: string; record: LaunchRecord },
+    gate: TuiCliGatePattern,
+    answer: TuiCliGateAnswer,
+  ): void {
+    const entry = { code: gate.code, option: answer.expectOptionText.trim(), describe: answer.describe, answeredAt: this.now().toISOString() };
+    console.log(`[openrig] ${this.runtime}: answered ${gate.code} with "${entry.option}" (${answer.describe}) for ${launch.record.sessionName} in ${launch.record.cwd}`);
+    launch.record.gateAnswers = [...(launch.record.gateAnswers ?? []), entry];
+    this.writeLaunchRecord(launch.seatStateDir, launch.record);
   }
 
   private failure(reason: string, recovery: HarnessLaunchRecovery, content: string): LaunchFailure {
@@ -629,7 +722,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     // scrollback: gate, error, and ready text there is stale here.
     if (atShell) return { state: { kind: "at_shell" }, content };
     for (const gate of this.spec.gatePatterns ?? []) {
-      if (gate.pattern.test(content)) return { state: { kind: "gate", code: gate.code, reason: gate.reason }, content };
+      if (gate.pattern.test(content)) return { state: { kind: "gate", gate }, content };
     }
     const error = this.matchError(window && window.line === null ? freshLines(content, window.lines) : content);
     if (error) return { state: { kind: "error", pattern: error }, content };
@@ -704,6 +797,65 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   private logSkip(why: string, path: string): void {
     console.log(`[openrig] skip: ${why} (file=${path})`);
   }
+}
+
+/** The seat cwd as given and its realpath, normalized for exact comparison. */
+function cwdKeys(cwd: string): string[] {
+  const keys = new Set([trimSlash(nodePath.resolve(cwd))]);
+  try {
+    keys.add(trimSlash(fs.realpathSync.native(cwd)));
+  } catch {
+    // A cwd that does not exist keeps the resolved key only.
+  }
+  return [...keys];
+}
+
+function normalizeDialogPath(raw: string, homedir: string): string {
+  const path = raw.trim();
+  const expanded = path === "~" ? homedir : path.startsWith("~/") ? nodePath.join(homedir, path.slice(2)) : path;
+  return trimSlash(nodePath.resolve(expanded));
+}
+
+function trimSlash(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, "") : path;
+}
+
+/** Option texts on lines carrying the selection marker, with box borders and
+ *  "1." style numbering removed. Empty texts (an idle input prompt) are skipped. */
+function selectedOptions(screen: string, marker: string): string[] {
+  const out: string[] = [];
+  for (const line of screen.split("\n")) {
+    const at = line.indexOf(marker);
+    if (at < 0) continue;
+    const text = line.slice(at + marker.length)
+      .replace(/[│┃║]+[\s│┃║]*$/, "")
+      .trim()
+      .replace(/^\d+[.)]\s*/, "");
+    if (text) out.push(text);
+  }
+  return out;
+}
+
+/** Text inside box borders, with lines the CLI hard-wrapped at the box edge
+ *  joined back together. Runtimes use it in TuiCliGateAnswer.dialogPath. */
+export function unwrapBoxedLines(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  let joinNext = false;
+  for (const line of lines) {
+    const inner = line.replace(/^[\s│┃║]*[│┃║]\s?/, "").replace(/\s?[│┃║][\s│┃║]*$/, "");
+    const text = inner.trimEnd();
+    if (/^[\s─━═╭╮╰╯┌┐└┘├┤┬┴┼]*$/.test(text)) {
+      // A rule or box corner row separates, never continues, wrapped text.
+      out.push("");
+      joinNext = false;
+      continue;
+    }
+    if (joinNext && out.length) out[out.length - 1] += text.trimStart();
+    else out.push(text.trimStart());
+    // Filled to the border (no padding left): the next line continues it.
+    joinNext = text.length > 0 && inner.length === text.length;
+  }
+  return out;
 }
 
 function freshLines(content: string, baseline: ReadonlySet<string>): string {

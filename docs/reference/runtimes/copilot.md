@@ -51,13 +51,30 @@ you set in Copilot's own settings still applies; OpenRig does not override it.
 
 ## Folder trust
 
-`--yolo` does not skip Copilot's "Confirm folder trust" dialog. Before each
-launch OpenRig adds the seat's working directory (and its resolved real path)
-to `trustedFolders` in `$COPILOT_HOME/settings.json` (default
-`~/.copilot/settings.json`). The edit is merge-only: it adds entries and never
-removes or rewrites anything else. If the file does not parse as JSON (for
-example it contains comments), OpenRig leaves it untouched and the launch
-reports `trust_gate` instead.
+Copilot asks "Do you trust the files in this folder?" the first time it runs
+in a folder, and `--yolo` does not skip that dialog. OpenRig writes no Copilot
+configuration for it. Instead, during the seat's own launch OpenRig chooses
+**1. Yes**, which trusts the folder for that Copilot session only; nothing is
+remembered for later sessions. It answers only when all of these hold:
+
+- the dialog appeared after this launch started (never old pane text);
+- the folder the dialog names is exactly the seat's working directory (or its
+  resolved real path), not a parent, a sibling such as `/repo-old`, or any
+  other folder;
+- the option selected on screen reads `Yes`, so the persistent "Yes, and
+  remember" option is never chosen;
+- it has not already answered in this launch.
+
+If any of these fail, or the dialog is still showing after the answer, the
+launch reports `attention_required` with the code `trust_gate` and the pane
+text as evidence. Each answer is logged by the daemon and recorded as
+`gateAnswers` in the seat's `launch.json` under the OpenRig state directory.
+This applies with both `floor` and `full_bypass`, because OpenRig only
+launches into the working directory the rig spec chose.
+
+Copilot's own `trustedFolders` setting is not used: Copilot moves that list
+from `settings.json` into its self-managed `config.json` at startup, and seats
+that start at the same time lose entries in that move.
 
 ## Resume
 
@@ -92,7 +109,11 @@ new session. Fork is not supported (Copilot has no fork flag).
 Against Copilot CLI 1.0.89 in an isolated tmux server with a throwaway home,
 without signing in: `--session-id` creating `session-state/<uuid>/workspace.yaml`
 at startup; `--yolo` still showing the folder-trust dialog; `trustedFolders`
-suppressing it; the unauthenticated idle screen; `--resume=<unknown id>`
+suppressing it for one launch, then being moved into `config.json`, and
+three concurrent launches all showing the dialog after that move lost their
+entries; the trust dialog, idle screen, and resume error at 80x24 with a long
+working directory (the path wraps inside the dialog box and is shortened with
+`...` on the idle screen); the unauthenticated idle screen; `--resume=<unknown id>`
 printing `No session, task, or name matched` and exiting 1; `AGENTS.md` and
 `.agents/skills` discovery (`copilot instruction list`, `copilot skill list`).
 The signed-in ready screen was not captured; its test fixture is the live
