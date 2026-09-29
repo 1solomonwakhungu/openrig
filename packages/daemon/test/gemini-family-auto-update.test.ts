@@ -9,11 +9,13 @@
 import nodePath from "node:path";
 import { describe, it, expect } from "vitest";
 import {
-  QWEN_AUTO_UPDATE_GUARD, buildSeatSystemDefaults, npmContainmentEnv, operatorSystemDefaultsPath, seatNpmPrefix, seatSystemDefaultsPath,
+  QWEN_AUTO_UPDATE_GUARD, buildSeatSystemDefaults, npmContainmentEnv, operatorSystemDefaultsPath, seatNpmCache, seatNpmPrefix,
+  seatSystemDefaultsPath,
 } from "../src/adapters/cli/gemini-family/auto-update.js";
 import { GEMINI_REGISTRATION } from "../src/adapters/cli/gemini/index.js";
 import { QWEN_REGISTRATION } from "../src/adapters/cli/qwen/index.js";
 import type { CliRuntimeRegistration } from "../src/adapters/cli/types.js";
+import { ATTENTION_REQUIRED_READINESS_CODES, isAttentionRequiredReadinessCode } from "../src/domain/runtime-adapter.js";
 import {
   HARNESS_CWD, HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs, mockTmux,
 } from "./helpers/tui-cli-adapter-harness.js";
@@ -28,7 +30,14 @@ describe("auto-update guard (pure)", () => {
     expect(npmContainmentEnv("/state/gemini/s@r")).toEqual({
       NPM_CONFIG_PREFIX: "/state/gemini/s@r/npm-global",
       npm_config_prefix: "/state/gemini/s@r/npm-global",
+      NPM_CONFIG_CACHE: "/state/gemini/s@r/npm-cache",
+      npm_config_cache: "/state/gemini/s@r/npm-cache",
     });
+  });
+
+  it("self_update is an attention-required readiness code", () => {
+    expect(isAttentionRequiredReadinessCode("self_update")).toBe(true);
+    expect(ATTENTION_REQUIRED_READINESS_CODES.has("self_update")).toBe(true);
   });
 
   it("resolves qwen's operator system-defaults path: env override, else the platform default", () => {
@@ -61,12 +70,14 @@ describe.each([
   const seatDir = nodePath.join(HARNESS_STATE_ROOT, id, HARNESS_SESSION);
   const prefix = seatNpmPrefix(seatDir);
 
-  it("sets the seat npm prefix and creates it, on fresh launches", async () => {
+  it("sets the seat npm prefix and cache and creates them, on fresh launches", async () => {
     const { adapter, pane, files } = launchRig(registration, {});
     expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
     expect(pane.typed[0]).toContain(`'NPM_CONFIG_PREFIX=${prefix}'`);
     expect(pane.typed[0]).toContain(`'npm_config_prefix=${prefix}'`);
+    expect(pane.typed[0]).toContain(`'NPM_CONFIG_CACHE=${seatNpmCache(seatDir)}'`);
     expect(files.dirs.has(prefix)).toBe(true);
+    expect(files.dirs.has(seatNpmCache(seatDir))).toBe(true);
   });
 
   it("sets it on resume too", async () => {

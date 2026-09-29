@@ -19,7 +19,8 @@ import {
 } from "./launch-args.js";
 import type { GeminiFamilyPanePatterns } from "./pane-patterns.js";
 import {
-  buildSeatSystemDefaults, npmContainmentEnv, operatorSystemDefaultsPath, seatNpmPrefix, seatSystemDefaultsPath, type AutoUpdateGuard,
+  buildSeatSystemDefaults, npmContainmentEnv, operatorSystemDefaultsPath, seatNpmCache, seatNpmPrefix, seatSystemDefaultsPath,
+  type AutoUpdateGuard,
 } from "./auto-update.js";
 import type { ResumeTargetCheck, SessionStoreContext, SessionStoreFs } from "./session-store.js";
 
@@ -106,7 +107,10 @@ export function createGeminiFamilySpec(
     prepareLaunch: (ctx: TuiCliPrepareContext) => {
       const errors: unknown[] = [];
       const guard = runtime.autoUpdateGuard;
-      const steps = [() => ctx.fs.mkdirp(seatNpmPrefix(ctx.seatStateDir))];
+      const steps = [() => {
+        ctx.fs.mkdirp(seatNpmPrefix(ctx.seatStateDir));
+        ctx.fs.mkdirp(seatNpmCache(ctx.seatStateDir));
+      }];
       if (guard) steps.push(() => writeSeatSystemDefaults(ctx, guard));
       if (runtime.prepareLaunch) steps.push(() => runtime.prepareLaunch!(ctx, store(ctx.binding.cwd, ctx.fs, ctx.homedir)));
       for (const step of steps) {

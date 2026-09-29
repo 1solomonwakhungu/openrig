@@ -65,8 +65,9 @@ export const GEMINI_PANE_PATTERNS: GeminiFamilyPanePatterns = {
     // npm containment does not cover (a global npm install lands in the seat's
     // NPM_CONFIG_PREFIX, see auto-update.ts, so it is not matched here). Volta,
     // pnpm, yarn, and bun globals, and qwen's standalone installer, write the
-    // operator's install: fail loudly with evidence.
-    { pattern: /(?:Installed with (?:Volta|pnpm|yarn|bun)|Standalone install detected)\. Attempting to automatically update/, reason: "gemini started updating the operator's install through a package manager outside OpenRig's npm containment; stop the seat, check that install, and set general.enableAutoUpdate false in the user settings", code: "self_update" },
+    // operator's install. This DETECTS the update and reports it loudly; it
+    // cannot prevent it (the CLI spawns the install when it announces it).
+    { pattern: /(?:Installed with (?:Volta|pnpm|yarn|bun)|Standalone install detected)\. Attempting to automatically update/, reason: "gemini started updating the operator's install through a package manager outside OpenRig's npm containment; set general.enableAutoUpdate false in your own user settings to stop this, and check that install", code: "self_update" },
     // Content-triggered startup dialogs (repo or owner config, not env): fail
     // fast with evidence instead of timing out.
     { pattern: /New Agents Discovered/, reason: "gemini found unacknowledged project agents in .gemini/agents; acknowledge or decline them in the pane", code: "startup_dialog" },
@@ -100,8 +101,9 @@ export const QWEN_PANE_PATTERNS: GeminiFamilyPanePatterns = {
     // npm containment does not cover (a global npm install lands in the seat's
     // NPM_CONFIG_PREFIX, see auto-update.ts, so it is not matched here). Volta,
     // pnpm, yarn, and bun globals, and qwen's standalone installer, write the
-    // operator's install: fail loudly with evidence.
-    { pattern: /(?:Installed with (?:Volta|pnpm|yarn|bun)|Standalone install detected)\. Attempting to automatically update/, reason: "qwen started updating the operator's install through a package manager outside OpenRig's npm containment; stop the seat, check that install, and set general.enableAutoUpdate false in the user settings", code: "self_update" },
+    // operator's install. This DETECTS the update and reports it loudly; it
+    // cannot prevent it (the CLI spawns the install when it announces it).
+    { pattern: /(?:Installed with (?:Volta|pnpm|yarn|bun)|Standalone install detected)\. Attempting to automatically update/, reason: "qwen started updating the operator's install through a package manager outside OpenRig's npm containment; set general.enableAutoUpdate false in your own user settings to stop this, and check that install", code: "self_update" },
     // Content-triggered startup dialogs (repo or owner config, not env).
     { pattern: /Command Format Migration/, reason: "qwen found legacy TOML commands in .qwen/commands or ~/.qwen/commands and asks to migrate them", code: "startup_dialog" },
     { pattern: /Approve this server/, reason: "qwen is asking to approve a project MCP server", code: "startup_dialog" },

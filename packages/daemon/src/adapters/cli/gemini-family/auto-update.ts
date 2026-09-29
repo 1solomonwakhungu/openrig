@@ -11,6 +11,7 @@
 //    npm_config_prefix) to <seatStateDir>/npm-global, so a self-update's
 //    `npm install -g` lands in the seat's own prefix. The seat keeps running the
 //    operator's installed binary; the downloaded copy is never on its PATH.
+//    NPM_CONFIG_CACHE points at <seatStateDir>/npm-cache, so ~/.npm is untouched.
 // 2. qwen only: the launch env points QWEN_CODE_SYSTEM_DEFAULTS_PATH at a
 //    seat-owned copy of the operator's system defaults with
 //    general.enableAutoUpdate false, so qwen does not download at all. (gemini
@@ -45,10 +46,16 @@ export function seatNpmPrefix(seatStateDir: string): string {
   return nodePath.join(seatStateDir, "npm-global");
 }
 
+/** Per-seat npm cache, so a self-update's download never touches ~/.npm. */
+export function seatNpmCache(seatStateDir: string): string {
+  return nodePath.join(seatStateDir, "npm-cache");
+}
+
 /** Launch env for the npm containment (npm reads either spelling). */
 export function npmContainmentEnv(seatStateDir: string): Record<string, string> {
   const prefix = seatNpmPrefix(seatStateDir);
-  return { NPM_CONFIG_PREFIX: prefix, npm_config_prefix: prefix };
+  const cache = seatNpmCache(seatStateDir);
+  return { NPM_CONFIG_PREFIX: prefix, npm_config_prefix: prefix, NPM_CONFIG_CACHE: cache, npm_config_cache: cache };
 }
 
 export function seatSystemDefaultsPath(seatStateDir: string): string {
