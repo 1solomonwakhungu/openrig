@@ -18,6 +18,8 @@ export interface ClineErrorPattern {
   /** "retry_fresh": the requested session is gone; the caller stops and asks
    *  instead of silently starting fresh. */
   recovery?: "retry_fresh";
+  /** Readiness code reported while the TUI still shows the error. */
+  code?: string;
 }
 
 export const CLINE_READY_PATTERNS: readonly RegExp[] = [
@@ -44,9 +46,15 @@ export const CLINE_GATE_PATTERNS: readonly ClineGatePattern[] = [
 
 export const CLINE_ERROR_PATTERNS: readonly ClineErrorPattern[] = [
   {
+    // zsh, bash, and env (every managed launch is prefixed with `env`).
+    pattern: /command not found: cline|cline: command not found|env: [\u2018']?cline[\u2019']?: No such file or directory/,
+    reason: "cline is not installed or not on the pane's PATH (npm install -g cline)",
+  },
+  {
     // `cline --id <gone>` stays in the TUI and prints this instead of exiting.
     pattern: /Error: Unknown session: /,
     reason: "cline does not know the persisted session id",
     recovery: "retry_fresh",
+    code: "session_missing",
   },
 ];

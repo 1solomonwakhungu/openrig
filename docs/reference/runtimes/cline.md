@@ -96,8 +96,20 @@ guess.
 
 - No per-seat model (see "Model selection"). All cline seats on a host share
   the operator's Cline provider and model.
-- The pane's foreground process is `node` (the npm launcher), which is too broad
-  to identify Cline. Pane-command fingerprinting is not used.
+- The pane's foreground process is `node` (the npm launcher). Discovery
+  identifies Cline by the pane process tree's argv (`.../cline/bin/cline` or
+  `.../bin/.cline`) instead of the pane command.
+- Stop does not reap the pane's process tree. While a TUI runs, Cline's shared
+  hub daemon is its child process, so reaping would kill the hub every Cline
+  seat on the host uses. Killing the tmux session ends the TUI; the hub keeps
+  running, as it does after an operator quits Cline (verified).
+- A launch where `cline` is not on the pane's PATH fails fast with
+  `attention_required`.
+- Cline draws its TUI on the terminal alternate screen (verified), which leaves
+  no tmux scrollback, so `rig transcript` for a cline seat stays thin. Launch
+  readiness reads the whole alternate screen once cline holds the foreground.
+  First paint took over 7 seconds in the verification run; the launch waits up
+  to 30.
 - The busy (model working) footer has not been verified with a live provider.
 
 ## Verification record
@@ -107,5 +119,5 @@ scratch `HOME`, with a dummy provider key (no real account): `--help`, TUI
 screens (sign-in, notice modals, home, chat), `--auto-approve true|false`
 footer, `-m` persisting into `providers.json`, `CLINE_MODEL` having no effect on the TUI, `CLINE_DISABLE_CLINE_PASS_NOTICE`,
 lazy session creation, the session metadata layout, `--id` resume with history,
-and the unknown-session error. The skills and rules search paths were read from
+the unknown-session error, and the alternate screen under `exec` launch. The skills and rules search paths were read from
 the bundled source. The pane fixtures used in tests are these live captures.

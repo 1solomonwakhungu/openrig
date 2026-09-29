@@ -1,9 +1,12 @@
-// Hermetic tests for the Cline CLI runtime pieces: launch argv and posture,
-// session-id validation, the on-disk session store (capture + resume check),
-// and pane patterns against live cline 3.0.65 captures. No real binary.
+// Hermetic tests for the Cline CLI runtime adapter: the shared TUI CLI
+// contract suite, then cline specifics (launch argv and posture, the seat model
+// refusal, session-id validation, the on-disk session store for capture and the
+// resume check, and pane patterns against live cline 3.0.65 captures). No real
+// binary, no network.
 
 import nodePath from "node:path";
-import { readFileSync } from "node:fs";
+import os from "node:os";
+import fs, { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
@@ -15,6 +18,11 @@ import {
 } from "../src/adapters/cli/cline/sessions.js";
 import { CLINE_READY_PATTERNS, CLINE_GATE_PATTERNS, CLINE_ERROR_PATTERNS } from "../src/adapters/cli/cline/patterns.js";
 import { ATTENTION_REQUIRED_READINESS_CODES } from "../src/domain/runtime-adapter.js";
+import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
+import { CLINE_DESCRIPTOR, CLINE_REGISTRATION } from "../src/adapters/cli/cline/index.js";
+import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
+import { HARNESS_HOME, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux } from "./helpers/tui-cli-adapter-harness.js";
 
 const FIXTURES = nodePath.join(nodePath.dirname(fileURLToPath(import.meta.url)), "fixtures", "cli-panes", "cline");
 const pane = (name: string) => readFileSync(nodePath.join(FIXTURES, name), "utf8");
@@ -224,5 +232,126 @@ describe("cline pane patterns (live captures)", () => {
   it("an empty or shell-only pane is pending", () => {
     expect(classify("")).toBe("pending");
     expect(classify("user@host ~/work/repo % cline --auto-approve false\n")).toBe("pending");
+  });
+});
+
+// ── adapter (TUI CLI base + contract) ───────────────────────────────────────
+
+const VALID_ID = "1790702191676_lovnf";
+const HARNESS_SESSIONS = `${HARNESS_HOME}/.cline/data/sessions`;
+
+runTuiCliAdapterContract({
+  registration: CLINE_REGISTRATION,
+  readyScreen: pane("home-ready.txt"),
+  runningCommand: "node",
+  gateScreens: [
+    { screen: pane("login-required.txt"), code: "login_required" },
+    { screen: pane("announcement-modal.txt"), code: "update_gate" },
+  ],
+  errorScreens: [pane("resume-unknown-session.txt")],
+  earlyExit: { screen: "zsh: command not found: cline", recovery: "attention_required" },
+  validResumeToken: VALID_ID,
+  invalidResumeToken: "../escape",
+  missingResumeToken: "1790000000000_nopex",
+  seedResumeTarget: ({ fs: seatFs, homedir, token }) => {
+    const dir = nodePath.join(homedir, ".cline", "data", "sessions", token);
+    seatFs.mkdirp(dir);
+    seatFs.writeFile(nodePath.join(dir, `${token}.json`), "{}");
+  },
+  // A seat model is refused (see "cline seat model" below).
+  passesModel: false,
+  seedSession: ({ cwd, homedir }) => {
+    const id = `${Date.now()}_seed0`;
+    const dir = nodePath.join(homedir, ".cline", "data", "sessions", id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, `${id}.json`), JSON.stringify({
+      version: 1, session_id: id, source: "cli", pid: 4242, started_at: new Date().toISOString(),
+      interactive: true, status: "idle", cwd, workspace_root: cwd,
+    }));
+    fs.writeFileSync(nodePath.join(dir, `${id}.messages.json`), "[]");
+    return id;
+  },
+});
+
+describe("cline adapter", () => {
+  function launchRig(frames = [{ command: "node", content: pane("home-ready.txt") }], env: NodeJS.ProcessEnv = {}, files: Record<string, string> = {}) {
+    const tmuxPane = mockTmux([atShell(), ...frames]);
+    const adapter = CLINE_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: harnessMemFs(files), env }));
+    return { adapter, pane: tmuxPane };
+  }
+
+  it("is registered under runtime: cline", () => {
+    expect(getRuntimeDescriptor("cline")).toBe(CLINE_DESCRIPTOR);
+  });
+
+  it("types the exact floor launch with the additive launch env", async () => {
+    const { adapter, pane: p } = launchRig();
+    expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+    expect(p.typed).toEqual([
+      "exec env 'CLINE_DISABLE_CLINE_PASS_NOTICE=1' 'CLINE_NO_AUTO_UPDATE=1' 'cline' '--auto-approve' 'false'",
+    ]);
+  });
+
+  it("types --auto-approve true under OPENRIG_YOLO and a full_bypass policy", async () => {
+    for (const [binding, env] of [[harnessBinding(), { OPENRIG_YOLO: "1" }], [harnessBinding({ launchPosture: "full_bypass" }), {}]] as const) {
+      const { adapter, pane: p } = launchRig(undefined, env);
+      await adapter.launchHarness(binding, { name: "x" });
+      expect(p.typed[0]).toContain("'--auto-approve' 'true'");
+    }
+  });
+
+  it("refuses a seat model before typing anything", async () => {
+    const { adapter, pane: p } = launchRig();
+    const result = await adapter.launchHarness(harnessBinding({ model: "claude-sonnet-4-5" }), { name: "x" });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(CLINE_MODEL_UNSUPPORTED_ERROR) });
+    expect(p.typed).toEqual([]);
+  });
+
+  it("resumes with --id when the session is still on disk", async () => {
+    const files = { [`${HARNESS_SESSIONS}/${VALID_ID}/${VALID_ID}.json`]: "{}" };
+    const { adapter, pane: p } = launchRig(undefined, {}, files);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: VALID_ID });
+    expect(result).toMatchObject({ ok: true, resumeToken: VALID_ID, resumeType: "cline_session_id" });
+    expect(p.typed[0]).toContain(`'--id' '${VALID_ID}'`);
+  });
+
+  it("maps the in-TUI unknown-session error to retry_fresh", async () => {
+    const files = { [`${HARNESS_SESSIONS}/${VALID_ID}/${VALID_ID}.json`]: "{}" };
+    const { adapter } = launchRig([{ command: "node", content: pane("resume-unknown-session.txt") }], {}, files);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: VALID_ID });
+    expect(result).toMatchObject({ ok: false, recovery: "retry_fresh" });
+  });
+
+  it("projects skills into <cwd>/.cline/skills", () => {
+    expect(CLINE_DESCRIPTOR.skillsDir!({ cwd: "/work/repo" })).toBe("/work/repo/.cline/skills");
+  });
+
+  it("does not reap the pane process tree (the shared hub daemon lives there)", () => {
+    expect(CLINE_DESCRIPTOR.reapProcessTreeOnStop).toBe(false);
+    expect(CLINE_DESCRIPTOR.paneCommands).toBeUndefined();
+  });
+
+  it.each([
+    // Live process tree of a pane running cline 3.0.65 (npm, darwin-arm64).
+    ["node /usr/local/lib/node_modules/cline/bin/cline --auto-approve false", true],
+    ["/usr/local/lib/node_modules/cline/bin/.cline --auto-approve false", true],
+    ["/opt/homebrew/bin/cline --auto-approve false", true],
+    ["node /opt/tools/clinepass/bin/server.js", false],
+    ["node /usr/lib/node_modules/openrig/dist/index.js --cwd /work/cline", false],
+    ["vim cline.md", false],
+  ])("processMatch %j -> %s", (command, expected) => {
+    expect(processMatches(command, CLINE_DESCRIPTOR.processMatch!)).toBe(expected);
+  });
+
+  it("late capture needs the launch time and returns null otherwise", () => {
+    const capture = CLINE_DESCRIPTOR.captureResumeToken!;
+    const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-cline-"));
+    try {
+      const input = { sessionName: "s", cwd: "/work/repo", seatStateDir: nodePath.join(tmp, "seat"), homedir: tmp };
+      expect(capture(input, {})).toBeNull();
+      expect(capture({ ...input, launchStartedAt: new Date() }, {})).toBeNull();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

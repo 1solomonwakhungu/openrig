@@ -16,6 +16,8 @@
 // - `--id <session-id>` resumes an existing session and stays interactive.
 //   There is no fork primitive.
 
+import { validateIdShapedToken, type ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
+
 export const CLINE_RUNTIME_ID = "cline";
 export const CLINE_BINARY = "cline";
 export const CLINE_RESUME_TYPE = "cline_session_id";
@@ -65,24 +67,19 @@ export function buildClineArgv(input: ClineArgvInput): string[] {
   return argv;
 }
 
-export type ClineTokenResult = { ok: true; token: string } | { ok: false; error: string };
-
-const SESSION_ID_RE = /^[A-Za-z0-9._-]+$/;
-const MAX_SESSION_ID_LEN = 200;
+export type ClineTokenResult = ResumeTokenFormatResult;
 
 /** Format floor for a Cline session id (observed shape: `<epoch ms>_<5 chars>`,
- *  e.g. 1790702191676_lovnf). The floor is the shell- and path-inert id
- *  charset rather than the exact observed shape, so a future id format change
+ *  e.g. 1790702191676_lovnf): the shared id-shaped floor (shell- and path-inert
+ *  charset, length cap) plus no bare "." or "..", since the id names a
+ *  directory. It is not the exact observed shape, so a future id format change
  *  degrades to a visible "Unknown session" instead of a silent refusal. Never
  *  echoes the token (resume tokens are credential-class). */
 export function validateClineSessionId(raw: string): ClineTokenResult {
   const token = raw.trim();
   if (!token) return { ok: false, error: "Resume token is empty." };
-  if (token.length > MAX_SESSION_ID_LEN) {
-    return { ok: false, error: `Resume token is too long (max ${MAX_SESSION_ID_LEN} characters).` };
-  }
-  if (!SESSION_ID_RE.test(token) || token === "." || token === "..") {
+  if (token === "." || token === "..") {
     return { ok: false, error: "Resume token contains disallowed characters (allowed: letters, digits, '.', '_', '-')." };
   }
-  return { ok: true, token };
+  return validateIdShapedToken(token);
 }
