@@ -111,6 +111,15 @@ Not supported. Gemini CLI has no fork or branch-session primitive (`/rewind` and
 - Guidance: OpenRig merges managed blocks into `GEMINI.md` in the seat cwd, the file Gemini CLI reads by default (it does not read `AGENTS.md` unless `context.fileName` says so). `rig-role` content is delivered per seat through the pane, not merged. Rig teardown removes OpenRig's managed blocks from `GEMINI.md`.
 - Skills: projected into `<cwd>/.gemini/skills/<name>/SKILL.md`, a project skills location Gemini CLI discovers in trusted folders (see Launch posture).
 
+## Self-update
+
+Gemini CLI checks npm on launch and, unless `general.enableAutoUpdate` is `false`, updates itself in the background with the install command for how it was installed. For a global npm install that is `npm install -g @google/gemini-cli@latest`, which from a seat would write the operator's npm global prefix. There is no flag or environment variable that turns this off, Gemini CLI skips any system settings or system-defaults file not owned by root, and it ignores the key in workspace settings, so OpenRig contains the update instead:
+
+- Every managed launch (fresh and resume) sets `NPM_CONFIG_PREFIX` and `npm_config_prefix` to the seat's own `<OPENRIG_HOME>/state/gemini/<seat>/npm-global`. A self-update's `npm install -g` lands there. The seat keeps running the operator's installed `gemini`, and the operator's prefix is untouched (verified live: 0.61.0 in the operator prefix stayed 0.61.0 while the update wrote 0.62.0 under the seat prefix). The same prefix applies to any `npm install -g` the agent itself runs in the seat.
+- Gemini CLI still reports "Update successful! The new version will be used on your next run", but the next run uses the operator's binary again, so an out-of-date install downloads the update on every launch. To stop seat downloads entirely, set `"general": { "enableAutoUpdate": false }` in your own `~/.gemini/settings.json`.
+- Homebrew, npx, and project-local installs only print an update message; they never run an install.
+- Volta, pnpm, yarn, and bun global installs update through their own tools, which the npm prefix does not contain. If a launch shows "Installed with Volta/pnpm/yarn/bun. Attempting to automatically update now...", it fails fast with `attention_required`, code `self_update`, and pane evidence. Set `general.enableAutoUpdate` to `false` in `~/.gemini/settings.json` for those installs.
+
 ## Stop
 
 The `gemini` launcher is a small parent process that ignores SIGHUP and SIGTERM and waits for the real CLI child, which does not finish its SIGHUP cleanup once the pane is gone. Both processes outlive `tmux kill-session` (verified live). OpenRig therefore reaps the pane's process tree when it stops a `gemini` seat: it records the pane's processes before killing the session, sends SIGTERM to that process group, and SIGKILL to anything left. Stopping never relies on typing Ctrl-C into the pane.

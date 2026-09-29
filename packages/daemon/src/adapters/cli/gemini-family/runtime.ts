@@ -18,6 +18,9 @@ import {
   buildGeminiFamilyArgv, mintSessionToken, validateSessionToken, type GeminiFamilyDialect,
 } from "./launch-args.js";
 import type { GeminiFamilyPanePatterns } from "./pane-patterns.js";
+import {
+  buildSeatSystemDefaults, npmContainmentEnv, operatorSystemDefaultsPath, seatNpmPrefix, seatSystemDefaultsPath, type AutoUpdateGuard,
+} from "./auto-update.js";
 import type { ResumeTargetCheck, SessionStoreContext, SessionStoreFs } from "./session-store.js";
 
 /** Read-only node fs for descriptor hooks, which run outside any adapter
@@ -38,6 +41,27 @@ export interface GeminiFamilyRuntime {
   /** Literal env added to every launch (the pane env is otherwise inherited,
    *  so auth variables reach the CLI unchanged). */
   launchEnv?: Record<string, string>;
+  /** Disables self-update via a seat system-defaults copy (auto-update.ts).
+   *  Absent = the CLI ignores that layer (gemini); npm containment still applies. */
+  autoUpdateGuard?: AutoUpdateGuard;
+}
+
+/** Write the seat's system-defaults file: the operator's defaults (read-only
+ *  copy, when present) with auto-update off. Only the seat state dir is written. */
+export function writeSeatSystemDefaults(ctx: TuiCliPrepareContext, guard: AutoUpdateGuard): void {
+  const source = operatorSystemDefaultsPath(guard, ctx.env);
+  let operatorText: string | null = null;
+  try {
+    if (ctx.fs.exists(source)) operatorText = ctx.fs.readFile(source);
+  } catch {
+    operatorText = null; // unreadable: the seat gets only the guard settings
+  }
+  const { content, copied } = buildSeatSystemDefaults(guard, operatorText);
+  if (copied === "operator_defaults_unparseable") {
+    console.log(`[openrig] ${guard.envVar}: operator system defaults at ${source} did not parse as JSON; the seat copy carries only the auto-update guard`);
+  }
+  ctx.fs.mkdirp(ctx.seatStateDir);
+  ctx.fs.writeFile(seatSystemDefaultsPath(ctx.seatStateDir), content);
 }
 
 /** Build the TUI CLI spec for one runtime of the family. `deps` supplies the
@@ -69,10 +93,27 @@ export function createGeminiFamilySpec(
       const check = runtime.checkResumeTarget(store(cwd, fsOps, homedir), token);
       return check.ok ? { ok: true } : { ok: false, reason: check.reason, recovery: "retry_fresh" };
     },
-    ...(runtime.launchEnv ? { env: { set: () => ({ ...runtime.launchEnv }) } } : {}),
-    ...(runtime.prepareLaunch
-      ? { prepareLaunch: (ctx: TuiCliPrepareContext) => runtime.prepareLaunch!(ctx, store(ctx.binding.cwd, ctx.fs, ctx.homedir)) }
-      : {}),
+    // Every launch (fresh, fork, resume) reads the seat's system-defaults copy.
+    env: {
+      set: ({ seatStateDir }) => ({
+        ...runtime.launchEnv,
+        ...npmContainmentEnv(seatStateDir),
+        ...(runtime.autoUpdateGuard ? { [runtime.autoUpdateGuard.envVar]: seatSystemDefaultsPath(seatStateDir) } : {}),
+      }),
+    },
+    // Independent steps: a failure in one never skips the other; the base logs
+    // a thrown error and still launches.
+    prepareLaunch: (ctx: TuiCliPrepareContext) => {
+      const errors: unknown[] = [];
+      const guard = runtime.autoUpdateGuard;
+      const steps = [() => ctx.fs.mkdirp(seatNpmPrefix(ctx.seatStateDir))];
+      if (guard) steps.push(() => writeSeatSystemDefaults(ctx, guard));
+      if (runtime.prepareLaunch) steps.push(() => runtime.prepareLaunch!(ctx, store(ctx.binding.cwd, ctx.fs, ctx.homedir)));
+      for (const step of steps) {
+        try { step(); } catch (err) { errors.push(err); }
+      }
+      if (errors.length > 0) throw errors[0];
+    },
     readyPatterns: patterns.readyPatterns,
     gatePatterns: patterns.gatePatterns,
     errorPatterns: patterns.errorPatterns,

@@ -11,6 +11,7 @@ import type { CliRuntimeRegistration } from "../types.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { QWEN_DIALECT, validateSessionToken } from "../gemini-family/launch-args.js";
 import { QWEN_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
+import { QWEN_AUTO_UPDATE_GUARD } from "../gemini-family/auto-update.js";
 import {
   captureQwenForkChild, checkQwenResumeTarget, qwenRuntimeStatusExists, type SessionStoreContext,
 } from "../gemini-family/session-store.js";
@@ -105,5 +106,6 @@ export const QWEN_REGISTRATION: CliRuntimeRegistration = {
       }
       if (errors.length > 0) throw errors[0];
     },
+    autoUpdateGuard: QWEN_AUTO_UPDATE_GUARD,
   }, deps), deps),
 };

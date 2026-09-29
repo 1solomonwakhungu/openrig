@@ -70,5 +70,7 @@ export const GEMINI_REGISTRATION: CliRuntimeRegistration = {
     patterns: GEMINI_PANE_PATTERNS,
     checkResumeTarget: checkGeminiResumeTarget,
     launchEnv: GEMINI_LAUNCH_ENV,
+    // No autoUpdateGuard: gemini ignores non-root system defaults files; the
+    // npm containment (seat NPM_CONFIG_PREFIX) is the defense (auto-update.ts).
   }, deps), deps),
 };
