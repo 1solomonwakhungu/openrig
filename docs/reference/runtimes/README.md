@@ -9,6 +9,7 @@ adapter", for how to add one.
 
 One line per runtime, alphabetical by id:
 
+- `antigravity`: Antigravity CLI (`agy`). Resume by conversation id (captured late), no fork, managed `AGENTS.md` blocks. [antigravity.md](antigravity.md)
 - `claude-code`: Claude Code (`claude`). Resume, fork, managed `CLAUDE.md` blocks.
 - `codex`: Codex (`codex`). Resume, fork, managed `AGENTS.md` blocks.
 - `gemini`: Gemini CLI (`gemini`). Resume by minted session id, no fork, managed `GEMINI.md` blocks. See [gemini.md](gemini.md).

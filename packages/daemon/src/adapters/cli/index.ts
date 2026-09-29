@@ -4,6 +4,7 @@
 // adapter".
 
 import type { CliRuntimeRegistration } from "./types.js";
+import { ANTIGRAVITY_REGISTRATION } from "./antigravity/index.js";
 import { GEMINI_REGISTRATION } from "./gemini/index.js";
 import { GROK_REGISTRATION } from "./grok/index.js";
 import { KILO_REGISTRATION } from "./kilo/index.js";
@@ -11,6 +12,7 @@ import { OPENCODE_REGISTRATION } from "./opencode/index.js";
 import { QWEN_REGISTRATION } from "./qwen/index.js";
 
 export const CLI_RUNTIME_REGISTRATIONS: readonly CliRuntimeRegistration[] = [
+  ANTIGRAVITY_REGISTRATION,
   GEMINI_REGISTRATION,
   GROK_REGISTRATION,
   KILO_REGISTRATION,
