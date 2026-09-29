@@ -1,0 +1,247 @@
+// GitHub Copilot CLI (`copilot`): the runtime-specific pieces of the adapter.
+//
+// Everything here is pure (or takes an injected read-only fs) so it can be
+// tested without a real binary. Facts were verified against @github/copilot
+// 1.0.89 (`--help`, `help environment`, `help config`, and a live TUI run in an
+// isolated tmux server with a throwaway HOME, unauthenticated):
+// - `--session-id <uuid>` sets the UUID of a NEW session and creates
+//   <COPILOT_HOME>/session-state/<uuid>/workspace.yaml at startup, so the
+//   adapter mints the resume token itself instead of scraping it.
+// - `--resume=<id>` reopens an exact session (bare `--resume` opens a picker,
+//   which a managed launch must never do).
+// - `--yolo` (= `--allow-all`) auto-approves tools, paths, and URLs, but does
+//   NOT skip the folder-trust modal. Only `trustedFolders` in
+//   <COPILOT_HOME>/settings.json does.
+// - There is no fork flag.
+
+import nodePath from "node:path";
+import type { ForkSource } from "../../../domain/runtime-adapter.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
+
+export const COPILOT_RUNTIME_ID = "copilot";
+export const COPILOT_BINARY = "copilot";
+export const COPILOT_RESUME_TYPE = "copilot_session_id";
+export const COPILOT_GUIDANCE_FILE = "AGENTS.md";
+/** Copilot's project skill roots are .github/skills, .agents/skills and
+ *  .claude/skills (`copilot skill --help`); .agents/skills is the shared
+ *  cross-runtime location the Codex adapter already projects into. */
+export const COPILOT_SKILLS_SUBDIR = [".agents", "skills"] as const;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export type TokenFormatResult = { ok: true; token: string } | { ok: false; error: string };
+
+/** Copilot session ids are lowercase UUIDs. The error never quotes the token. */
+export function validateCopilotSessionId(token: string): TokenFormatResult {
+  const trimmed = token.trim();
+  if (!UUID_RE.test(trimmed)) {
+    return { ok: false, error: "Copilot session id must be a lowercase UUID (8-4-4-4-12 hex)." };
+  }
+  return { ok: true, token: trimmed };
+}
+
+// ── launch argv ─────────────────────────────────────────────────────────────
+
+export interface CopilotLaunchInput {
+  model?: string | null;
+  posture: ResolvedLaunchPosture;
+  /** Fresh launch: the UUID minted for the new session. */
+  newSessionId?: string;
+  /** Resume launch: the persisted session id. */
+  resumeToken?: string;
+  forkSource?: ForkSource;
+  binary?: string;
+}
+
+/**
+ * argv for an interactive Copilot launch. Throws (refusing the launch) on a
+ * fork request, a malformed token, or an ambiguous fresh/resume mix.
+ * - full_bypass: `--yolo`. floor: no permission flag, so Copilot keeps its
+ *   own default (prompt for writes and commands).
+ */
+export function buildCopilotArgv(input: CopilotLaunchInput): string[] {
+  if (input.forkSource) {
+    throw new Error("copilot has no native fork primitive; remove session_source for copilot members");
+  }
+  if (input.resumeToken && input.newSessionId) {
+    throw new Error("copilot launch: a resume token and a new session id are mutually exclusive");
+  }
+  const argv = [input.binary ?? COPILOT_BINARY];
+  if (input.resumeToken !== undefined) {
+    const token = validateCopilotSessionId(input.resumeToken);
+    if (!token.ok) throw new Error(`copilot resume: ${token.error}`);
+    argv.push(`--resume=${token.token}`);
+  } else if (input.newSessionId !== undefined) {
+    const id = validateCopilotSessionId(input.newSessionId);
+    if (!id.ok) throw new Error(`copilot launch: ${id.error}`);
+    argv.push("--session-id", id.token);
+  }
+  const model = input.model?.trim();
+  if (model) {
+    if (model.startsWith("-")) throw new Error("copilot launch: model must not start with '-'");
+    argv.push("--model", model);
+  }
+  if (input.posture === "full_bypass") argv.push("--yolo");
+  return argv;
+}
+
+// ── pane patterns (live captures in test/fixtures/cli-panes/copilot-*.txt) ───
+
+export const COPILOT_READY_PATTERNS: readonly RegExp[] = [
+  // Idle footer under the input box: "← open sidebar · / commands · ? help · tab next tab".
+  /\/ commands\s*·\s*\? help/,
+];
+
+export const COPILOT_GATE_PATTERNS: ReadonlyArray<{ pattern: RegExp; code: string; reason: string }> = [
+  {
+    pattern: /Do you trust the files in this folder\?|Confirm folder trust/,
+    code: "trust_gate",
+    reason: "copilot is asking to trust the workspace folder",
+  },
+  {
+    // Printed above an otherwise idle prompt, so it must win over the ready footer.
+    pattern: /Please use \/login to sign in to use Copilot/,
+    code: "login_required",
+    reason: "copilot is not signed in (run `copilot login` or set COPILOT_GITHUB_TOKEN)",
+  },
+];
+
+// ── identity / version ──────────────────────────────────────────────────────
+
+/** `copilot --version` prints "GitHub Copilot CLI 1.0.89." */
+export function parseCopilotVersion(output: string): string | null {
+  const match = output.match(/GitHub Copilot CLI (\d+\.\d+\.\d+)/);
+  return match?.[1] ?? null;
+}
+
+/** null = the binary is Copilot CLI; otherwise the reason it is not. */
+export function verifyCopilotVersionOutput(output: string): string | null {
+  return parseCopilotVersion(output)
+    ? null
+    : "`copilot --version` did not identify GitHub Copilot CLI; install it with `npm install -g @github/copilot` or `brew install --cask copilot-cli`";
+}
+
+// ── on-disk session store and settings ──────────────────────────────────────
+
+export interface ReadOnlyFs {
+  exists(path: string): boolean;
+  readFile(path: string): string;
+  /** Recursive relative file listing. */
+  listFiles?(dirPath: string): string[];
+}
+
+/** COPILOT_HOME overrides the default $HOME/.copilot (`help environment`). */
+export function copilotHome(env: NodeJS.ProcessEnv, homedir: string): string {
+  const override = env.COPILOT_HOME?.trim();
+  return override ? override : nodePath.join(homedir, ".copilot");
+}
+
+export function copilotSettingsPath(home: string): string {
+  return nodePath.join(home, "settings.json");
+}
+
+export function copilotWorkspaceFile(home: string, sessionId: string): string {
+  return nodePath.join(home, "session-state", sessionId, "workspace.yaml");
+}
+
+export interface CopilotWorkspaceRecord {
+  id: string;
+  cwd?: string;
+  createdAt?: string;
+}
+
+/** workspace.yaml is flat `key: value` lines; only the fields we need are read. */
+export function parseCopilotWorkspaceYaml(content: string): CopilotWorkspaceRecord | null {
+  const fields = new Map<string, string>();
+  for (const line of content.split("\n")) {
+    const match = line.match(/^([a-z_]+):\s*(.*?)\s*$/);
+    if (match) fields.set(match[1]!, match[2]!.replace(/^(['"])(.*)\1$/, "$2"));
+  }
+  const id = fields.get("id");
+  if (!id || !validateCopilotSessionId(id).ok) return null;
+  return { id, cwd: fields.get("cwd"), createdAt: fields.get("created_at") };
+}
+
+/** Resume target check: the session must still exist on disk, otherwise the
+ *  honest outcome is retry_fresh (never a silent new session). */
+export function copilotResumeTargetExists(fs: ReadOnlyFs, home: string, sessionId: string): boolean {
+  const id = validateCopilotSessionId(sessionId);
+  if (!id.ok) return false;
+  const file = copilotWorkspaceFile(home, id.token);
+  if (!fs.exists(file)) return false;
+  try {
+    return parseCopilotWorkspaceYaml(fs.readFile(file))?.id === id.token;
+  } catch {
+    return false;
+  }
+}
+
+export interface CopilotCaptureInput {
+  fs: ReadOnlyFs;
+  home: string;
+  cwd: string;
+  /** The id minted for this launch, when there was one. */
+  mintedSessionId?: string;
+  launchStartedAt?: Date;
+}
+
+/**
+ * Read-only token capture. A minted id is confirmed on disk. Without one
+ * (a seat adopted from a manual launch), the unique session whose cwd matches
+ * and that was created at or after launch start is returned; zero or several
+ * candidates return null rather than a guess.
+ */
+export function captureCopilotSessionId(input: CopilotCaptureInput): string | null {
+  try {
+    if (input.mintedSessionId) {
+      return copilotResumeTargetExists(input.fs, input.home, input.mintedSessionId) ? input.mintedSessionId : null;
+    }
+    const stateDir = nodePath.join(input.home, "session-state");
+    if (!input.fs.listFiles || !input.fs.exists(stateDir)) return null;
+    const cwd = nodePath.resolve(input.cwd);
+    const since = input.launchStartedAt?.getTime();
+    const matches: string[] = [];
+    for (const rel of input.fs.listFiles(stateDir)) {
+      const parts = rel.split(/[\\/]/);
+      if (parts.length !== 2 || parts[1] !== "workspace.yaml" || !UUID_RE.test(parts[0]!)) continue;
+      const record = parseCopilotWorkspaceYaml(input.fs.readFile(nodePath.join(stateDir, rel)));
+      if (!record || record.id !== parts[0] || !record.cwd || nodePath.resolve(record.cwd) !== cwd) continue;
+      if (since !== undefined) {
+        const created = record.createdAt ? Date.parse(record.createdAt) : NaN;
+        if (!Number.isFinite(created) || created < since) continue;
+      }
+      matches.push(record.id);
+    }
+    return matches.length === 1 ? matches[0]! : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge-only trust edit for <COPILOT_HOME>/settings.json: add `folder` to
+ * `trustedFolders` and change nothing else. Returns the new content, or null
+ * when no write should happen (already trusted, or the file is not a plain
+ * JSON object with an array-or-absent `trustedFolders`; an unparseable file is
+ * left alone and the trust gate then surfaces as attention_required).
+ */
+export function addCopilotTrustedFolder(existing: string | null, folder: string): string | null {
+  let settings: Record<string, unknown> = {};
+  if (existing !== null && existing.trim() !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(existing);
+    } catch {
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    settings = parsed as Record<string, unknown>;
+  }
+  const current = settings.trustedFolders;
+  if (current !== undefined && !(Array.isArray(current) && current.every((entry) => typeof entry === "string"))) {
+    return null;
+  }
+  const folders = (current as string[] | undefined) ?? [];
+  if (folders.includes(folder)) return null;
+  return `${JSON.stringify({ ...settings, trustedFolders: [...folders, folder] }, null, 2)}\n`;
+}
