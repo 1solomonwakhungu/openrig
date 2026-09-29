@@ -21,6 +21,10 @@ import { getRuntimeDescriptor, runtimeSeatStateDir } from "./runtime-registry.js
 import { runDescriptorTokenCapture } from "./runtime-capture.js";
 
 export interface ResumeTokenCaptureDeps {
+  /** Whether another live seat of this runtime shares this cwd (session
+   *  registry). Present = the sibling-seat guard applies to CLI runtimes whose
+   *  capture is not session-scoped (runtime-capture.ts). */
+  hasLiveSiblingSeat?: ((input: { runtime: string; cwd: string; sessionName: string }) => string | null) | null;
   contextUsageStore?: {
     readSidecar(sessionName: string): { ok: true; data: { session_id?: string } } | { ok: false; reason: string };
   } | null;
@@ -43,7 +47,7 @@ export type ResumeTokenDeriveResult =
   /** A live token was derived + format-validated. The caller persists it. */
   | { outcome: "captured"; resumeType: ResumeType; token: string }
   /** Derivation ran but produced no usable token — the caller emits a skip event. */
-  | { outcome: "skipped"; reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "invalid_token" | "capture_error" };
+  | { outcome: "skipped"; reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "invalid_token" | "capture_error" | "ambiguous_seat" };
 
 /**
  * Derive a runtime's resume token from live, read-only sources, via the

@@ -1650,7 +1650,7 @@ export class RestoreOrchestrator {
         cwd,
         seatStateDir: runtimeSeatStateDir(descriptor.id, session.sessionName, this.runtimeStateRoot),
         homedir: this.homedir,
-      });
+      }, { hasLiveSiblingSeat: (input) => this.sessionRegistry.hasLiveSiblingSeat(input) });
       if (captured.outcome !== "token") return;
       const validation = validateResumeToken(descriptor.id, captured.token);
       if (!validation.ok) return;

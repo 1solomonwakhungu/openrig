@@ -552,6 +552,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     fsOps: nodeFsOps,
     stateRoot: nodePath.join(OPENRIG_HOME, "state"),
     homedir: os.homedir(),
+    hasLiveSiblingSeat: (input) => sessionRegistry.hasLiveSiblingSeat(input),
   });
   const claudeResume = new ClaudeResumeAdapter(tmuxAdapter, { claudeManagedLaunch });
   const codexResume = new CodexResumeAdapter(tmuxAdapter, { launchPath: process.env.PATH, detectDaemonSupport: codexDaemonSupportProbe(process.env.PATH) });

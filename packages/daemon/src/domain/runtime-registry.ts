@@ -35,7 +35,7 @@ export type RuntimeTokenCaptureOutcome =
   /** A required dependency is absent (older wiring / tests): silent no-op. */
   | { outcome: "noop" }
   /** Capture ran but produced no usable token: the caller records a skip. */
-  | { outcome: "skipped"; reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "capture_error" }
+  | { outcome: "skipped"; reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "capture_error" | "ambiguous_seat" }
   | { outcome: "token"; token: string };
 
 /** What a capture hook may return: a normalized outcome (built-ins), or a
@@ -104,6 +104,11 @@ export interface RuntimeDescriptor {
   /** Whether rig teardown strips managed blocks from `guidanceFile`.
    *  Default true when guidanceFile is set. */
   readonly cleanupGuidanceOnTeardown?: boolean;
+  /** The capture hook reads state keyed to this seat alone (a per-session
+   *  sidecar or the pane's own process), so pod-mates sharing a cwd cannot
+   *  confuse it. When false (the default for CLI runtimes), late capture is
+   *  skipped while another live seat of the same runtime shares the cwd. */
+  readonly captureIsSessionScoped?: boolean;
   /** Where projected skills land. Absent = skills are an honest skip. */
   readonly skillsDir?: (ctx: RuntimeSkillsDirContext) => string | null;
   /** Exact foreground process names that mean the runtime is running in the
@@ -160,6 +165,7 @@ const CLAUDE_CODE: RuntimeDescriptor = {
   resumeType: "claude_id",
   validateResumeToken: validateIdShapedToken,
   // The status-line sidecar's session_id (a file read).
+  captureIsSessionScoped: true,
   captureResumeToken: async ({ sessionName }, deps) => {
     if (!deps.contextUsageStore) return { outcome: "noop" };
     const sidecar = deps.contextUsageStore.readSidecar(sessionName);
@@ -182,6 +188,7 @@ const CODEX: RuntimeDescriptor = {
   resumeType: "codex_id",
   validateResumeToken: validateIdShapedToken,
   // The thread id derived from live pid-keyed logs.
+  captureIsSessionScoped: true,
   captureResumeToken: async ({ sessionName }, deps) => {
     if (!deps.resumeTokenCapturer) return { outcome: "noop" };
     const token = await deps.resumeTokenCapturer.captureCodexThreadId(sessionName);
@@ -212,6 +219,7 @@ const PI: RuntimeDescriptor = {
   resumeType: "pi_session_file",
   validateResumeToken: validatePiSessionFileToken,
   // The pi-runner state sidecar's sessionFile (a file read).
+  captureIsSessionScoped: true,
   captureResumeToken: async ({ sessionName }, deps) => {
     if (!deps.piRunnerStateStore) return { outcome: "noop" };
     const state = deps.piRunnerStateStore.readSessionFile(sessionName);

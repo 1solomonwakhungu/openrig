@@ -35,7 +35,7 @@ export interface OwnerConfigEditor {
 export type OwnerConfigMergeResult =
   | { status: "changed"; changes: OwnerConfigChange[] }
   | { status: "unchanged"; changes: [] }
-  | { status: "skipped"; reason: "unparseable" | "not_an_object" | "conflicting_shape"; detail: string; changes: [] };
+  | { status: "skipped"; reason: "unparseable" | "not_an_object" | "conflicting_shape" | "dangling_symlink"; detail: string; changes: [] };
 
 type Doc = Record<string, unknown>;
 
@@ -159,6 +159,12 @@ export function mergeOwnerConfig(
   format: OwnerConfigFormat,
   edit: (editor: OwnerConfigEditor) => void,
 ): OwnerConfigMergeResult {
+  // A symlink whose target is missing is left alone: replacing it with a
+  // regular file would silently break the owner's dotfile link.
+  if (fs.isSymlink?.(filePath) && !fs.exists(filePath)) {
+    console.warn(`[openrig] owner-config: ${filePath} is a symlink to a missing file; not editing it`);
+    return { status: "skipped", reason: "dangling_symlink", detail: `${filePath} points to a missing file`, changes: [] };
+  }
   const target = fs.exists(filePath) && fs.realpath ? fs.realpath(filePath) : filePath;
   const text = fs.exists(target) ? fs.readFile(target) : "";
   const doc = format === "json" ? jsonDoc(text) : yamlDoc(text);
@@ -188,7 +194,14 @@ function writeAtomic(fs: CliAdapterFsOps, target: string, content: string): void
   }
   const mode = fs.exists(target) && fs.statMode ? fs.statMode(target) & 0o7777 : null;
   const temp = nodePath.join(dir, `.${nodePath.basename(target)}.openrig-${process.pid}-${Date.now()}.tmp`);
-  fs.writeFile(temp, content);
+  if (mode !== null && fs.createFile) {
+    // Created with the target's mode from the start (exclusive), so a 0600
+    // secret config is never briefly readable at a wider mode.
+    fs.createFile(temp, content, mode);
+  } else {
+    fs.writeFile(temp, content);
+  }
+  // The creation mode is filtered by the umask; set it exactly.
   if (mode !== null && fs.chmod) fs.chmod(temp, mode);
   fs.rename(temp, target);
 }

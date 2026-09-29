@@ -193,6 +193,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   private readonly env: NodeJS.ProcessEnv;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => Date;
+  private readonly hasLiveSiblingSeat: CliRuntimeAdapterDeps["hasLiveSiblingSeat"];
 
   constructor(spec: TuiCliRuntimeSpec, deps: CliRuntimeAdapterDeps) {
     for (const gate of spec.gatePatterns ?? []) {
@@ -219,6 +220,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     this.env = deps.env ?? process.env;
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.now = deps.now ?? (() => new Date());
+    this.hasLiveSiblingSeat = deps.hasLiveSiblingSeat;
   }
 
   /** <stateRoot>/<runtime id>/<session name> */
@@ -413,7 +415,11 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     // Fresh or fork without a minted id: capture the NEW session. CLIs that
     // create sessions lazily return nothing here; the refresher and restore
     // capture it later from the same hook.
-    const captured = await runDescriptorTokenCapture(this.descriptor, { sessionName, cwd: binding.cwd, seatStateDir, launchStartedAt, homedir: this.homedir });
+    const captured = await runDescriptorTokenCapture(
+      this.descriptor,
+      { sessionName, cwd: binding.cwd, seatStateDir, launchStartedAt, homedir: this.homedir },
+      { hasLiveSiblingSeat: this.hasLiveSiblingSeat },
+    );
     const token = captured.outcome === "token" ? this.validateToken(captured.token) : null;
     if (token?.ok && opts.forkSource?.value && token.token === opts.forkSource.value.trim()) {
       return { ok: false, error: `${id} fork: captured the parent session instead of the post-fork child` };
@@ -472,8 +478,10 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   // ── internals ──────────────────────────────────────────────────────────────
 
   /** The exact text typed into the pane (exposed for tests and docs). It
-   *  `exec`s the CLI so the CLI replaces the launch shell: pane_current_command
-   *  becomes the CLI, and the pane closes with it instead of dropping to a shell. */
+   *  `exec`s the CLI so the CLI replaces the launch script's shell
+   *  (`/bin/sh <script>` from sendShellCommand) and pane_current_command
+   *  becomes the CLI. When the CLI exits, the pane returns to its own shell
+   *  prompt; the pane does not close. */
   buildShellCommand(input: TuiCliLaunchInput): string {
     const argv = this.spec.buildLaunchCommand(input);
     if (argv.length === 0 || !argv[0]) throw new Error("empty launch command");
@@ -629,8 +637,12 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return { state: { kind: "pending" }, content };
   }
 
+  /** The last N non-padding lines: a full-screen capture is padded to the
+   *  pane height with blank rows, which would otherwise be all the evidence. */
   private evidence(content: string): string {
-    return content.split("\n").slice(-(this.spec.evidenceLines ?? DEFAULT_EVIDENCE_LINES)).join("\n");
+    const lines = content.split("\n");
+    while (lines.length > 0 && lines[lines.length - 1]!.trim() === "") lines.pop();
+    return lines.slice(-(this.spec.evidenceLines ?? DEFAULT_EVIDENCE_LINES)).join("\n");
   }
 
   private guidancePath(binding: NodeBinding): string | null {

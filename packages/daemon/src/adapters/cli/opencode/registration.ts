@@ -42,6 +42,10 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
       );
       return current.ok ? current.token : null;
     },
+    // Capture reads this seat's own session database (OPENCODE_DB / KILO_DB
+    // under the seat state dir), so pod-mates in the same cwd cannot confuse
+    // it and the sibling-seat guard does not apply.
+    captureIsSessionScoped: true,
     // Each seat has its own session database, so a parent session from
     // another seat is not visible to `--fork`.
     supportsFork: false,
