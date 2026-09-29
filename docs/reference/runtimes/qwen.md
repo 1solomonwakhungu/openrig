@@ -9,7 +9,7 @@ npm install -g @qwen-code/qwen-code@latest   # Node 22+
 qwen --version
 ```
 
-`brew install qwen-code` also works. `rig` preflight probes `qwen --version` and fails with this install hint when the binary is missing.
+`brew install qwen-code` also works. `rig` preflight probes `qwen --version` and, when the binary is missing, fails with the install hint `npm install -g @qwen-code/qwen-code@latest`. The runtime verifier also checks that `node` on PATH is version 22 or later.
 
 ## Auth
 
@@ -51,10 +51,10 @@ OpenRig always passes an approval mode because Qwen Code's own default is `auto`
 
 Qwen Code has no flag to trust a folder for one session. Folder trust is off by default (`security.folderTrust.enabled: false`), so seats start normally and OpenRig writes nothing. If you enable it, OpenRig adds the seat cwd as `TRUST_FOLDER` to `~/.qwen/trustedFolders.json` (or `$QWEN_CODE_TRUSTED_FOLDERS_PATH`) before launch. The edit is merge-only and atomic: an existing entry for the cwd, including `DO_NOT_TRUST`, is never changed, and an unparseable file is left alone; in those cases the seat reports `attention_required` with code `trust_gate`. This matches the Claude Code adapter, which pre-accepts its trust dialog for the managed cwd. In an untrusted folder Qwen Code skips the cwd `QWEN.md` and downgrades `--yolo`.
 
-The exact command OpenRig types:
+The command OpenRig types into the pane (each argument shell-quoted; `exec` makes Qwen Code replace the launch shell):
 
 ```bash
-qwen --model qwen3-coder-plus --approval-mode auto-edit --session-id <uuid>
+exec 'qwen' '--model' 'qwen3-coder-plus' '--approval-mode' 'auto-edit' '--session-id' '<uuid>'
 ```
 
 No positional prompt is ever passed: `qwen "text"` runs one shot and exits.

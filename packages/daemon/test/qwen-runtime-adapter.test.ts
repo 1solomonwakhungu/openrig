@@ -13,6 +13,7 @@ import { SESSION_ID_RE } from "../src/adapters/cli/gemini-family/launch-args.js"
 import { createGeminiFamilyCapture, readLaunchRecord } from "../src/adapters/cli/gemini-family/runtime.js";
 import { captureQwenForkChild, qwenRuntimeStatusExists } from "../src/adapters/cli/gemini-family/session-store.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import {
   HARNESS_CWD, HARNESS_HOME, HARNESS_NOW, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs, mockTmux,
@@ -32,6 +33,7 @@ runTuiCliAdapterContract({
   registration: QWEN_REGISTRATION,
   readyScreen: READY,
   runningCommand: "node",
+  modelExample: "qwen3-coder-plus",
   gateScreens: [
     { screen: fixture("qwen-trust.txt"), code: "trust_gate" },
     { screen: fixture("qwen-auth.txt"), code: "login_required" },
@@ -70,9 +72,11 @@ describe("qwen runtime adapter", () => {
     expect(QWEN_DESCRIPTOR.reapProcessTreeOnStop).toBeFalsy();
     expect(QWEN_DESCRIPTOR.paneCommands).toBeUndefined();
     expect(QWEN_DESCRIPTOR.skillsDir?.({ cwd: "/w" })).toBe("/w/.qwen/skills");
-    const match = QWEN_DESCRIPTOR.processMatch as RegExp;
-    expect(match.test("node /opt/homebrew/bin/qwen --approval-mode auto-edit")).toBe(true);
-    expect(match.test("node /x/@qwen-code/qwen-code/cli.js")).toBe(false);
+    const match = QWEN_DESCRIPTOR.processMatch!;
+    expect(processMatches("node /opt/homebrew/bin/qwen --approval-mode auto-edit", match)).toBe(true);
+    expect(processMatches("node /x/@qwen-code/qwen-code/cli.js", match)).toBe(false);
+    expect(processMatches("node", match)).toBe(false);
+    expect(QWEN_DESCRIPTOR.installHint).toBe("npm install -g @qwen-code/qwen-code@latest");
   });
 
   it("fresh floor launch types the exact command and returns the minted id", async () => {

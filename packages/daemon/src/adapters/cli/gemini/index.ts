@@ -17,6 +17,7 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   displayName: "Gemini CLI",
   kind: "agent",
   binary: "gemini",
+  installHint: "npm install -g @google/gemini-cli",
   // @google/gemini-cli engines: node >= 20.
   verify: nodeEngineFloorVerify("Gemini CLI", 20),
   resumeType: "gemini_session_id",
@@ -30,8 +31,8 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   guidanceFile: "GEMINI.md",
   // Project skills; read because managed launches pass --skip-trust.
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".gemini", "skills"),
-  // The pane shows `node`; the bin path is the identity (`node .../bin/gemini`).
-  processMatch: /(?:^|[\s/])gemini(?:\s|$)/,
+  // The pane shows `node`; the script basename is the identity (`node .../bin/gemini`).
+  processMatch: "gemini",
   // The bin's parent ignores SIGHUP/SIGTERM and waits on a child that never
   // finishes its SIGHUP cleanup, so both outlive kill-session (verified live).
   reapProcessTreeOnStop: true,

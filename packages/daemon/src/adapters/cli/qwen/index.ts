@@ -54,6 +54,7 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   displayName: "Qwen Code",
   kind: "agent",
   binary: "qwen",
+  installHint: "npm install -g @qwen-code/qwen-code@latest",
   // @qwen-code/qwen-code engines: node >= 22.
   verify: nodeEngineFloorVerify("Qwen Code", 22),
   resumeType: "qwen_session_id",
@@ -67,8 +68,8 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   // Codex/Pi seats sharing the cwd AGENTS.md.
   guidanceFile: "QWEN.md",
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".qwen", "skills"),
-  // The pane shows `node`; the bin path is the identity (`node .../bin/qwen`).
-  processMatch: /(?:^|[\s/])qwen(?:\s|$)/,
+  // The pane shows `node`; the script basename is the identity (`node .../bin/qwen`).
+  processMatch: "qwen",
   // Qwen exits cleanly on kill-session (verified live): no tree reap.
 };
 

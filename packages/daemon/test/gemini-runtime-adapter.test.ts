@@ -13,6 +13,7 @@ import { SESSION_ID_RE } from "../src/adapters/cli/gemini-family/launch-args.js"
 import { createGeminiFamilyCapture, readLaunchRecord } from "../src/adapters/cli/gemini-family/runtime.js";
 import { findGeminiSessionFile } from "../src/adapters/cli/gemini-family/session-store.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import {
   HARNESS_CWD, HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs, mockTmux,
@@ -30,6 +31,7 @@ runTuiCliAdapterContract({
   registration: GEMINI_REGISTRATION,
   readyScreen: READY,
   runningCommand: "node",
+  modelExample: "gemini-2.5-pro",
   gateScreens: [
     { screen: fixture("gemini-trust.txt"), code: "trust_gate" },
     { screen: fixture("gemini-auth.txt"), code: "login_required" },
@@ -67,19 +69,20 @@ describe("gemini runtime adapter", () => {
 
   it("descriptor: guidance, skills, identity, reap, no fork", () => {
     expect(GEMINI_DESCRIPTOR).toMatchObject({
-      binary: "gemini", resumeType: "gemini_session_id", supportsFork: false, guidanceFile: "GEMINI.md", reapProcessTreeOnStop: true,
+      binary: "gemini", installHint: "npm install -g @google/gemini-cli", resumeType: "gemini_session_id", supportsFork: false, guidanceFile: "GEMINI.md", reapProcessTreeOnStop: true,
     });
     expect(GEMINI_DESCRIPTOR.paneCommands).toBeUndefined();
     expect(GEMINI_DESCRIPTOR.skillsDir?.({ cwd: "/w" })).toBe("/w/.gemini/skills");
   });
 
   it("processMatch identifies both gemini processes and nothing adjacent", () => {
-    const match = GEMINI_DESCRIPTOR.processMatch as RegExp;
-    expect(match.test("node /usr/local/lib/node_modules/.bin/gemini --skip-trust")).toBe(true);
-    expect(match.test("/opt/node/bin/node --max-old-space-size=24576 /home/u/.npm/bin/gemini")).toBe(true);
-    expect(match.test("node")).toBe(false);
-    expect(match.test("/home/u/.gemini/antigravity-cli/bin/agy")).toBe(false);
-    expect(match.test("node /x/@google/gemini-cli/bundle/gemini.js")).toBe(false);
+    const match = GEMINI_DESCRIPTOR.processMatch!;
+    expect(processMatches("node /usr/local/lib/node_modules/.bin/gemini --skip-trust", match)).toBe(true);
+    expect(processMatches("/opt/node/bin/node --max-old-space-size=24576 /home/u/.npm/bin/gemini", match)).toBe(true);
+    expect(processMatches("node", match)).toBe(false);
+    expect(processMatches("/home/u/.gemini/antigravity-cli/bin/agy", match)).toBe(false);
+    expect(processMatches("node /x/@google/gemini-cli/bundle/gemini.js", match)).toBe(false);
+    expect(processMatches("vim notes-about-gemini", match)).toBe(false);
   });
 
   it("fresh floor launch types the exact command and returns the minted id", async () => {

@@ -9,7 +9,7 @@ npm install -g @google/gemini-cli   # Node 20+
 gemini --version
 ```
 
-`rig` preflight probes `gemini --version` and fails with this install hint when the binary is missing. The Homebrew formula is frozen at 0.46.0 and deprecated; use npm.
+`rig` preflight probes `gemini --version` and, when the binary is missing, fails with the install hint `npm install -g @google/gemini-cli`. The runtime verifier also checks that `node` on PATH is version 20 or later. The Homebrew formula is frozen at 0.46.0 and deprecated; use npm.
 
 ## Auth
 
@@ -57,10 +57,10 @@ members:
 
 Every managed launch also passes `--skip-trust`. It trusts the seat's cwd for that session only and writes no config. Without it, Gemini CLI shows a folder trust dialog, and in an untrusted folder it ignores the cwd `GEMINI.md`, ignores project skills, and silently downgrades `--yolo` to the default mode. This matches the Claude Code adapter, which pre-accepts its trust dialog for the managed cwd.
 
-The exact command OpenRig types:
+The command OpenRig types into the pane (each argument shell-quoted; `exec` makes Gemini CLI replace the launch shell):
 
 ```bash
-gemini --model gemini-2.5-pro --approval-mode auto_edit --skip-trust --session-id <uuid>
+exec 'gemini' '--model' 'gemini-2.5-pro' '--approval-mode' 'auto_edit' '--skip-trust' '--session-id' '<uuid>'
 ```
 
 ## Readiness
