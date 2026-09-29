@@ -6,7 +6,7 @@ ranking, not a product endorsement, and selection does not by itself mean an ada
 check the supported runtime list in [rig-spec.md](../rig-spec.md) for what your installed version
 provides.
 
-- Retrieved: 2026-09-29. Download windows are the 30 days ending 2026-09-27 or 2026-09-28 unless noted.
+- Retrieved: 2026-09-29. Download windows are the most recent month each registry reports (30 days for npm and Homebrew, 31 days for pypistats, ending 2026-09-27 or 2026-09-28) unless noted.
 - Scope: interactive AI coding agents that run in a terminal and can be driven inside a tmux pane.
 - Excluded by definition: Claude Code, OpenAI Codex CLI, and Pi (already supported natively).
 - Measured values come from public registries (npm, PyPI, Homebrew analytics, GitHub). Values
@@ -52,9 +52,9 @@ Known biases in measured data:
 - Antigravity CLI's GitHub release count covers 20 releases in 30 days and includes the self-updater, so it overstates new installs.
 - Homebrew analytics are opt-out and macOS-heavy; they undercount Linux and Windows users.
 
-The exact scoring inputs are in the "Scoring inputs" table below, and the script is `score.py` in the same directory; running it reproduces every score.
+Applying the method above to the "Scoring inputs" table below reproduces every score to within 0.001.
 
-## Scoring inputs (exact values fed to score.py)
+## Scoring inputs
 
 D = 30-day installs summed across measurable channels ("~" = imputed); H = Homebrew 30d; S = GitHub stars; V = vendor-claim bucket. "n/a" = signal absent, weight renormalized.
 
