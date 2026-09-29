@@ -100,7 +100,7 @@ OpenRig mints a UUID for each fresh seat and launches with `--session-id <uuid>`
 
 Before typing a resume command, OpenRig checks that the session file exists: it looks up the cwd's slug in `~/.gemini/projects.json` (or `$GEMINI_CLI_HOME/.gemini/`) and matches `tmp/<slug>/chats/session-*-<first 8 of id>.jsonl` whose first line carries the full id. A missing session is refused with `retry_fresh`, never started fresh silently.
 
-Gemini CLI writes the session file at launch, but only treats it as resumable once it has a real message. Resuming a seat that never received a prompt makes Gemini print `Error resuming session: No previous sessions found for this project.` and exit 42; OpenRig detects that and returns `retry_fresh`.
+Gemini CLI writes the session file at launch, but only treats it as resumable once it has a real message. The resume refresher and restore report the minted id as the seat's token only once the session is resumable by Gemini CLI's own rule (a real user prompt, even if no reply landed, or a model reply; the injected session context, slash commands, and `?` do not count), and the precheck uses the same test. A seat that stopped at a gate before its launch finished therefore has no token and restores fresh. A seat that reached ready but was never prompted holds the minted id from launch; restore then stops for a decision (`retry_fresh`) instead of starting fresh silently. Resuming a seat that never received a prompt makes Gemini print `Error resuming session: No previous sessions found for this project.` and exit 42; OpenRig detects that and returns `retry_fresh`.
 
 ## Fork
 

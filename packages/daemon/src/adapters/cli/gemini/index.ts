@@ -9,7 +9,7 @@ import type { CliRuntimeRegistration } from "../types.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { GEMINI_DIALECT, validateSessionToken } from "../gemini-family/launch-args.js";
 import { GEMINI_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
-import { checkGeminiResumeTarget, findGeminiSessionFile } from "../gemini-family/session-store.js";
+import { checkGeminiResumeTarget, geminiSessionIsResumable } from "../gemini-family/session-store.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 
 /**
@@ -45,10 +45,9 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   verify: nodeEngineFloorVerify("Gemini CLI", 20),
   resumeType: "gemini_session_id",
   validateResumeToken: validateSessionToken,
-  // gemini writes the session file at launch (first line carries the id).
-  captureResumeToken: createGeminiFamilyCapture({
-    sessionExists: (ctx, id) => findGeminiSessionFile(ctx, id) !== null,
-  }),
+  // Reported only once the session is resumable (the same test as the resume
+  // precheck), so a seat that never got a prompt has no token and restores fresh.
+  captureResumeToken: createGeminiFamilyCapture({ sessionExists: geminiSessionIsResumable }),
   // Maps the recorded approval mode back to a posture for permission drift.
   permissionPostureFor: geminiFamilyPermissionPosture(GEMINI_DIALECT),
   supportsFork: false,

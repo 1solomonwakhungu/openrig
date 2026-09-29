@@ -16,7 +16,7 @@ import {
   GEMINI_PANE_PATTERNS, QWEN_PANE_PATTERNS, type GeminiFamilyPanePatterns,
 } from "../src/adapters/cli/gemini-family/pane-patterns.js";
 import {
-  captureQwenForkChild, checkGeminiResumeTarget, checkQwenResumeTarget, findGeminiSessionFile,
+  captureQwenForkChild, checkGeminiResumeTarget, checkQwenResumeTarget, findGeminiSessionFile, geminiSessionTextIsResumable,
   findQwenSessionFile, geminiChatsDir, qwenProjectDirName, qwenRuntimeBases,
   type SessionStoreContext, type SessionStoreFs,
 } from "../src/adapters/cli/gemini-family/session-store.js";
@@ -187,7 +187,47 @@ function ctx(files: Record<string, string>, env: NodeJS.ProcessEnv = {}): Sessio
 const GEMINI_ROOT = `${HOME}/.gemini`;
 const GEMINI_CHATS = `${GEMINI_ROOT}/tmp/project/chats`;
 const GEMINI_REGISTRY = { [`${GEMINI_ROOT}/projects.json`]: JSON.stringify({ projects: { [CWD]: "project" } }) };
-const geminiSession = (id: string) => `${JSON.stringify({ sessionId: id, projectHash: "abc", kind: "main" })}\n{"$set":{}}\n`;
+const geminiSession = (id: string, exchange = true) => `${JSON.stringify({ sessionId: id, projectHash: "abc", kind: "main" })}\n${
+  exchange ? JSON.stringify({ $set: { messages: [{ id: "m1", type: "user", content: [{ text: "hi" }] }, { id: "m2", type: "gemini", content: "hello" }] } }) : '{"$set":{}}'
+}\n`;
+
+describe("gemini resumability (mirrors gemini 0.61.0 isResumableMessageRecord)", () => {
+  const meta = JSON.stringify({ sessionId: "x", projectHash: "h", kind: "main" });
+  const file = (...records: unknown[]) => [meta, ...records.map((r) => JSON.stringify(r))].join("\n") + "\n";
+  const user = (id: string, text: string) => ({ id, timestamp: "t", type: "user", content: [{ text }] });
+
+  it("a real user prompt with no reply (crash, quota, API error) is resumable", () => {
+    expect(geminiSessionTextIsResumable(file({ $set: { messages: [user("u1", "Refactor the parser please.")] } }))).toBe(true);
+    expect(geminiSessionTextIsResumable(file(user("u1", "Refactor the parser please.")))).toBe(true);
+  });
+
+  it("only the injected session context is not resumable (the never-prompted shape)", () => {
+    const context = user("c1", "<session_context>\nThis is the Gemini CLI. We are setting up the context for our chat.\n</session_context>");
+    expect(geminiSessionTextIsResumable(file({ $set: { messages: [context] } }))).toBe(false);
+  });
+
+  it("only slash commands or help is not resumable", () => {
+    expect(geminiSessionTextIsResumable(file(user("s1", "/model"), user("s2", "  /help"), user("s3", "?")))).toBe(false);
+    expect(geminiSessionTextIsResumable(file(user("h1", "<hook_context>x</hook_context>"), user("e1", "   ")))).toBe(false);
+  });
+
+  it("a model reply, tool call, or thought counts; an empty reply does not", () => {
+    expect(geminiSessionTextIsResumable(file({ id: "g1", type: "gemini", content: "Done." }))).toBe(true);
+    expect(geminiSessionTextIsResumable(file({ id: "g1", type: "gemini", content: "", toolCalls: [{ id: "t" }] }))).toBe(true);
+    expect(geminiSessionTextIsResumable(file({ id: "g1", type: "gemini", content: "", thoughts: [{ subject: "s" }] }))).toBe(true);
+    expect(geminiSessionTextIsResumable(file({ id: "g1", type: "gemini", content: "   " }))).toBe(false);
+  });
+
+  it("replays checkpoints and rewinds like gemini's loader", () => {
+    // A later $set checkpoint replaces earlier messages.
+    expect(geminiSessionTextIsResumable(file(user("u1", "real prompt"), { $set: { messages: [user("s1", "/clear")] } }))).toBe(false);
+    // A rewind to the only real prompt drops it and everything after it.
+    expect(geminiSessionTextIsResumable(file(user("u1", "real prompt"), { id: "g1", type: "gemini", content: "ok" }, { $rewindTo: "u1" }))).toBe(false);
+    expect(geminiSessionTextIsResumable(file(user("u1", "first"), user("u2", "second"), { $rewindTo: "u2" }))).toBe(true);
+    // Unparseable lines are skipped, never fatal.
+    expect(geminiSessionTextIsResumable(`${meta}\n{not json\n${JSON.stringify(user("u1", "ok"))}\n`)).toBe(true);
+  });
+});
 
 describe("gemini session store", () => {
   it("resolves the chats dir from projects.json and honors GEMINI_CLI_HOME", () => {
@@ -201,6 +241,13 @@ describe("gemini session store", () => {
     const c = ctx({ ...GEMINI_REGISTRY, [path]: geminiSession(ID) });
     expect(findGeminiSessionFile(c, ID)).toBe(path);
     expect(checkGeminiResumeTarget(c, ID)).toEqual({ ok: true });
+  });
+
+  it("a session file gemini wrote at launch, with no exchange yet, is not resumable", () => {
+    const path = `${GEMINI_CHATS}/session-2026-09-29T17-15-${ID.slice(0, 8)}.jsonl`;
+    const c = ctx({ ...GEMINI_REGISTRY, [path]: geminiSession(ID, false) });
+    expect(findGeminiSessionFile(c, ID)).toBe(path);
+    expect(checkGeminiResumeTarget(c, ID).ok).toBe(false);
   });
 
   it("does not accept a file whose 8-char prefix collides but full id differs", () => {
@@ -258,11 +305,17 @@ describe("qwen session store", () => {
 
     it("returns the single new runtime.json that is not the parent", () => {
       const c = ctx({
+        [`${QWEN_CHATS}/${ID}.jsonl`]: "{}\n",
         [`${QWEN_CHATS}/${PARENT}.runtime.json`]: status(PARENT, "2026-09-29T17:20:01.000Z"),
         [`${QWEN_CHATS}/${ID}.runtime.json`]: status(ID, "2026-09-29T17:20:02.500Z"),
         [`${QWEN_CHATS}/11111111-1111-4111-8111-111111111111.runtime.json`]: status("11111111-1111-4111-8111-111111111111", "2026-09-29T16:00:00.000Z"),
       });
       expect(captureQwenForkChild(c, { parentId: PARENT, launchStartedAt })).toBe(ID);
+    });
+
+    it("ignores a child without its conversation file (not resumable yet)", () => {
+      const c = ctx({ [`${QWEN_CHATS}/${ID}.runtime.json`]: status(ID, "2026-09-29T17:20:02.500Z") });
+      expect(captureQwenForkChild(c, { parentId: PARENT, launchStartedAt })).toBeNull();
     });
 
     it("returns null when two seats launched in the same cwd at once (no guessing)", () => {

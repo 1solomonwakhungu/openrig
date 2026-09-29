@@ -100,12 +100,87 @@ export function findGeminiSessionFile(ctx: SessionStoreContext, sessionId: strin
   return null;
 }
 
-/** Resume precheck. A found file can still hold no resumable message; gemini
- *  then exits with "Error resuming session:", which the pane error patterns
- *  map to retry_fresh. */
+// gemini 0.61.0 resumability, mirrored from chatRecordingService.ts
+// (isResumableMessageRecord / hasResumableContent) and sessionUtils.ts
+// (isIgnoredUserContent): a real user prompt counts even if no reply landed
+// (crash, quota, API error); the injected <session_context> message, slash
+// commands, and `?` help do not.
+
+function partsToString(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map(partsToString).join("");
+  if (isRecord(content)) {
+    if (typeof content.text === "string") return content.text;
+    // A non-text part (function call/response, inline data) still renders as
+    // content in gemini's partListUnionToString.
+    return Object.keys(content).length > 0 ? "[part]" : "";
+  }
+  return "";
+}
+
+function isIgnoredUserContent(trimmed: string): boolean {
+  return trimmed.length === 0 || trimmed.startsWith("/") || trimmed.startsWith("?")
+    || trimmed.startsWith("<session_context>") || trimmed.startsWith("<hook_context>");
+}
+
+function isResumableMessage(message: Record<string, unknown>): boolean {
+  const text = message.content === undefined ? "" : partsToString(message.content).trim();
+  if (message.type === "user") return !isIgnoredUserContent(text);
+  if (message.type === "gemini") {
+    const count = (value: unknown) => (Array.isArray(value) ? value.length : 0);
+    return text.length > 0 || count(message.toolCalls) > 0 || count(message.thoughts) > 0;
+  }
+  return false;
+}
+
+/** Replays the JSONL records the way gemini's loader does: message records
+ *  (string `id`) upsert by id, `$set.messages` checkpoints rebuild the set,
+ *  and `$rewindTo` drops that message and everything after it. */
+export function geminiSessionTextIsResumable(text: string): boolean {
+  const messages = new Map<string, Record<string, unknown>>();
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(record)) continue;
+    if (typeof record.$rewindTo === "string") {
+      const ids = [...messages.keys()];
+      const at = ids.indexOf(record.$rewindTo);
+      if (at === -1) messages.clear();
+      else for (const id of ids.slice(at)) messages.delete(id);
+    } else if (typeof record.id === "string") {
+      messages.set(record.id, record);
+    } else if (isRecord(record.$set) && Array.isArray(record.$set.messages)) {
+      messages.clear();
+      for (const message of record.$set.messages) {
+        if (isRecord(message) && typeof message.id === "string") messages.set(message.id, message);
+      }
+    }
+  }
+  return [...messages.values()].some(isResumableMessage);
+}
+
+/** Whether gemini can resume `sessionId` from this cwd (gemini's own rule). */
+export function geminiSessionIsResumable(ctx: SessionStoreContext, sessionId: string): boolean {
+  const path = findGeminiSessionFile(ctx, sessionId);
+  if (!path) return false;
+  try {
+    return geminiSessionTextIsResumable(ctx.fs.readFile(path));
+  } catch {
+    return false;
+  }
+}
+
+/** Resume precheck. The same test as late capture, so a seat whose token was
+ *  captured is also one this accepts. gemini itself still guards with
+ *  "Error resuming session:" (pane error pattern, retry_fresh). */
 export function checkGeminiResumeTarget(ctx: SessionStoreContext, sessionId: string): ResumeTargetCheck {
-  if (findGeminiSessionFile(ctx, sessionId)) return { ok: true };
-  return { ok: false, reason: "gemini has no stored session with that id for this cwd" };
+  if (geminiSessionIsResumable(ctx, sessionId)) return { ok: true };
+  return { ok: false, reason: "gemini has no resumable session with that id for this cwd (no real prompt stored)" };
 }
 
 // ── Qwen ─────────────────────────────────────────────────────────────────────
@@ -155,19 +230,6 @@ export function findQwenSessionFile(ctx: SessionStoreContext, sessionId: string)
     }
   }
   return null;
-}
-
-/** Whether qwen recorded a launch of `sessionId` in this cwd (runtime.json is
- *  written at launch, before any message). */
-export function qwenRuntimeStatusExists(ctx: SessionStoreContext, sessionId: string): boolean {
-  const id = sessionId.toLowerCase();
-  return qwenChatsDirs(ctx).some((dir) => {
-    try {
-      return ctx.fs.exists(nodePath.join(dir, `${id}.runtime.json`));
-    } catch {
-      return false;
-    }
-  });
 }
 
 /** Resume precheck: qwen writes <id>.jsonl on the first message, so a seat
@@ -220,6 +282,9 @@ export function captureQwenForkChild(
       const startedAt = parseStartedAt(status.started_at);
       const workDir = typeof status.work_dir === "string" ? nodePath.resolve(status.work_dir) : "";
       if (!id || id === parent || workDir !== cwd || !(startedAt >= since)) continue;
+      // The fork copies the parent history into <child>.jsonl; without it the
+      // child is not resumable, so it is not reported.
+      if (!findQwenSessionFile(ctx, id)) continue;
       found.add(id);
     }
   }

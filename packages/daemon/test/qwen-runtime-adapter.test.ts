@@ -11,7 +11,7 @@ import { QWEN_DESCRIPTOR, QWEN_REGISTRATION } from "../src/adapters/cli/qwen/ind
 import { CLI_RUNTIME_REGISTRATIONS } from "../src/adapters/cli/index.js";
 import { SESSION_ID_RE } from "../src/adapters/cli/gemini-family/launch-args.js";
 import { createGeminiFamilyCapture, readLaunchRecord } from "../src/adapters/cli/gemini-family/runtime.js";
-import { captureQwenForkChild, qwenRuntimeStatusExists } from "../src/adapters/cli/gemini-family/session-store.js";
+import { captureQwenForkChild, findQwenSessionFile } from "../src/adapters/cli/gemini-family/session-store.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
@@ -46,11 +46,12 @@ runTuiCliAdapterContract({
   missingResumeToken: MISSING,
   forkSourceValue: PARENT,
   seedResumeTarget: ({ fs: seedFs, homedir, cwd, token }) => { seedQwenConversation(seedFs, { homedir, cwd, token }); },
-  // Late capture reports the minted id once qwen recorded the launch.
+  // Late capture reports the minted id once the conversation exists (first message).
   seedSession: ({ seatStateDir, cwd, homedir }) => {
     const token = readLaunchRecord(seatStateDir)?.presetToken;
     if (!token) throw new Error("expected a minted session id in launch.json");
     seedQwenRuntimeStatus(realSeedFs, { homedir, cwd, token, startedAt: new Date() });
+    seedQwenConversation(realSeedFs, { homedir, cwd, token });
     return token;
   },
 });
@@ -261,18 +262,21 @@ describe("qwen late capture", () => {
     ...(presetToken ? { presetToken } : {}),
   });
   const hook = (files: ReturnType<typeof memFs>) => createGeminiFamilyCapture({
-    sessionExists: qwenRuntimeStatusExists,
+    sessionExists: (ctx, id) => findQwenSessionFile(ctx, id) !== null,
     captureForkChild: (ctx, at) => captureQwenForkChild(ctx, { launchStartedAt: at }),
     fs: files,
     env: {},
   });
   const later = (ms: number) => new Date(launchStartedAt.getTime() + ms);
 
-  it("fresh: reports the minted id once runtime.json exists, never a pod-mate's", () => {
+  it("fresh: reports the minted id only once its conversation exists, never a pod-mate's", () => {
     const files = memFs({ [nodePath.join(seatStateDir, "launch.json")]: record("fresh", VALID) });
-    seedQwenRuntimeStatus(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: MISSING, startedAt: later(500) });
+    seedQwenConversation(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: MISSING });
     expect(hook(files)(input)).toBeNull();
+    // Launched but never prompted (the seat stopped at a gate): not resumable, no token.
     seedQwenRuntimeStatus(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: VALID, startedAt: later(800) });
+    expect(hook(files)(input)).toBeNull();
+    seedQwenConversation(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: VALID });
     expect(hook(files)(input)).toBe(VALID);
   });
 
@@ -280,6 +284,7 @@ describe("qwen late capture", () => {
     const files = memFs({ [nodePath.join(seatStateDir, "launch.json")]: record("fork") });
     seedQwenRuntimeStatus(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: PARENT, startedAt: new Date("2026-09-29T09:00:00.000Z") });
     seedQwenRuntimeStatus(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: VALID, startedAt: later(1_200) });
+    seedQwenConversation(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: VALID });
     expect(hook(files)(input)).toBe(VALID);
   });
 

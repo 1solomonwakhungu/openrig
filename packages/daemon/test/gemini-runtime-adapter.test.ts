@@ -11,7 +11,7 @@ import { GEMINI_DESCRIPTOR, GEMINI_REGISTRATION } from "../src/adapters/cli/gemi
 import { CLI_RUNTIME_REGISTRATIONS } from "../src/adapters/cli/index.js";
 import { SESSION_ID_RE } from "../src/adapters/cli/gemini-family/launch-args.js";
 import { createGeminiFamilyCapture, readLaunchRecord } from "../src/adapters/cli/gemini-family/runtime.js";
-import { findGeminiSessionFile } from "../src/adapters/cli/gemini-family/session-store.js";
+import { geminiSessionIsResumable } from "../src/adapters/cli/gemini-family/session-store.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
@@ -200,13 +200,19 @@ describe("gemini late capture", () => {
   const seatStateDir = nodePath.join(HARNESS_STATE_ROOT, "gemini", HARNESS_SESSION);
   const input = { sessionName: HARNESS_SESSION, cwd: HARNESS_CWD, seatStateDir, homedir: HARNESS_HOME };
   const record = (mode: string, presetToken?: string) => JSON.stringify({ launchId: "l1", runtimeId: "gemini", sessionName: HARNESS_SESSION, cwd: HARNESS_CWD, launchStartedAt: "2026-09-29T12:00:00.000Z", mode, ...(presetToken ? { presetToken } : {}) });
-  const hook = (files: ReturnType<typeof memFs>) => createGeminiFamilyCapture({ sessionExists: (ctx, id) => findGeminiSessionFile(ctx, id) !== null, fs: files, env: {} });
+  const hook = (files: ReturnType<typeof memFs>) => createGeminiFamilyCapture({ sessionExists: geminiSessionIsResumable, fs: files, env: {} });
 
   it("reports the minted id once gemini stored the session", () => {
     const files = memFs({ [nodePath.join(seatStateDir, "launch.json")]: record("fresh", VALID) });
     expect(hook(files)(input)).toBeNull(); // not stored yet
     seedGeminiSession(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: VALID });
     expect(hook(files)(input)).toBe(VALID);
+  });
+
+  it("a minted session gemini wrote at launch but never used (stopped at a gate) yields no token", () => {
+    const files = memFs({ [nodePath.join(seatStateDir, "launch.json")]: record("fresh", VALID) });
+    seedGeminiSession(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: VALID, exchange: false });
+    expect(hook(files)(input)).toBeNull();
   });
 
   it("never reports another seat's session from a shared cwd", () => {

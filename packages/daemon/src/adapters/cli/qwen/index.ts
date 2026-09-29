@@ -12,7 +12,7 @@ import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { QWEN_DIALECT, validateSessionToken } from "../gemini-family/launch-args.js";
 import { QWEN_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
 import {
-  captureQwenForkChild, checkQwenResumeTarget, qwenRuntimeStatusExists, type SessionStoreContext,
+  captureQwenForkChild, checkQwenResumeTarget, findQwenSessionFile, type SessionStoreContext,
 } from "../gemini-family/session-store.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 
@@ -75,7 +75,9 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   resumeType: "qwen_session_id",
   validateResumeToken: validateSessionToken,
   captureResumeToken: createGeminiFamilyCapture({
-    sessionExists: qwenRuntimeStatusExists,
+    // The conversation file, the same test as the resume precheck: a seat that
+    // never got a message has only runtime.json, so no token, and restores fresh.
+    sessionExists: (ctx, id) => findQwenSessionFile(ctx, id) !== null,
     captureForkChild: (ctx, launchStartedAt) => captureQwenForkChild(ctx, { launchStartedAt }),
   }),
   // Maps the recorded approval mode back to a posture for permission drift.
