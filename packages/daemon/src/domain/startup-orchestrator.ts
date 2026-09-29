@@ -70,7 +70,10 @@ export type StartupResult =
   // outcomes so restore-orchestrator's per-node mapping can populate
   // `attentionEvidence` on the RestoreNodeResult. Internal type only;
   // not persisted on the failure event.
-  | { ok: false; startupStatus: "attention_required" | "failed"; errors: string[]; evidence?: string };
+  // `recovery` carries the adapter's launch-failure recovery hint (for
+  // example `retry_fresh`: the resume target is gone) so restore can map it to
+  // the awaiting-decision stop-and-ask instead of a plain failure.
+  | { ok: false; startupStatus: "attention_required" | "failed"; errors: string[]; evidence?: string; recovery?: import("./runtime-adapter.js").HarnessLaunchRecovery };
 
 interface StartupOrchestratorDeps {
   db: Database.Database;
@@ -298,7 +301,7 @@ export class StartupOrchestrator {
           }
 
           errors.push(`Harness launch failed: ${launchResult.error}`);
-          return this.fail(input, "failed", errors);
+          return this.fail(input, "failed", errors, undefined, false, launchResult.recovery);
         }
       } catch (err) {
         errors.push(`Harness launch error: ${(err as Error).message}`);
@@ -509,6 +512,7 @@ export class StartupOrchestrator {
     errors: string[],
     evidence?: string,
     freshContextPending = false,
+    recovery?: import("./runtime-adapter.js").HarnessLaunchRecovery,
   ): StartupResult {
     this.sessionRegistry.updateStartupStatus(input.sessionId, status);
     this.eventBus.emit({
@@ -519,7 +523,7 @@ export class StartupOrchestrator {
       sessionId: input.sessionId,
       ...(freshContextPending ? { freshContextPending: true } : {}),
     });
-    return { ok: false, startupStatus: status, errors, evidence };
+    return { ok: false, startupStatus: status, errors, evidence, ...(recovery ? { recovery } : {}) };
   }
 
   private async executeActions(
