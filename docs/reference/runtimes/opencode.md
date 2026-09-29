@@ -61,6 +61,10 @@ Resume launches `opencode -s <session id>`. Before typing, OpenRig checks that t
 
 Session ids look like `ses_` followed by 26 letters or digits.
 
+## Self-update
+
+OpenCode checks for a new release when the TUI starts and installs a patch release in place through the method it detects (a global npm install, Homebrew, or the install script). From a managed seat that would rewrite the owner's installation unattended, so every launch, fresh or resumed, sets `OPENCODE_DISABLE_AUTOUPDATE=1` for the seat's process only. Nothing is written to the owner's OpenCode config. Update OpenCode yourself with `opencode upgrade` or your package manager.
+
 ## Fork
 
 Not supported. `--fork` only works on a session in the same database, and every seat has its own, so a parent session from another seat is never visible. A fork request fails with a clear error.

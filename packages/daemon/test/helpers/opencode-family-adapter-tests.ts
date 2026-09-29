@@ -95,7 +95,8 @@ export function runOpencodeFamilyAdapterTests(input: {
       return { adapter, pane };
     }
 
-    const dbEnv = () => `'${variant.dbEnvVar}=${dbPath}'`;
+    // The seat env: its own session database, and no startup self-update.
+    const dbEnv = () => `'${variant.dbEnvVar}=${dbPath}' '${variant.disableAutoUpdateEnvVar}=1'`;
 
     it("types the per-seat database env, the model, and no --auto at the floor", async () => {
       const { adapter, pane } = launch();

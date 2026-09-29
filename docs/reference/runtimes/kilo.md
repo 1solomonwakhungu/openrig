@@ -38,6 +38,7 @@ pods:
 | Skills dir | `<cwd>/.opencode/skills/` | `<cwd>/.kilo/skills/` |
 | Home placeholder | `Ask anything…` (Unicode ellipsis) | `Ask anything...` (three dots) |
 | Default agent | Build | Code |
+| Self-update off at launch | `OPENCODE_DISABLE_AUTOUPDATE=1` | `KILO_DISABLE_AUTOUPDATE=1` |
 
 Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never does), resume (`-s <ses_ id>` with a pre-launch check of the seat's database), fork (refused), guidance (`AGENTS.md`), and readiness all match OpenCode.
 
