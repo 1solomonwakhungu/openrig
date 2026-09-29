@@ -1,4 +1,4 @@
-# Gemini CLI runtime (`gemini`)
+# Gemini CLI runtime (`runtime: gemini`)
 
 OpenRig runs [Gemini CLI](https://github.com/google-gemini/gemini-cli) as an interactive TUI in the seat's tmux pane. Verified against Gemini CLI 0.61.0.
 
@@ -46,6 +46,8 @@ members:
     restore_policy: resume_if_possible
 ```
 
+## Model
+
 `model` is passed as `--model <value>`. Omit it to use Gemini CLI's own default (`GEMINI_MODEL`, then `model.name` in settings, then `auto`). Aliases such as `pro` and `flash` work.
 
 ## Launch posture
@@ -54,6 +56,8 @@ members:
 |---|---|
 | floor (default) | `--approval-mode auto_edit`: file edits are auto-approved, shell commands and other tools still ask |
 | `full_bypass` (YOLO, or a `full_bypass` permission policy) | `--yolo`: every tool call is auto-approved |
+
+OpenRig records the approval mode it passed (`auto_edit` or `yolo`) as the seat's applied-launch observation (axis `permission`). When the seat has a permission policy (member or rig), permission drift compares the posture that mode implies with the policy's posture and reports `aligned` or `drift`; with no policy attached it reports `unknown`. This checks the launch arguments OpenRig emitted, not the CLI's own enforcement.
 
 Every managed launch also passes `--skip-trust`. It trusts the seat's cwd for that session only and writes no config. Without it, Gemini CLI shows a folder trust dialog, and in an untrusted folder it ignores the cwd `GEMINI.md`, ignores project skills, and silently downgrades `--yolo` to the default mode. This matches the Claude Code adapter, which pre-accepts its trust dialog for the managed cwd.
 

@@ -1,5 +1,6 @@
 import nodePath from "node:path";
-import { getRuntimeDescriptor } from "./runtime-registry.js";
+import type { ResolvedLaunchPosture } from "../adapters/yolo-mode.js";
+import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor } from "./runtime-registry.js";
 
 export type AppliedLaunchAxis = "permission" | "sandbox" | "resource_trust" | "not_applicable";
 export type AppliedLaunchState = "observed" | "unknown";
@@ -235,12 +236,46 @@ function inspectLaunchBoundRuntime(
   };
 }
 
+/**
+ * Registry CLI runtimes (adapters/cli/) that record a permission-axis
+ * observation and declare `permissionPostureFor`: compare the posture the
+ * observed launch value implies with the seat's expected policy posture. The
+ * comparison is of launch arguments (what OpenRig emitted), not of the CLI's
+ * native enforcement. Returns null when this path does not apply, so the
+ * caller keeps the built-in behavior.
+ */
+function inspectRegistryPermission(
+  runtime: string,
+  applied: AppliedLaunchObservation | null,
+  expectedPosture: ResolvedLaunchPosture | null | undefined,
+): RuntimeEnforcementDiagnostic | null {
+  if ((BUILTIN_RUNTIME_IDS as readonly string[]).includes(runtime)) return null;
+  const postureFor = getRuntimeDescriptor(runtime)?.permissionPostureFor;
+  if (!postureFor || !applied || applied.runtime !== runtime || applied.axis !== "permission"
+    || applied.state !== "observed" || !applied.value) return null;
+  const observed = postureFor(applied.value);
+  if (!observed) return unknownEnforcement("permission", null, null, "unrecognized_launch_value");
+  if (!expectedPosture) return unknownEnforcement("permission", null, null, "expected_posture_unknown");
+  return {
+    axis: "permission",
+    state: observed === expectedPosture ? "aligned" : "drift",
+    expected: expectedPosture,
+    effective: observed,
+    sourcePath: null,
+    reason: "launch_posture_compared",
+  };
+}
+
+
 export function diagnoseRuntimePosture(input: {
   runtime: string;
   cwd: string | null;
   applied: AppliedLaunchObservation | null;
   fs: PermissionDriftFs;
   now?: () => Date;
+  /** The seat's policy posture (node attachment, else rig attachment); null or
+   *  absent when no policy is attached. Only registry runtimes compare it. */
+  expectedPosture?: ResolvedLaunchPosture | null;
 }): PermissionDriftDiagnostic {
   // This store records launch arguments, including older records without a reason.
   // Preserve their bytes; generation matching does not prove native enforcement.
@@ -251,7 +286,8 @@ export function diagnoseRuntimePosture(input: {
     ? unknownEnforcement(applied.axis, applied.value, null, "native_permission_effect_unverified")
     : input.runtime === "claude-code"
     ? inspectClaude(input.cwd, input.applied, input.fs)
-    : inspectLaunchBoundRuntime(input.runtime, input.applied);
+    : inspectRegistryPermission(input.runtime, input.applied, input.expectedPosture)
+      ?? inspectLaunchBoundRuntime(input.runtime, input.applied);
   const config = input.runtime === "claude-code" && launchArguments
     ? inspectClaude(input.cwd, input.applied, input.fs) : null;
   return {

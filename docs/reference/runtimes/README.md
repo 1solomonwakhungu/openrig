@@ -14,12 +14,12 @@ One line per runtime, alphabetical by id:
 - `codex`: Codex (`codex`). Resume, fork, managed `AGENTS.md` blocks.
 - `copilot`: GitHub Copilot CLI (`copilot`). Resume by minted session id, managed `AGENTS.md` blocks, `.agents/skills`. No fork. See [copilot.md](copilot.md).
 - `cursor`: Cursor CLI (`cursor-agent`). Resume by captured chat id, managed `AGENTS.md` blocks, `.agents/skills`. No fork. See [cursor.md](cursor.md).
-- `gemini`: Gemini CLI (`gemini`). Resume by minted session id, no fork, managed `GEMINI.md` blocks. See [gemini.md](gemini.md).
+- `gemini`: Gemini CLI (`gemini`). Resume by minted session id, managed `GEMINI.md` blocks, `.gemini/skills`. No fork. See [gemini.md](gemini.md).
 - `grok`: Grok Build (`grok`). Resume and fork by minted session id, managed `AGENTS.md` blocks. [grok.md](grok.md)
 - `kilo`: Kilo CLI (`kilo`), an OpenCode fork. Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.kilo/skills`. No fork. See [kilo.md](kilo.md).
 - `opencode`: OpenCode (`opencode`). Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.opencode/skills`. No fork. See [opencode.md](opencode.md).
 - `pi`: Pi coding agent (`pi`, RPC runner in the pane). Resume by session file, fork.
-- `qwen`: Qwen Code (`qwen`). Resume by minted session id, fork, managed `QWEN.md` blocks. See [qwen.md](qwen.md).
+- `qwen`: Qwen Code (`qwen`), a Gemini CLI fork. Resume by minted session id, managed `QWEN.md` blocks, `.qwen/skills`. Fork via `--fork-session`. See [qwen.md](qwen.md).
 - `terminal`: a plain shell for infrastructure nodes (servers, log tails). Requires `agent_ref: builtin:terminal` and `profile: none`.
 
 The internal `stub` runtime exists for OpenRig's own tests and is not listed.

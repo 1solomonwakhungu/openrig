@@ -14,7 +14,7 @@ import { QWEN_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
 import {
   captureQwenForkChild, checkQwenResumeTarget, qwenRuntimeStatusExists, type SessionStoreContext,
 } from "../gemini-family/session-store.js";
-import { createGeminiFamilyCapture, createGeminiFamilySpec, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
+import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 
 /** <QWEN_HOME or ~/.qwen> */
 function qwenHome(store: SessionStoreContext): string {
@@ -78,6 +78,8 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
     sessionExists: qwenRuntimeStatusExists,
     captureForkChild: (ctx, launchStartedAt) => captureQwenForkChild(ctx, { launchStartedAt }),
   }),
+  // Maps the recorded approval mode back to a posture for permission drift.
+  permissionPostureFor: geminiFamilyPermissionPosture(QWEN_DIALECT),
   supportsFork: true,
   // Qwen reads QWEN.md and AGENTS.md; QWEN.md keeps OpenRig blocks apart from
   // Codex/Pi seats sharing the cwd AGENTS.md.

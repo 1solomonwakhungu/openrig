@@ -24,6 +24,7 @@ import {
   type ResumeTokenFormatResult,
 } from "./resume-token-formats.js";
 import type { ResumeTokenCaptureDeps } from "./resume-token-capture.js";
+import type { ResolvedLaunchPosture } from "../adapters/yolo-mode.js";
 import { OPENRIG_HOME } from "../openrig-compat.js";
 import { seatStateDirFor } from "./runtime-capture.js";
 
@@ -128,6 +129,12 @@ export interface RuntimeDescriptor {
   /** Reap the pane's process tree on stop (the CLI can outlive kill-session).
    *  PID-scoped, snapshot before the kill (process-tree-reaper.ts). Default false. */
   readonly reapProcessTreeOnStop?: boolean;
+  /** Registry runtimes that record a permission-axis applied-launch observation
+   *  (TuiCliRuntimeSpec.observeLaunch): map the observed launch value back to
+   *  the OpenRig posture that emits it, or null for a value this runtime never
+   *  emits. Permission drift compares it with the seat's policy posture.
+   *  Absent = the runtime's observations are recorded but not compared. */
+  readonly permissionPostureFor?: (observedValue: string) => ResolvedLaunchPosture | null;
 }
 
 // ── Built-in descriptors (behavior-preserving) ──────────────────────────────

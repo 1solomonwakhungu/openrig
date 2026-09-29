@@ -242,7 +242,7 @@ describe("runtime registry: a registered runtime reaches every generic site", ()
     const spec = { pods: [{ id: "dev", members: [{ id: "a", runtime: "example-cli" }, { id: "b", runtime: "codex" }] }] } as unknown as RigSpec;
     const exec = vi.fn(async (cmd: string) => { if (cmd === "example-cli --version") throw new Error("nope"); return "1.0"; });
     expect(await verifyCliRuntimesAvailable(spec, exec)).toEqual([
-      `Runtime "example-cli" not available ('example-cli --version' failed). The spec declares a example-cli member, so the launch would fail. Fix: install Example CLI and ensure 'example-cli' is on PATH.`,
+      `Runtime "example-cli" not available ('example-cli --version' failed). The spec declares a member with runtime "example-cli", so the launch would fail. Fix: install Example CLI and ensure 'example-cli' is on PATH.`,
     ]);
     expect(exec).toHaveBeenCalledTimes(1); // built-ins keep their own probes
     exec.mockResolvedValue("1.0");
