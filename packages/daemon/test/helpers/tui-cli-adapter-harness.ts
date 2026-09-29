@@ -18,6 +18,8 @@ export interface PaneFrame {
   /** pane_current_command, e.g. the CLI binary or "zsh". */
   command: string;
   content: string;
+  /** The pane shows the alternate screen in this frame. */
+  alternate?: boolean;
 }
 
 /** The pane before a launch: an idle shell prompt. */
@@ -71,7 +73,9 @@ export function mockTmux(frames: PaneFrame[] = [{ command: "zsh", content: "" }]
     getPaneCommand: vi.fn(async () => { index = Math.min(index + 1, script.length - 1); return current().command; }),
     capturePaneContent: vi.fn(async () => current().content),
     getPaneLinePosition: vi.fn(async () => script[0]!.content.split("\n").length - 1),
+    isPaneAlternateScreen: vi.fn(async () => current().alternate === true),
     capturePaneFromLine: vi.fn(async (_target: string, line: number) => {
+      if (current().alternate) return current().content; // the whole alternate screen
       const scrollback = index <= 0 ? script[0]!.content : `${script[0]!.content}\n${current().content}`;
       return scrollback.split("\n").slice(line).join("\n");
     }),

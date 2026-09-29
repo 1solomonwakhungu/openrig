@@ -98,6 +98,35 @@ describe.skipIf(!tmuxAvailable())("TUI CLI base on a real tmux server", () => {
     expect(await adapter.checkReady(binding())).toEqual({ ready: true });
   }, 30_000);
 
+  it("reads a full-screen (alternate screen) TUI whole, even above the launch line", async () => {
+    await freshPane();
+    await run(`tmux send-keys -t ${SESSION} "printf 'line1\\nline2\\nline3\\n'" Enter`);
+    const altCli = path.join(root, "smoke-alt.mjs");
+    fs.writeFileSync(altCli, [
+      "#!/usr/bin/env node",
+      // Switch to the alternate screen and draw the marker on its top row.
+      "process.stdout.write('\\x1b[?1049h\\x1b[H\\x1b[2Jsmoke-cli ready> ');",
+      "setInterval(() => {}, 1000);",
+    ].join("\n"));
+    fs.chmodSync(altCli, 0o755);
+    const adapter = new TuiCliRuntimeAdapter(spec([altCli]), { tmux, fsOps: createNodeFsOps(), stateRoot: path.join(root, "state"), homedir: root });
+    expect(await adapter.launchHarness(binding(), { name: SESSION })).toEqual({ ok: true });
+  }, 30_000);
+
+  it("a stale alternate screen left by a previous process is not the new CLI's", async () => {
+    await freshPane();
+    // A previous TUI switched to the alternate screen, drew a ready marker, and
+    // exited without restoring the normal screen.
+    await run(`tmux send-keys -t ${SESSION} "printf '\\033[?1049h\\033[Hsmoke-cli ready> (stale)\\n'" Enter`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect((await run(`tmux display-message -p -t ${SESSION} "#{alternate_on}"`)).trim()).toBe("1");
+    const silentCli = path.join(root, "smoke-silent.mjs");
+    fs.writeFileSync(silentCli, "#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n");
+    fs.chmodSync(silentCli, 0o755);
+    const adapter = new TuiCliRuntimeAdapter({ ...spec([silentCli]), launchTimeoutMs: 2_000 }, { tmux, fsOps: createNodeFsOps(), stateRoot: path.join(root, "state"), homedir: root });
+    expect(await adapter.launchHarness(binding(), { name: SESSION })).toMatchObject({ ok: false, error: expect.stringMatching(/timed out/) });
+  }, 30_000);
+
   it("fails fast, well inside the timeout, when the binary is missing", async () => {
     await freshPane();
     const adapter = new TuiCliRuntimeAdapter(spec([path.join(root, "no-such-cli")]), { tmux, fsOps: createNodeFsOps(), stateRoot: path.join(root, "state"), homedir: root });

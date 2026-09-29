@@ -787,14 +787,30 @@ export class TmuxAdapter {
     }
   }
 
+  /** Whether the pane is showing the alternate screen (a full-screen TUI, or
+   *  one that exited without restoring the normal screen). Null when unknown. */
+  async isPaneAlternateScreen(paneId: string): Promise<boolean | null> {
+    try {
+      const output = (await this.exec(`tmux display-message -p -t ${shellQuote(paneId)} "#{alternate_on}"`)).trim();
+      return output === "1" ? true : output === "0" ? false : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Capture from an absolute line (getPaneLinePosition) to the end of the
    *  screen. Lines trimmed from history since then are simply gone, so the
-   *  capture starts at the oldest line still kept. */
+   *  capture starts at the oldest line still kept. While the pane is on the
+   *  alternate screen (a full-screen TUI) the line position does not apply,
+   *  so the whole visible screen is returned; the caller decides whether that
+   *  screen is the new process's (isPaneAlternateScreen before and after). */
   async capturePaneFromLine(paneId: string, absoluteLine: number): Promise<string | null> {
     try {
-      const output = await this.exec(`tmux display-message -p -t ${shellQuote(paneId)} "#{history_size}"`);
-      const history = Number.parseInt(output.trim(), 10);
+      const output = await this.exec(`tmux display-message -p -t ${shellQuote(paneId)} "#{history_size}\t#{alternate_on}"`);
+      const [historyRaw, alternateRaw] = output.trim().split("\t");
+      const history = Number.parseInt(historyRaw ?? "", 10);
       if (!Number.isFinite(history)) return null;
+      if (alternateRaw === "1") return (await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)}`)) ?? "";
       const start = Math.max(absoluteLine - history, -history);
       const captured = await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)} -S ${start} -E -`);
       return captured ?? "";

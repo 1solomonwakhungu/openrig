@@ -175,6 +175,8 @@ type LaunchFailure = Extract<HarnessLaunchResult, { ok: false }>;
 interface LaunchWindow {
   line: number | null;
   lines: ReadonlySet<string>;
+  /** A previous process left the pane on the alternate screen. */
+  alternateAtLaunch: boolean;
 }
 
 /** A shell reporting the launch binary missing (bash, zsh, dash, env). */
@@ -393,6 +395,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     const window: LaunchWindow = {
       line: await this.tmux.getPaneLinePosition(sessionName),
       lines: new Set(((await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES)) ?? "").split("\n")),
+      alternateAtLaunch: (await this.tmux.isPaneAlternateScreen(sessionName)) === true,
     };
     const sent = await this.tmux.sendShellCommand(sessionName, command);
     if (!sent.ok) return { ok: false, error: `Failed to send launch command: ${sent.message}` };
@@ -602,12 +605,21 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
    */
   private async readPane(sessionName: string, window?: LaunchWindow): Promise<{ state: PaneState; content: string }> {
     const paneCommand = ((await this.tmux.getPaneCommand(sessionName)) ?? "").trim().replace(/^-/, "");
-    const content = window && window.line !== null
+    const atShell = SHELL_COMMANDS.has(paneCommand);
+    let content = window && window.line !== null
       ? (await this.tmux.capturePaneFromLine(sessionName, window.line)) ?? ""
       : (await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES)) ?? "";
+    // An alternate screen is the new CLI's only while the CLI holds the
+    // foreground and the screen was not already on before the launch (a
+    // previous TUI that exited without restoring it). Otherwise keep only the
+    // lines that were not on screen before typing.
+    if (window && window.line !== null && (window.alternateAtLaunch || atShell)
+      && (await this.tmux.isPaneAlternateScreen(sessionName)) === true) {
+      content = freshLines(content, window.lines);
+    }
     // A dead CLI leaves the pane at the shell with its last screen in
     // scrollback: gate, error, and ready text there is stale here.
-    if (SHELL_COMMANDS.has(paneCommand)) return { state: { kind: "at_shell" }, content };
+    if (atShell) return { state: { kind: "at_shell" }, content };
     for (const gate of this.spec.gatePatterns ?? []) {
       if (gate.pattern.test(content)) return { state: { kind: "gate", code: gate.code, reason: gate.reason }, content };
     }

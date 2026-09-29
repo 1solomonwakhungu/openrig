@@ -269,6 +269,18 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
         expect(await adapter.launchHarness(harnessBinding(), { name: "x" })).toMatchObject({ ok: false, error: expect.stringMatching(/still at a shell/) });
       });
 
+      it("a full-screen CLI is read whole on the alternate screen", async () => {
+        const { adapter } = launchRig([{ command: running, content: readyScreen, alternate: true }]);
+        expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+      });
+
+      it("an alternate screen a previous process left on never counts as the new CLI's", async () => {
+        const stale: PaneFrame = { command: "zsh", content: `${readyScreen}\n$ `, alternate: true };
+        const pane = mockTmux([stale, stale, stale]);
+        const adapter = registration.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: memFs() }));
+        expect(await adapter.launchHarness(harnessBinding(), { name: "x" })).toMatchObject({ ok: false, error: expect.stringMatching(/still at a shell/) });
+      });
+
       it("an error this launch prints counts even when the same line is already in scrollback", async () => {
         const repeated = input.earlyExit?.screen;
         if (!repeated) return;
