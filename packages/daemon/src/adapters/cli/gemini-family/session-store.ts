@@ -100,19 +100,76 @@ export function findGeminiSessionFile(ctx: SessionStoreContext, sessionId: strin
   return null;
 }
 
-/** A model reply in the session file. gemini writes the file at launch but
- *  only resumes a session with a real exchange (chatRecordingService
- *  hasResumableContent); the injected session-context user message alone does
- *  not count, and a model reply only follows a real prompt. */
-const GEMINI_MODEL_REPLY_RE = /"type"\s*:\s*"gemini"/;
+// gemini 0.61.0 resumability, mirrored from chatRecordingService.ts
+// (isResumableMessageRecord / hasResumableContent) and sessionUtils.ts
+// (isIgnoredUserContent): a real user prompt counts even if no reply landed
+// (crash, quota, API error); the injected <session_context> message, slash
+// commands, and `?` help do not.
 
-/** Whether gemini can resume `sessionId` from this cwd: the session file
- *  exists and holds a model reply. */
+function partsToString(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map(partsToString).join("");
+  if (isRecord(content)) {
+    if (typeof content.text === "string") return content.text;
+    // A non-text part (function call/response, inline data) still renders as
+    // content in gemini's partListUnionToString.
+    return Object.keys(content).length > 0 ? "[part]" : "";
+  }
+  return "";
+}
+
+function isIgnoredUserContent(trimmed: string): boolean {
+  return trimmed.length === 0 || trimmed.startsWith("/") || trimmed.startsWith("?")
+    || trimmed.startsWith("<session_context>") || trimmed.startsWith("<hook_context>");
+}
+
+function isResumableMessage(message: Record<string, unknown>): boolean {
+  const text = message.content === undefined ? "" : partsToString(message.content).trim();
+  if (message.type === "user") return !isIgnoredUserContent(text);
+  if (message.type === "gemini") {
+    const count = (value: unknown) => (Array.isArray(value) ? value.length : 0);
+    return text.length > 0 || count(message.toolCalls) > 0 || count(message.thoughts) > 0;
+  }
+  return false;
+}
+
+/** Replays the JSONL records the way gemini's loader does: message records
+ *  (string `id`) upsert by id, `$set.messages` checkpoints rebuild the set,
+ *  and `$rewindTo` drops that message and everything after it. */
+export function geminiSessionTextIsResumable(text: string): boolean {
+  const messages = new Map<string, Record<string, unknown>>();
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(record)) continue;
+    if (typeof record.$rewindTo === "string") {
+      const ids = [...messages.keys()];
+      const at = ids.indexOf(record.$rewindTo);
+      if (at === -1) messages.clear();
+      else for (const id of ids.slice(at)) messages.delete(id);
+    } else if (typeof record.id === "string") {
+      messages.set(record.id, record);
+    } else if (isRecord(record.$set) && Array.isArray(record.$set.messages)) {
+      messages.clear();
+      for (const message of record.$set.messages) {
+        if (isRecord(message) && typeof message.id === "string") messages.set(message.id, message);
+      }
+    }
+  }
+  return [...messages.values()].some(isResumableMessage);
+}
+
+/** Whether gemini can resume `sessionId` from this cwd (gemini's own rule). */
 export function geminiSessionIsResumable(ctx: SessionStoreContext, sessionId: string): boolean {
   const path = findGeminiSessionFile(ctx, sessionId);
   if (!path) return false;
   try {
-    return GEMINI_MODEL_REPLY_RE.test(ctx.fs.readFile(path));
+    return geminiSessionTextIsResumable(ctx.fs.readFile(path));
   } catch {
     return false;
   }
@@ -123,7 +180,7 @@ export function geminiSessionIsResumable(ctx: SessionStoreContext, sessionId: st
  *  "Error resuming session:" (pane error pattern, retry_fresh). */
 export function checkGeminiResumeTarget(ctx: SessionStoreContext, sessionId: string): ResumeTargetCheck {
   if (geminiSessionIsResumable(ctx, sessionId)) return { ok: true };
-  return { ok: false, reason: "gemini has no resumable session with that id for this cwd (no stored exchange)" };
+  return { ok: false, reason: "gemini has no resumable session with that id for this cwd (no real prompt stored)" };
 }
 
 // ── Qwen ─────────────────────────────────────────────────────────────────────
