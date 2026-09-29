@@ -1,0 +1,16 @@
+  ██║▄▄ ██║██║███╗██║██╔══╝  ██║╚██╗██║  │ API Key | probe-model (/model to change)                 │
+  ╚██████╔╝╚███╔███╔╝███████╗██║ ╚████║  │ /home/.../project       │
+   ╚══▀▀═╝  ╚══╝╚══╝ ╚══════╝╚═╝  ╚═══╝  └──────────────────────────────────────────────────────────┘
+
+  Tips: Add a QWEN.md file to give Qwen Code persistent project context.
+   ╭──────────────────────────────────────────────────────────────────────────────────────────────────
+   │
+   │ Do you trust this folder?
+   │ Trusting a folder allows Qwen Code to execute commands it suggests. This is a security feature
+   │ to prevent accidental execution in untrusted directories.
+   │
+   │ › 1. Trust folder (project)
+   │   2. Trust parent folder (user)
+   │   3. Don't trust (esc)
+   │
+   ╰──────────────────────────────────────────────────────────────────────────────────────────────────

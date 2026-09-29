@@ -1,0 +1,2 @@
+Error resuming session: No previous sessions found for this project.
+user@host project % 
