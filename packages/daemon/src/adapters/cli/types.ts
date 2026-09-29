@@ -41,6 +41,8 @@ export interface CliRuntimeAdapterDeps {
   env?: NodeJS.ProcessEnv;
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
+  /** Session-registry sibling check for the late-capture guard (runtime-capture.ts). */
+  hasLiveSiblingSeat?: (input: { runtime: string; cwd: string; sessionName: string }) => boolean;
 }
 
 /** A CLI runtime serves both the launch contract and restore-time resume. */

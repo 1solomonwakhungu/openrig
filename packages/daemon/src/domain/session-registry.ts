@@ -463,6 +463,24 @@ export class SessionRegistry {
    *  (running / idle / unknown), with the fields the resume-metadata refresher
    *  needs. Lifted from rig-teardown so both the teardown pre-down path and the
    *  FR-4 periodic/manual snapshot refresh call ONE query (no duplication). */
+  /**
+   * Whether another seat of this runtime, in any rig, is live in this cwd:
+   * its node's latest session is running, idle, or unknown, and its session
+   * name differs. Used by the late-capture sibling-seat guard.
+   */
+  hasLiveSiblingSeat(input: { runtime: string; cwd: string; sessionName: string }): boolean {
+    return !!this.db.prepare(`
+      SELECT 1
+      FROM nodes n
+      JOIN sessions s ON s.node_id = n.id
+      WHERE n.runtime = ? AND n.cwd = ?
+        AND s.id = (SELECT s2.id FROM sessions s2 WHERE s2.node_id = n.id ORDER BY s2.created_at DESC, s2.id DESC LIMIT 1)
+        AND s.status IN ('running', 'idle', 'unknown')
+        AND s.session_name != ?
+      LIMIT 1
+    `).get(input.runtime, input.cwd, input.sessionName);
+  }
+
   getLatestLiveSessions(rigId: string): LatestLiveSession[] {
     const rows = this.db.prepare(`
       SELECT n.id as node_id, s.id as session_id, s.session_name, s.status, n.runtime, n.cwd, s.resume_type, s.resume_token

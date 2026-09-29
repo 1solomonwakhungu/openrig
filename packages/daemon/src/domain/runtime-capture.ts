@@ -37,15 +37,20 @@ export interface LaunchRecord {
   ownerConfigChanges?: unknown[];
 }
 
-/** Best-effort read of the launch record's start time. Null when absent or unreadable. */
-export function readLaunchStartedAt(seatStateDir: string): Date | null {
+/** Best-effort read of the seat's launch record. Null when absent or unreadable. */
+export function readLaunchRecord(seatStateDir: string): Partial<LaunchRecord> | null {
   try {
-    const record = JSON.parse(fs.readFileSync(nodePath.join(seatStateDir, LAUNCH_RECORD_FILE), "utf-8")) as Partial<LaunchRecord>;
-    const at = record.launchStartedAt ? new Date(record.launchStartedAt) : null;
-    return at && !Number.isNaN(at.getTime()) ? at : null;
+    return JSON.parse(fs.readFileSync(nodePath.join(seatStateDir, LAUNCH_RECORD_FILE), "utf-8")) as Partial<LaunchRecord>;
   } catch {
     return null;
   }
+}
+
+/** Best-effort read of the launch record's start time. Null when absent or unreadable. */
+export function readLaunchStartedAt(seatStateDir: string): Date | null {
+  const record = readLaunchRecord(seatStateDir);
+  const at = record?.launchStartedAt ? new Date(record.launchStartedAt) : null;
+  return at && !Number.isNaN(at.getTime()) ? at : null;
 }
 
 export interface RuntimeTokenCaptureRequest {
@@ -69,6 +74,23 @@ export async function runDescriptorTokenCapture(
   deps: ResumeTokenCaptureDeps = {},
 ): Promise<RuntimeTokenCaptureOutcome> {
   if (!descriptor.captureResumeToken) return { outcome: "noop" };
+  // Sibling-seat guard: a CLI whose capture is not keyed to this seat (for
+  // example "newest session in this cwd") cannot tell two live seats in one
+  // cwd apart, so it is not asked. A seat with a minted token is unaffected:
+  // its capture returns that token.
+  if (!descriptor.captureIsSessionScoped && request.cwd && deps.hasLiveSiblingSeat && !readLaunchRecord(request.seatStateDir)?.presetToken) {
+    let shared = false;
+    try {
+      shared = deps.hasLiveSiblingSeat({ runtime: descriptor.id, cwd: request.cwd, sessionName: request.sessionName });
+    } catch (err) {
+      console.warn(`[openrig] ${descriptor.id} sibling-seat check failed for ${request.sessionName}: ${(err as Error).message}; skipping capture`);
+      return { outcome: "skipped", reason: "ambiguous_seat" };
+    }
+    if (shared) {
+      console.log(`[openrig] ${descriptor.id} resume-token capture skipped for ${request.sessionName}: another live ${descriptor.id} seat shares ${request.cwd}`);
+      return { outcome: "skipped", reason: "ambiguous_seat" };
+    }
+  }
   try {
     // Late capture (refresher, restore, adoption) recovers the start time from
     // the launch record the base wrote before typing.

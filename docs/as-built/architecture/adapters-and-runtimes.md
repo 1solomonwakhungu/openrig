@@ -261,7 +261,18 @@ adoption/hook/operator tokens; an equal token re-stamps freshness), and once at
 restore when a registered CLI seat's snapshot has no token, before the
 fresh-versus-awaiting-decision classification. Late capture reads
 `launchStartedAt` from `launch.json`. This is what makes CLIs that create their
-session lazily on the first prompt (opencode, kilo) restorable. The restore plan
+session lazily on the first prompt (opencode, kilo) restorable.
+
+Sibling-seat guard: for a runtime whose capture is not session-scoped
+(`captureIsSessionScoped` is false, the default for CLI runtimes), the
+post-launch, refresher, and restore captures skip the hook while another live
+seat of the same runtime shares the cwd in any rig
+(`SessionRegistry.hasLiveSiblingSeat`), log why, and report
+`ambiguous_seat`. A seat with a minted token is unaffected. The built-ins set
+`captureIsSessionScoped: true` (their capture reads a per-session sidecar or
+the pane's own process), so they are never guarded. Sessions the owner starts
+outside OpenRig in the same cwd are invisible to the registry; each adapter
+documents that limit. The restore plan
 preview does not run capture, so it can still show such a seat as
 awaiting-decision until the restore itself runs.
 

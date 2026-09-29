@@ -193,6 +193,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   private readonly env: NodeJS.ProcessEnv;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => Date;
+  private readonly hasLiveSiblingSeat: CliRuntimeAdapterDeps["hasLiveSiblingSeat"];
 
   constructor(spec: TuiCliRuntimeSpec, deps: CliRuntimeAdapterDeps) {
     for (const gate of spec.gatePatterns ?? []) {
@@ -219,6 +220,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     this.env = deps.env ?? process.env;
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.now = deps.now ?? (() => new Date());
+    this.hasLiveSiblingSeat = deps.hasLiveSiblingSeat;
   }
 
   /** <stateRoot>/<runtime id>/<session name> */
@@ -413,7 +415,11 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     // Fresh or fork without a minted id: capture the NEW session. CLIs that
     // create sessions lazily return nothing here; the refresher and restore
     // capture it later from the same hook.
-    const captured = await runDescriptorTokenCapture(this.descriptor, { sessionName, cwd: binding.cwd, seatStateDir, launchStartedAt, homedir: this.homedir });
+    const captured = await runDescriptorTokenCapture(
+      this.descriptor,
+      { sessionName, cwd: binding.cwd, seatStateDir, launchStartedAt, homedir: this.homedir },
+      { hasLiveSiblingSeat: this.hasLiveSiblingSeat },
+    );
     const token = captured.outcome === "token" ? this.validateToken(captured.token) : null;
     if (token?.ok && opts.forkSource?.value && token.token === opts.forkSource.value.trim()) {
       return { ok: false, error: `${id} fork: captured the parent session instead of the post-fork child` };

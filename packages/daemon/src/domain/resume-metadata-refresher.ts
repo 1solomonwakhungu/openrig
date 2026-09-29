@@ -108,7 +108,7 @@ export class ResumeMetadataRefresher {
       cwd: session.cwd,
       seatStateDir: runtimeSeatStateDir(descriptor.id, session.sessionName, this.runtimeStateRoot),
       homedir: this.homeDir,
-    });
+    }, { hasLiveSiblingSeat: (input) => this.sessionRegistry.hasLiveSiblingSeat(input) });
     if (captured.outcome !== "token") return true;
     const validation = validateResumeToken(descriptor.id, captured.token);
     if (!validation.ok) return true;

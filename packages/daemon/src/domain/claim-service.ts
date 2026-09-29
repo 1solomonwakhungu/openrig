@@ -273,7 +273,7 @@ export class ClaimService {
   private emitCaptureSkip(
     input: { rigId: string; nodeId: string; sessionId: string; sessionName: string },
     runtime: string,
-    reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "invalid_token" | "capture_error",
+    reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "invalid_token" | "capture_error" | "ambiguous_seat",
   ): void {
     try {
       this.eventBus.emit({
