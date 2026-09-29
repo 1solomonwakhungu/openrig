@@ -39,7 +39,7 @@ pods:
 | full_bypass posture (`OPENRIG_YOLO=1` or a full-bypass permission policy) | `--auto-approve true`. The hidden `--yolo` flag is never used because it forces headless output. |
 | resume | `--id <session id>` |
 | fork | refused: Cline has no fork primitive |
-| launch env | `CLINE_DISABLE_CLINE_PASS_NOTICE=1` (suppresses launch notice modals, which swallow the first keystroke and open a browser on Enter) and `CLINE_NO_AUTO_UPDATE=1` (releases up to 3.0.54 killed live sessions when they auto-updated) |
+| launch env | `CLINE_DISABLE_CLINE_PASS_NOTICE=1` (suppresses launch notice modals, which swallow the first keystroke and open a browser on Enter) and `CLINE_NO_AUTO_UPDATE=1`. Cline's only self-updater checks npm at launch and later runs the matching global update (`npm update -g cline`, or the pnpm, yarn, or bun equivalent) in the owner's prefix; this variable turns it off before any check. Releases up to 3.0.54 also killed live sessions when they auto-updated. Both variables are applied on fresh and resume launches. |
 
 ## Model selection
 

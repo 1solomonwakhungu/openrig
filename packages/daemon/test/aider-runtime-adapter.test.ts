@@ -36,7 +36,7 @@ const SEAT = "/openrig-home/state/aider/dev-aider@my-rig";
 const CHAT = `${SEAT}/aider.chat.history.md`;
 const INPUT = `${SEAT}/aider.input.history`;
 const BASE = [
-  "aider", "--no-check-update", "--no-show-release-notes", "--no-analytics", "--no-gitignore",
+  "aider", "--no-check-update", "--no-show-release-notes", "--no-analytics", "--no-gitignore", "--disable-playwright",
   "--chat-history-file", CHAT, "--input-history-file", INPUT, "--read", "AGENTS.md",
 ];
 
@@ -81,9 +81,24 @@ describe("aider launch argv", () => {
     expect(() => buildAiderArgv({ posture: "floor", seatStateDir: SEAT, resumeToken: "relative.md" })).toThrow(/absolute path/);
   });
 
-  it("full_bypass neutralizes webbrowser.open; floor leaves the env alone", () => {
-    expect(aiderLaunchEnv("full_bypass")).toEqual({ BROWSER: "true" });
-    expect(aiderLaunchEnv("floor")).toEqual({});
+  it("every launch keeps pip installs inside a virtualenv; full_bypass also neutralizes webbrowser.open", () => {
+    expect(aiderLaunchEnv("floor")).toEqual({ PIP_REQUIRE_VIRTUALENV: "true" });
+    expect(aiderLaunchEnv("full_bypass")).toEqual({ PIP_REQUIRE_VIRTUALENV: "true", BROWSER: "true" });
+  });
+
+  it("never lets a seat self-update or auto-install (fresh and resume, both postures)", () => {
+    for (const posture of ["floor", "full_bypass"] as const) {
+      for (const resumeToken of [undefined, CHAT]) {
+        const argv = buildAiderArgv({ posture, seatStateDir: SEAT, resumeToken });
+        expect(argv).toContain("--no-check-update");
+        expect(argv).toContain("--disable-playwright");
+        expect(argv).not.toContain("--upgrade");
+        expect(argv).not.toContain("--update");
+        expect(argv).not.toContain("--install-main-branch");
+        expect(argv).not.toContain("--just-check-update");
+      }
+      expect(aiderLaunchEnv(posture).PIP_REQUIRE_VIRTUALENV).toBe("true");
+    }
   });
 });
 
@@ -314,11 +329,11 @@ describe("aider adapter", () => {
     return { adapter, pane: tmuxPane, fs: seatFs };
   }
 
-  it("types the exact floor launch with no env prefix and reports the minted file", async () => {
+  it("types the exact floor launch (pip confined to a virtualenv) and reports the minted file", async () => {
     const { adapter, pane: p } = fixedIdRig();
     const result = await adapter.launchHarness(harnessBinding({ model: "sonnet" }), { name: "x" });
     expect(result).toMatchObject({ ok: true, resumeToken: MINTED, resumeType: "aider_chat_history_file" });
-    expect(p.typed).toEqual([`exec ${q(buildAiderArgv({ posture: "floor", seatStateDir: HARNESS_SEAT, model: "sonnet", sessionToken: MINTED }))}`]);
+    expect(p.typed).toEqual([`exec env 'PIP_REQUIRE_VIRTUALENV=true' ${q(buildAiderArgv({ posture: "floor", seatStateDir: HARNESS_SEAT, model: "sonnet", sessionToken: MINTED }))}`]);
     expect(p.typed[0]).not.toContain("--yes-always");
     expect(p.typed[0]).not.toContain("BROWSER");
   });
@@ -327,15 +342,18 @@ describe("aider adapter", () => {
     for (const [binding, env] of [[harnessBinding(), { OPENRIG_YOLO: "1" }], [harnessBinding({ launchPosture: "full_bypass" }), {}]] as const) {
       const { adapter, pane: p } = fixedIdRig(undefined, env);
       await adapter.launchHarness(binding, { name: "x" });
-      expect(p.typed[0]).toBe(`exec env 'BROWSER=true' ${q(buildAiderArgv({ posture: "full_bypass", seatStateDir: HARNESS_SEAT, sessionToken: MINTED }))}`);
+      expect(p.typed[0]).toBe(`exec env 'PIP_REQUIRE_VIRTUALENV=true' 'BROWSER=true' ${q(buildAiderArgv({ posture: "full_bypass", seatStateDir: HARNESS_SEAT, sessionToken: MINTED }))}`);
     }
   });
 
-  it("resumes with --restore-chat-history when the history file exists", async () => {
+  it("resumes with --restore-chat-history when the history file exists, keeping the install guards", async () => {
     const { adapter, pane: p } = launchRig(undefined, {}, { [HARNESS_CHAT]: "# aider chat started\n" });
     const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: HARNESS_CHAT });
     expect(result).toMatchObject({ ok: true, resumeToken: HARNESS_CHAT, resumeType: "aider_chat_history_file" });
     expect(p.typed[0]).toContain("'--restore-chat-history'");
+    expect(p.typed[0]).toContain("'PIP_REQUIRE_VIRTUALENV=true'");
+    expect(p.typed[0]).toContain("'--no-check-update'");
+    expect(p.typed[0]).toContain("'--disable-playwright'");
   });
 
   it("a fresh relaunch never reuses the previous launch's history, so a later restore stays fresh", async () => {

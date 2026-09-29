@@ -17,6 +17,14 @@
 //   managed guidance file as read-only context. A missing file prints
 //   "Read-only file ... does not exist. Skipping." and aider carries on.
 // - `--yes-always` is the auto-approve flag. No fork primitive.
+// - Self-update and auto-install: with the update check on, aider offers
+//   `pip install --upgrade aider-chat` at launch; it also offers pip installs
+//   for bedrock/ and vertex_ai/ model deps (launch), Playwright plus Chromium
+//   (`/web` or a URL in chat, `playwright install --with-deps`), and /help
+//   extras. `--yes-always` accepts every one. Managed seats pass
+//   `--no-check-update` and `--disable-playwright`, and launch with
+//   PIP_REQUIRE_VIRTUALENV=true so any remaining pip install can only touch a
+//   virtualenv (aider's own tool venv), never the owner's global Python.
 
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
@@ -84,6 +92,7 @@ export function buildAiderArgv(input: AiderArgvInput): string[] {
     "--no-show-release-notes",
     "--no-analytics",
     "--no-gitignore",
+    "--disable-playwright",
     "--chat-history-file", chatHistoryFile,
     "--input-history-file", seat.inputHistoryFile,
     "--read", AIDER_GUIDANCE_FILE,
@@ -95,12 +104,20 @@ export function buildAiderArgv(input: AiderArgvInput): string[] {
   return argv;
 }
 
-/** Additive launch env. Under full_bypass, `--yes-always` also answers yes to
- *  aider's "Open documentation url for more info?" offers (for example after
- *  a missing API key warning), which calls Python's webbrowser.open. BROWSER=true
- *  makes that a no-op so a managed seat never opens a browser. */
+/** Additive launch env, applied on every launch (fresh and resume).
+ *  - PIP_REQUIRE_VIRTUALENV=true: pip refuses to install outside a virtualenv,
+ *    so an aider-offered pip install (model deps, /help extras) can never write
+ *    into the owner's global or Homebrew Python (verified live). A uv or pipx
+ *    install is a virtualenv and is unaffected.
+ *  - BROWSER=true (full_bypass only): `--yes-always` also answers yes to
+ *    aider's "Open documentation url for more info?" offers (for example after
+ *    a missing API key warning), which call Python's webbrowser.open; this
+ *    makes that a no-op so a managed seat never opens a browser. */
 export function aiderLaunchEnv(posture: AiderLaunchPosture): Record<string, string> {
-  return posture === "full_bypass" ? { BROWSER: "true" } : {};
+  return {
+    PIP_REQUIRE_VIRTUALENV: "true",
+    ...(posture === "full_bypass" ? { BROWSER: "true" } : {}),
+  };
 }
 
 export type AiderTokenResult = { ok: true; token: string } | { ok: false; error: string };

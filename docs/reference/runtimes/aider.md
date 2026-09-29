@@ -40,7 +40,9 @@ pods:
 Every launch passes:
 
 ```
+PIP_REQUIRE_VIRTUALENV=true \
 aider --no-check-update --no-show-release-notes --no-analytics --no-gitignore \
+  --disable-playwright \
   --chat-history-file <seat state>/aider.chat.history.<launch id>.md \
   --input-history-file <seat state>/aider.input.history \
   --read AGENTS.md
@@ -60,6 +62,24 @@ All flags are session-scoped. None writes global aider config. For example,
 `--analytics-disable` is avoided because it persists. `--no-gitignore` stops aider
 from offering to add `.aider*` to the repo's `.gitignore`; the seat's history
 files live in the seat state dir, not the repo.
+
+### Self-update and auto-install
+
+Aider can install software from inside a session, and `--yes-always`
+(full_bypass) accepts every offer without asking:
+
+| Offer | When | Managed seat |
+|---|---|---|
+| `pip install --upgrade aider-chat` (self-update) | launch, when the update check runs | `--no-check-update` skips the check entirely |
+| `pip install boto3` / `google-cloud-aiplatform` | launch, for `bedrock/` and `vertex_ai/` models missing the package | `PIP_REQUIRE_VIRTUALENV=true` |
+| `pip install aider-chat[playwright]` plus `playwright install --with-deps chromium` | `/web` or a URL in chat | `--disable-playwright` (scraping falls back to plain HTTP) |
+| `pip install aider-chat[help]` | `/help` | `PIP_REQUIRE_VIRTUALENV=true` |
+
+`PIP_REQUIRE_VIRTUALENV=true` makes pip refuse to install outside a virtualenv,
+so an accepted install can only touch aider's own tool environment (uv and pipx
+installs are virtualenvs), never the owner's global or Homebrew Python. A uv tool
+install ships no pip at all, so those installs fail harmlessly there. None of
+these knobs writes owner config.
 
 ## Readiness
 
@@ -117,7 +137,10 @@ into an isolated prefix, scratch `HOME`, dummy key, no real account): `--help`,
 the ready prompt, the missing-key warning and its doc-link confirmation, the
 no-git confirmation, the missing `--read` file message, per-seat history files
 written at startup, `--restore-chat-history` ("Restored previous conversation
-history."), and `BROWSER=true` neutralizing Python's `webbrowser.open`. Prompt
+history."), `BROWSER=true` neutralizing Python's `webbrowser.open`, and
+`PIP_REQUIRE_VIRTUALENV=true` refusing a pip install into a global Python while
+allowing one in a virtualenv. The install offers were read from `aider/versioncheck.py`,
+`models.py`, `scrape.py`, and `help.py`. Prompt
 and confirmation formats were also read from `aider/io.py`. The pane fixtures
 used in tests are these live captures, including 80x24 captures (OpenRig's pane
 size) with a long cwd: ready, resumed, missing key, and the no-git question,

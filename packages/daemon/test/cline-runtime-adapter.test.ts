@@ -323,6 +323,8 @@ describe("cline adapter", () => {
     const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: VALID_ID });
     expect(result).toMatchObject({ ok: true, resumeToken: VALID_ID, resumeType: "cline_session_id" });
     expect(p.typed[0]).toContain(`'--id' '${VALID_ID}'`);
+    // The resume launch keeps cline's self-updater off (npm update -g cline).
+    expect(p.typed[0]).toContain("'CLINE_NO_AUTO_UPDATE=1'");
   });
 
   it("the resume check looks where the launched cline writes (adapter env plus launch env)", async () => {
