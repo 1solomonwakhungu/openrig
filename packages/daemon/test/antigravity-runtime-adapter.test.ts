@@ -76,13 +76,13 @@ describe("antigravity adapter", () => {
   it("launches with the floor posture and no browser, and cannot know the token yet", async () => {
     const { pane, adapter } = launch();
     expect(await adapter.launchHarness(harnessBinding(), { name: "x" })).toEqual({ ok: true });
-    expect(pane.typed[0]).toBe("exec env 'BROWSER=true' 'agy' '--mode' 'accept-edits'");
+    expect(pane.typed[0]).toBe("exec env 'AGY_CLI_DISABLE_AUTO_UPDATE=1' 'BROWSER=true' 'agy' '--mode' 'accept-edits'");
   });
 
   it("maps full_bypass to --dangerously-skip-permissions, passes the model, resumes by conversation", async () => {
     const bypass = launch();
     await bypass.adapter.launchHarness(harnessBinding({ model: "gemini-3.5-flash-medium", launchPosture: "full_bypass" }), { name: "x" });
-    expect(bypass.pane.typed[0]).toBe("exec env 'BROWSER=true' 'agy' '--model' 'gemini-3.5-flash-medium' '--dangerously-skip-permissions'");
+    expect(bypass.pane.typed[0]).toBe("exec env 'AGY_CLI_DISABLE_AUTO_UPDATE=1' 'BROWSER=true' 'agy' '--model' 'gemini-3.5-flash-medium' '--dangerously-skip-permissions'");
     const { home } = dirs();
     seedConversation(home, TOKEN);
     const pane = mockTmux([atShell(), { command: "agy", content: READY }]);
@@ -120,6 +120,21 @@ describe("antigravity adapter", () => {
 
   it("reaps the process tree on stop until survival is verified", () => {
     expect(ANTIGRAVITY_DESCRIPTOR.reapProcessTreeOnStop).toBe(true);
+  });
+
+  it("disables agy's self-updater on every launch path without writing owner config", async () => {
+    const { home } = dirs();
+    seedConversation(home, TOKEN);
+    for (const opts of [{}, { resumeToken: TOKEN }]) {
+      const pane = mockTmux([atShell(), { command: "agy", content: READY }]);
+      const files = memFs();
+      const adapter = new TuiCliRuntimeAdapter(ANTIGRAVITY_SPEC, harnessDeps({ tmux: pane.tmux, fsOps: files, homedir: home }));
+      await adapter.launchHarness(harnessBinding({ launchPosture: "full_bypass" }), { name: "x", ...opts });
+      expect(pane.typed[0]).toContain("'AGY_CLI_DISABLE_AUTO_UPDATE=1'");
+      expect(Object.keys(files.files).filter((p) => p.includes(".gemini"))).toEqual([]);
+    }
+    // agy has no fork, so fresh and resume are its only launch paths.
+    expect(ANTIGRAVITY_DESCRIPTOR.supportsFork).toBe(false);
   });
 
   it("validates conversation ids as UUIDs", () => {

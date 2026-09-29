@@ -143,7 +143,11 @@ export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
   },
   env: {
     // Sign-in prints a URL in the pane; never open a tab on the operator's desktop.
-    set: () => ({ BROWSER: "true" }),
+    // AGY_CLI_DISABLE_AUTO_UPDATE turns off agy's background self-updater so a
+    // managed seat never replaces the operator's agy install. Source-derived:
+    // the variable and its log line ("Auto-update disabled via environment
+    // variable %s") are in the agy 1.1.27 binary; not behavior-proven live.
+    set: () => ({ AGY_CLI_DISABLE_AUTO_UPDATE: "1", BROWSER: "true" }),
   },
   validateResumeTarget: ({ token, homedir }) => fs.existsSync(antigravityConversationPath(homedir, token))
     ? { ok: true }
