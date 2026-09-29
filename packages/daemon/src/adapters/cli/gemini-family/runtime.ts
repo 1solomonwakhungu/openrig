@@ -33,6 +33,9 @@ export interface GeminiFamilyRuntime {
   checkResumeTarget(ctx: SessionStoreContext, sessionId: string): ResumeTargetCheck;
   /** Owner-state-safe provisioning before typing (e.g. a trust entry). */
   prepareLaunch?(ctx: TuiCliPrepareContext, store: SessionStoreContext): void;
+  /** Literal env added to every launch (the pane env is otherwise inherited,
+   *  so auth variables reach the CLI unchanged). */
+  launchEnv?: Record<string, string>;
 }
 
 /** Build the TUI CLI spec for one runtime of the family. `deps` supplies the
@@ -64,6 +67,7 @@ export function createGeminiFamilySpec(
       const check = runtime.checkResumeTarget(store(cwd, fsOps, homedir), token);
       return check.ok ? { ok: true } : { ok: false, reason: check.reason, recovery: "retry_fresh" };
     },
+    ...(runtime.launchEnv ? { env: { set: () => ({ ...runtime.launchEnv }) } } : {}),
     ...(runtime.prepareLaunch
       ? { prepareLaunch: (ctx: TuiCliPrepareContext) => runtime.prepareLaunch!(ctx, store(ctx.binding.cwd, ctx.fs, ctx.homedir)) }
       : {}),

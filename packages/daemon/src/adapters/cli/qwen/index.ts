@@ -49,6 +49,21 @@ export function prepareQwenLaunch(ctx: TuiCliPrepareContext, store: SessionStore
   });
 }
 
+/**
+ * Qwen opens its "Welcome back!" dialog on every launch (resume included) in a
+ * cwd that has .qwen/PROJECT_SUMMARY.md, which only the /summary command
+ * writes. When that file exists, disable the dialog for this cwd in the
+ * workspace settings, merge-only: an operator's own ui.enableWelcomeBack value
+ * is kept (the pane pattern then fails fast with evidence).
+ */
+export function suppressQwenWelcomeBack(ctx: TuiCliPrepareContext): void {
+  const qwenDir = nodePath.join(ctx.binding.cwd, ".qwen");
+  if (!ctx.fs.exists(nodePath.join(qwenDir, "PROJECT_SUMMARY.md"))) return;
+  ctx.mergeOwnerConfig(nodePath.join(qwenDir, "settings.json"), "json", (config) => {
+    config.setIfAbsent(["ui", "enableWelcomeBack"], false);
+  });
+}
+
 export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   id: "qwen",
   displayName: "Qwen Code",
@@ -79,6 +94,14 @@ export const QWEN_REGISTRATION: CliRuntimeRegistration = {
     dialect: QWEN_DIALECT,
     patterns: QWEN_PANE_PATTERNS,
     checkResumeTarget: checkQwenResumeTarget,
-    prepareLaunch: prepareQwenLaunch,
+    // Independent steps: a failure in one never skips the other; the base
+    // logs a thrown error and still launches.
+    prepareLaunch: (ctx, store) => {
+      const errors: unknown[] = [];
+      for (const step of [() => prepareQwenLaunch(ctx, store), () => suppressQwenWelcomeBack(ctx)]) {
+        try { step(); } catch (err) { errors.push(err); }
+      }
+      if (errors.length > 0) throw errors[0];
+    },
   }, deps), deps),
 };

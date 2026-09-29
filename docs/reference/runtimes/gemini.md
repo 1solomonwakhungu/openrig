@@ -63,6 +63,10 @@ The command OpenRig types into the pane (each argument shell-quoted; `exec` make
 exec 'gemini' '--model' 'gemini-2.5-pro' '--approval-mode' 'auto_edit' '--skip-trust' '--session-id' '<uuid>'
 ```
 
+## Launch environment
+
+The seat inherits the tmux pane environment (so `GEMINI_API_KEY` and friends reach the CLI). OpenRig clears three variables for the launch: `TERMINAL_EMULATOR`, `ZED_SESSION_ID`, and `XCODE_VERSION_ACTUAL`. A tmux server started from a JetBrains, Zed, or Xcode terminal passes those to every pane, and with any of them set (and `ide.hasSeenNudge` unset) Gemini CLI opens "Do you want to connect ... to Gemini CLI?" on every launch. tmux already sets `TERM_PROGRAM=tmux`, so a VS Code terminal does not trigger it. Nothing is written to config. If the nudge still appears, the launch fails fast with `attention_required`, code `startup_dialog`, and pane evidence.
+
 ## Readiness
 
 - Ready: the composer placeholder `Type your message or @path/to/file`.
@@ -94,7 +98,6 @@ The `gemini` launcher is a small parent process that ignores SIGHUP and SIGTERM 
 ## Known limits
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../gemini`), never from the process name alone.
-- The IDE connection nudge ("Do you want to connect ... to Gemini CLI?") can appear when the tmux server inherited an IDE terminal environment. It is not mapped to a gate; the launch times out with pane evidence.
 - The resume precheck reads `projects.json` from the daemon's view of `GEMINI_CLI_HOME`. If the pane environment sets a different `GEMINI_CLI_HOME`, the check can refuse a session that exists.
 - Gemini CLI may print an update notice; it does not block the prompt.
 

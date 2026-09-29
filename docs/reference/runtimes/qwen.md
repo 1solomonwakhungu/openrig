@@ -59,6 +59,11 @@ exec 'qwen' '--model' 'qwen3-coder-plus' '--approval-mode' 'auto-edit' '--sessio
 
 No positional prompt is ever passed: `qwen "text"` runs one shot and exits.
 
+## Startup dialogs
+
+- "Welcome back!": Qwen Code shows it on every launch, resume included, in a cwd that has `.qwen/PROJECT_SUMMARY.md` (only the `/summary` command writes that file). When the file exists, OpenRig sets `ui.enableWelcomeBack: false` in the cwd's `.qwen/settings.json` before launch (merge-only and atomic; an existing `ui.enableWelcomeBack` value is kept). If the dialog shows anyway, the launch fails fast with `attention_required`, code `startup_dialog`, and pane evidence.
+- IDE connection nudge: Qwen Code only offers it when `TERM_PROGRAM=vscode` or the CLI runs under an IDE process. tmux sets `TERM_PROGRAM=tmux` and detaches from the starting terminal, so it does not appear in seats.
+
 ## Readiness
 
 - Ready: the composer placeholder `Type your message or @path/to/file`.
@@ -85,7 +90,6 @@ Supported for `session_source` with `ref.kind: native_id` and the parent session
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../qwen`), never from the process name alone.
 - Ready detection matches the English placeholder. With a non-English UI language, readiness times out with pane evidence.
-- The "Welcome back!" dialog appears when the cwd has `.qwen/PROJECT_SUMMARY.md` (written by `/summary`). It is not mapped to a gate; disable it with `ui.enableWelcomeBack: false`.
 - Session ids must be UUID versions 1 to 5; Qwen Code treats anything else given to `--resume` as a session title.
 
 ## What was verified live

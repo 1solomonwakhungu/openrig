@@ -18,6 +18,8 @@ export interface GeminiFamilyGatePattern {
 export interface GeminiFamilyErrorPattern {
   pattern: RegExp;
   reason: string;
+  /** Readiness code checkReady reports (TUI base default "runtime_error"). */
+  code?: string;
   /** retry_fresh: the requested session does not exist, so a resume cannot
    *  proceed and the caller must decide (never a silent fresh start). */
   recovery?: "retry_fresh" | "attention_required";
@@ -51,6 +53,11 @@ export const GEMINI_PANE_PATTERNS: GeminiFamilyPanePatterns = {
     { pattern: /Error resuming session:/, reason: "gemini could not find the session to resume", recovery: "retry_fresh" },
     { pattern: /Error starting session: Session ID .* already exists/, reason: "gemini refused the minted session id because it already exists" },
     { pattern: /When using Gemini API, you must specify the GEMINI_API_KEY environment variable/, reason: "gemini needs GEMINI_API_KEY in the seat environment" },
+    // IdeIntegrationNudge.tsx: only when the pane env names an IDE terminal
+    // (JetBrains TERMINAL_EMULATOR, ZED_SESSION_ID, XCODE_VERSION_ACTUAL; tmux
+    // sets TERM_PROGRAM=tmux). Managed launches clear those, so this is the
+    // fail-fast fallback, not the normal path.
+    { pattern: /Do you want to connect .+ to Gemini CLI\?/, reason: "gemini is asking to connect an IDE; answer it in the pane or set ide.hasSeenNudge in ~/.gemini/settings.json", code: "startup_dialog" },
   ],
 };
 
@@ -71,5 +78,9 @@ export const QWEN_PANE_PATTERNS: GeminiFamilyPanePatterns = {
     { pattern: /No saved session found with (?:ID|title)/, reason: "qwen could not find the session to resume", recovery: "retry_fresh" },
     { pattern: /Failed to fork session/, reason: "qwen could not fork the parent session" },
     { pattern: /Session Id \S+ already exists/, reason: "qwen refused the minted session id because it already exists" },
+    // WelcomeBackDialog.tsx: only when <cwd>/.qwen/PROJECT_SUMMARY.md exists
+    // (written by /summary). Managed launches disable it for that cwd unless
+    // the operator set ui.enableWelcomeBack themselves; fail fast then.
+    { pattern: /Welcome back! \(Last updated:/, reason: "qwen is showing its Welcome back dialog (the cwd has .qwen/PROJECT_SUMMARY.md); choose in the pane or set ui.enableWelcomeBack: false", code: "startup_dialog" },
   ],
 };

@@ -109,6 +109,23 @@ describe("gemini runtime adapter", () => {
     expect(byEnv.pane.typed[0]).toContain("'--yolo'");
   });
 
+  it("clears inherited IDE-terminal markers so the IDE nudge never opens (no config write)", async () => {
+    const { adapter, pane, files } = launchRig();
+    await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(pane.typed[0]).toMatch(/^exec env 'TERMINAL_EMULATOR=' 'XCODE_VERSION_ACTUAL=' 'ZED_SESSION_ID=' 'gemini' /);
+    expect(Object.keys(files.files).filter((f) => f.includes(".gemini"))).toEqual([]);
+  });
+
+  it("fails fast with evidence if the IDE nudge still appears", async () => {
+    const nudge = "Do you want to connect IntelliJ IDEA to Gemini CLI?\n  1. Yes\n  2. No (esc)\n  3. No, don't ask again";
+    const { adapter } = launchRig([{ command: "node", content: nudge }]);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required" });
+    if (!result.ok) expect(result.evidence).toContain("Do you want to connect");
+    const ready = await GEMINI_REGISTRATION.createAdapter(harnessDeps({ tmux: mockTmux([{ command: "node", content: nudge }]).tmux, fsOps: memFs() })).checkReady(harnessBinding());
+    expect(ready).toMatchObject({ ready: false, code: "startup_dialog" });
+  });
+
   it("resume types --resume <id> without --session-id once the session exists", async () => {
     const { adapter, pane, files } = launchRig();
     seedGeminiSession(files, { homedir: HARNESS_HOME, cwd: HARNESS_CWD, token: VALID });

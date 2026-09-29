@@ -194,6 +194,40 @@ describe("qwen trust provisioning (prepareLaunch)", () => {
   });
 });
 
+describe("qwen Welcome back dialog", () => {
+  const summary = nodePath.join(HARNESS_CWD, ".qwen", "PROJECT_SUMMARY.md");
+  const workspaceSettings = nodePath.join(HARNESS_CWD, ".qwen", "settings.json");
+
+  it("disables it for the cwd only when .qwen/PROJECT_SUMMARY.md exists", async () => {
+    const without = memFs();
+    await launchRig(undefined, {}, without).adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(without.files[workspaceSettings]).toBeUndefined();
+
+    const withSummary = memFs({ [summary]: "# Project Summary", [workspaceSettings]: JSON.stringify({ model: { name: "m" } }) });
+    await launchRig(undefined, {}, withSummary).adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(JSON.parse(withSummary.files[workspaceSettings]!)).toEqual({ model: { name: "m" }, ui: { enableWelcomeBack: false } });
+  });
+
+  it("keeps an operator's explicit ui.enableWelcomeBack and still runs the trust step", async () => {
+    const files = memFs({
+      [summary]: "# Project Summary",
+      [workspaceSettings]: JSON.stringify({ ui: { enableWelcomeBack: true } }),
+      [nodePath.join(HARNESS_HOME, ".qwen", "settings.json")]: JSON.stringify({ security: { folderTrust: { enabled: true } } }),
+    });
+    await launchRig(undefined, {}, files).adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(JSON.parse(files.files[workspaceSettings]!)).toEqual({ ui: { enableWelcomeBack: true } });
+    expect(JSON.parse(files.files[nodePath.join(HARNESS_HOME, ".qwen", "trustedFolders.json")]!)).toEqual({ [HARNESS_CWD]: "TRUST_FOLDER" });
+  });
+
+  it("fails fast with evidence when the dialog shows anyway", async () => {
+    const screen = "Welcome back! (Last updated: 2 hours ago)\n  1. Start new chat session\n  2. Continue previous conversation";
+    const { adapter } = launchRig([{ command: "node", content: screen }]);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required" });
+    if (!result.ok) expect(result.evidence).toContain("Welcome back!");
+  });
+});
+
 describe("qwen late capture", () => {
   const seatStateDir = nodePath.join(HARNESS_STATE_ROOT, "qwen", HARNESS_SESSION);
   const launchStartedAt = new Date("2026-09-29T12:00:00.000Z");

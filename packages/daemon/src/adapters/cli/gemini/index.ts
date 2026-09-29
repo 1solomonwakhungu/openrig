@@ -12,6 +12,16 @@ import { GEMINI_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
 import { checkGeminiResumeTarget, findGeminiSessionFile } from "../gemini-family/session-store.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 
+/** Clears the IDE-terminal markers a tmux server can inherit from the shell
+ *  that started it (JetBrains, Zed, Xcode). With any of them set and
+ *  ide.hasSeenNudge unset, gemini opens its IDE connection nudge on every
+ *  launch. Managed seats are never IDE-integrated; nothing is written. */
+export const GEMINI_LAUNCH_ENV: Record<string, string> = {
+  TERMINAL_EMULATOR: "",
+  XCODE_VERSION_ACTUAL: "",
+  ZED_SESSION_ID: "",
+};
+
 export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   id: "gemini",
   displayName: "Gemini CLI",
@@ -44,5 +54,6 @@ export const GEMINI_REGISTRATION: CliRuntimeRegistration = {
     dialect: GEMINI_DIALECT,
     patterns: GEMINI_PANE_PATTERNS,
     checkResumeTarget: checkGeminiResumeTarget,
+    launchEnv: GEMINI_LAUNCH_ENV,
   }, deps), deps),
 };
