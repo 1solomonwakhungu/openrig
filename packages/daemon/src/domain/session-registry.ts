@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { monotonicFactory } from "ulid";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import nodePath from "node:path";
 
 const ulid = monotonicFactory();
 import type { Session, Binding } from "./types.js";
@@ -464,21 +466,24 @@ export class SessionRegistry {
    *  needs. Lifted from rig-teardown so both the teardown pre-down path and the
    *  FR-4 periodic/manual snapshot refresh call ONE query (no duplication). */
   /**
-   * Whether another seat of this runtime, in any rig, is live in this cwd:
-   * its node's latest session is running, idle, or unknown, and its session
-   * name differs. Used by the late-capture sibling-seat guard.
+   * Another seat of this runtime, in any rig, live in this cwd: its node's
+   * latest session is running, idle, or unknown, and its session name differs.
+   * Returns that seat's session name (for the log), or null. Paths compare
+   * after normalization (resolve, no trailing slash, realpath when present).
+   * Used by the late-capture sibling-seat guard.
    */
-  hasLiveSiblingSeat(input: { runtime: string; cwd: string; sessionName: string }): boolean {
-    return !!this.db.prepare(`
-      SELECT 1
+  hasLiveSiblingSeat(input: { runtime: string; cwd: string; sessionName: string }): string | null {
+    const rows = this.db.prepare(`
+      SELECT s.session_name AS session_name, n.cwd AS cwd
       FROM nodes n
       JOIN sessions s ON s.node_id = n.id
-      WHERE n.runtime = ? AND n.cwd = ?
+      WHERE n.runtime = ?
         AND s.id = (SELECT s2.id FROM sessions s2 WHERE s2.node_id = n.id ORDER BY s2.created_at DESC, s2.id DESC LIMIT 1)
         AND s.status IN ('running', 'idle', 'unknown')
         AND s.session_name != ?
-      LIMIT 1
-    `).get(input.runtime, input.cwd, input.sessionName);
+    `).all(input.runtime, input.sessionName) as Array<{ session_name: string; cwd: string | null }>;
+    const cwd = normalizeSeatCwd(input.cwd);
+    return rows.find((row) => row.cwd !== null && normalizeSeatCwd(row.cwd) === cwd)?.session_name ?? null;
   }
 
   getLatestLiveSessions(rigId: string): LatestLiveSession[] {
@@ -644,4 +649,14 @@ interface BindingRow {
   cmux_workspace: string | null;
   cmux_surface: string | null;
   updated_at: string;
+}
+
+/** A cwd in comparable form: absolute, no trailing slash, symlinks resolved when the path exists. */
+export function normalizeSeatCwd(cwd: string): string {
+  const resolved = nodePath.resolve(cwd);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
 }

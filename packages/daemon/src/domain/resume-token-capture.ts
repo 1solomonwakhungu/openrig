@@ -24,7 +24,7 @@ export interface ResumeTokenCaptureDeps {
   /** Whether another live seat of this runtime shares this cwd (session
    *  registry). Present = the sibling-seat guard applies to CLI runtimes whose
    *  capture is not session-scoped (runtime-capture.ts). */
-  hasLiveSiblingSeat?: ((input: { runtime: string; cwd: string; sessionName: string }) => boolean) | null;
+  hasLiveSiblingSeat?: ((input: { runtime: string; cwd: string; sessionName: string }) => string | null) | null;
   contextUsageStore?: {
     readSidecar(sessionName: string): { ok: true; data: { session_id?: string } } | { ok: false; reason: string };
   } | null;

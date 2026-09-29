@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type Database from "better-sqlite3";
+import Database from "better-sqlite3";
 import { RigRepository } from "../src/domain/rig-repository.js";
 import { SessionRegistry } from "../src/domain/session-registry.js";
 import { EventBus } from "../src/domain/event-bus.js";
@@ -66,9 +66,21 @@ describe("sibling-seat guard", () => {
   describe("SessionRegistry.hasLiveSiblingSeat", () => {
     it("finds a live seat of the same runtime in the same cwd, in any rig", () => {
       const a = seat("r1", "a");
-      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: CWD, sessionName: a.sessionName })).toBe(false);
+      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: CWD, sessionName: a.sessionName })).toBeNull();
       seat("r2", "b");
-      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: CWD, sessionName: a.sessionName })).toBe(true);
+      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: CWD, sessionName: a.sessionName })).toBe("b@r2");
+    });
+
+    it("compares normalized cwds (trailing slash, relative segments, symlinks)", () => {
+      const real = nodePath.join(root, "repo");
+      const link = nodePath.join(root, "repo-link");
+      fs.mkdirSync(real, { recursive: true });
+      fs.symlinkSync(real, link);
+      const a = seat("r1", "a", { cwd: `${real}/` });
+      seat("r1", "b", { cwd: link });
+      seat("r1", "c", { cwd: nodePath.join(real, "sub", "..") });
+      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: real, sessionName: a.sessionName })).toMatch(/^(b|c)@r1$/);
+      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: `${link}/`, sessionName: "b@r1" })).toMatch(/^(a|c)@r1$/);
     });
 
     it("ignores other cwds, other runtimes, and stopped seats", () => {
@@ -76,7 +88,7 @@ describe("sibling-seat guard", () => {
       seat("r1", "b", { cwd: "/work/other" });
       seat("r1", "c", { runtime: "codex" });
       seat("r1", "d", { status: "exited" });
-      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: CWD, sessionName: a.sessionName })).toBe(false);
+      expect(registry.hasLiveSiblingSeat({ runtime: "example-cli", cwd: CWD, sessionName: a.sessionName })).toBeNull();
     });
   });
 
@@ -93,7 +105,8 @@ describe("sibling-seat guard", () => {
           .toEqual({ outcome: "skipped", reason: "ambiguous_seat" });
       }
       expect(hook).not.toHaveBeenCalled();
-      expect(log).toHaveBeenCalledWith(expect.stringContaining("another live example-cli seat shares /work/shared"));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("live example-cli seat b@r1 shares /work/shared"));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("live example-cli seat a@r1 shares /work/shared"));
       log.mockRestore();
     });
 
@@ -114,6 +127,28 @@ describe("sibling-seat guard", () => {
       const minted = { ...EXAMPLE_CLI_DESCRIPTOR, captureResumeToken: () => "sess_minted" };
       expect(await runDescriptorTokenCapture(minted, { sessionName: a.sessionName, cwd: CWD, seatStateDir: a.seatStateDir }, guard))
         .toEqual({ outcome: "token", token: "sess_minted" });
+    });
+
+    it("opencode seats in one cwd each capture from their own seat database", async () => {
+      const opencode = getRuntimeDescriptor("opencode")!;
+      expect(opencode.captureIsSessionScoped).toBe(true);
+      expect(getRuntimeDescriptor("kilo")!.captureIsSessionScoped).toBe(true);
+      const schema = fs.readFileSync(nodePath.join(import.meta.dirname, "fixtures", "opencode-family", "opencode-1.18.33-session-schema.sql"), "utf8");
+      const a = seat("r1", "a", { runtime: "opencode" });
+      const b = seat("r1", "b", { runtime: "opencode" });
+      const ids = { a: "ses_0198a2f0aaaaAAAAAAAAAAAAAA", b: "ses_0198a2f0bbbbBBBBBBBBBBBBBB" };
+      for (const [s, id] of [[a, ids.a], [b, ids.b]] as const) {
+        fs.mkdirSync(s.seatStateDir, { recursive: true });
+        const seatDb = new Database(nodePath.join(s.seatStateDir, "opencode.db"));
+        seatDb.pragma("foreign_keys = OFF");
+        seatDb.exec(schema);
+        seatDb.prepare("INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived) VALUES (?, 'proj', NULL, 'slug', ?, 't', '1.18.33', ?, ?, NULL)")
+          .run(id, CWD, Date.now() - 1_000, Date.now());
+        seatDb.close();
+      }
+      const capture = (s: typeof a) => runDescriptorTokenCapture(opencode, { sessionName: s.sessionName, cwd: CWD, seatStateDir: s.seatStateDir }, guard);
+      expect(await capture(a)).toEqual({ outcome: "token", token: ids.a });
+      expect(await capture(b)).toEqual({ outcome: "token", token: ids.b });
     });
 
     it("session-scoped built-in capture (claude/codex/pi) is never guarded", async () => {

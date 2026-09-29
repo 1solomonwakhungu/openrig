@@ -268,9 +268,12 @@ Sibling-seat guard: for a runtime whose capture is not session-scoped
 post-launch, refresher, and restore captures skip the hook while another live
 seat of the same runtime shares the cwd in any rig
 (`SessionRegistry.hasLiveSiblingSeat`), log why, and report
-`ambiguous_seat`. A seat with a minted token is unaffected. The built-ins set
-`captureIsSessionScoped: true` (their capture reads a per-session sidecar or
-the pane's own process), so they are never guarded. Sessions the owner starts
+`ambiguous_seat`, naming the blocking seat in the log. Cwds compare after
+normalization (absolute, no trailing slash, symlinks resolved when the path
+exists). A seat with a minted token is unaffected. Runtimes whose capture
+reads state keyed to the seat alone set `captureIsSessionScoped: true` and are
+never guarded: the built-ins (a per-session sidecar or the pane's own process)
+and the OpenCode family (the seat's own `OPENCODE_DB` / `KILO_DB`). Sessions the owner starts
 outside OpenRig in the same cwd are invisible to the registry; each adapter
 documents that limit. The restore plan
 preview does not run capture, so it can still show such a seat as

@@ -79,7 +79,7 @@ export async function runDescriptorTokenCapture(
   // cwd apart, so it is not asked. A seat with a minted token is unaffected:
   // its capture returns that token.
   if (!descriptor.captureIsSessionScoped && request.cwd && deps.hasLiveSiblingSeat && !readLaunchRecord(request.seatStateDir)?.presetToken) {
-    let shared = false;
+    let shared: string | null = null;
     try {
       shared = deps.hasLiveSiblingSeat({ runtime: descriptor.id, cwd: request.cwd, sessionName: request.sessionName });
     } catch (err) {
@@ -87,7 +87,7 @@ export async function runDescriptorTokenCapture(
       return { outcome: "skipped", reason: "ambiguous_seat" };
     }
     if (shared) {
-      console.log(`[openrig] ${descriptor.id} resume-token capture skipped for ${request.sessionName}: another live ${descriptor.id} seat shares ${request.cwd}`);
+      console.log(`[openrig] ${descriptor.id} resume-token capture skipped for ${request.sessionName}: live ${descriptor.id} seat ${shared} shares ${request.cwd}`);
       return { outcome: "skipped", reason: "ambiguous_seat" };
     }
   }
