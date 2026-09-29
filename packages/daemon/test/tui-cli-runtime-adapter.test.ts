@@ -10,6 +10,7 @@ import os from "node:os";
 import nodePath from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
+import { isAttentionRequiredReadinessCode } from "../src/domain/runtime-adapter.js";
 import { CLI_RUNTIME_REGISTRATIONS } from "../src/adapters/cli/index.js";
 import { createNodeFsOps } from "../src/adapters/node-fs-ops.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
@@ -198,6 +199,18 @@ describe("TuiCliRuntimeAdapter (example-cli fixture)", () => {
     const { adapter } = setup([atShell(), { command: "example-cli", content: `${lines}\nPlease log in` }]);
     const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
     expect(result.ok === false && result.evidence?.split("\n")).toHaveLength(12);
+  });
+
+  it("evidence skips the blank rows padding a full-screen capture", async () => {
+    const padded = `Please log in\nvisit https://example.test/device${"\n".repeat(40)}`;
+    const { adapter } = setup([atShell(), { command: "example-cli", content: padded, alternate: true }]);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result.ok === false && result.evidence).toBe("Please log in\nvisit https://example.test/device");
+  });
+
+  it("startup_dialog is an attention-required readiness code", () => {
+    expect(isAttentionRequiredReadinessCode("startup_dialog")).toBe(true);
+    expect(isAttentionRequiredReadinessCode("awaiting_runtime")).toBe(false);
   });
 
   it("maps a resume failure without recovery to resume_failed", async () => {

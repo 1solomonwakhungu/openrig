@@ -637,8 +637,12 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return { state: { kind: "pending" }, content };
   }
 
+  /** The last N non-padding lines: a full-screen capture is padded to the
+   *  pane height with blank rows, which would otherwise be all the evidence. */
   private evidence(content: string): string {
-    return content.split("\n").slice(-(this.spec.evidenceLines ?? DEFAULT_EVIDENCE_LINES)).join("\n");
+    const lines = content.split("\n");
+    while (lines.length > 0 && lines[lines.length - 1]!.trim() === "") lines.pop();
+    return lines.slice(-(this.spec.evidenceLines ?? DEFAULT_EVIDENCE_LINES)).join("\n");
   }
 
   private guidancePath(binding: NodeBinding): string | null {

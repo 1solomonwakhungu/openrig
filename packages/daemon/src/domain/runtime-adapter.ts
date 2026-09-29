@@ -72,6 +72,8 @@ export const ATTENTION_REQUIRED_READINESS_CODES = new Set([
   // but adding it here keeps the two paths semantically aligned.
   "codex_auth_refusal",
   "codex_client_incompatible",
+  // A CLI's first-run or startup dialog (gemini/qwen) that needs an operator.
+  "startup_dialog",
 ]);
 
 export function isAttentionRequiredReadinessCode(code: string | undefined): boolean {
