@@ -32,7 +32,7 @@ export type CurrentSessionResult =
 export type SessionPresence = "present" | "missing" | "unknown";
 
 const CURRENT_SESSION_SQL =
-  "SELECT id FROM session WHERE parent_id IS NULL AND time_archived IS NULL ORDER BY time_updated DESC, id DESC LIMIT 1";
+  "SELECT id FROM session WHERE parent_id IS NULL AND time_archived IS NULL AND time_updated >= ? ORDER BY time_updated DESC, id DESC LIMIT 1";
 const SESSION_BY_ID_SQL = "SELECT id FROM session WHERE id = ? LIMIT 1";
 
 export function openSessionDbReadonly(path: string): SessionDbReader {
@@ -59,10 +59,20 @@ function withReader<T>(
   }
 }
 
-/** The seat's current top-level session id. */
-export function readCurrentSessionId(dbPath: string, deps: SessionStoreDeps): CurrentSessionResult {
+/**
+ * The seat's current top-level session id. `updatedSince` (the current
+ * launch's start) skips sessions last used before this launch, so a fresh
+ * launch in a seat whose database still holds an older conversation reports
+ * nothing until its own first prompt. time_updated is epoch milliseconds.
+ */
+export function readCurrentSessionId(
+  dbPath: string,
+  deps: SessionStoreDeps,
+  updatedSince?: Date,
+): CurrentSessionResult {
   if (!deps.exists(dbPath)) return { ok: false, reason: "missing_db" };
-  const row = withReader(dbPath, deps, (reader) => reader.get(CURRENT_SESSION_SQL, []));
+  const since = updatedSince ? updatedSince.getTime() : 0;
+  const row = withReader(dbPath, deps, (reader) => reader.get(CURRENT_SESSION_SQL, [since]));
   if (!row.ok) return { ok: false, reason: "read_error" };
   const id = row.value?.id;
   if (typeof id !== "string") return { ok: false, reason: "no_session" };

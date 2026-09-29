@@ -216,6 +216,12 @@ describe("session database reads", () => {
     expect(readCurrentSessionId(dbPath, deps)).toEqual({ ok: true, token: TOKEN });
   });
 
+  it("skips sessions last updated before the current launch", () => {
+    createDb([{ id: OTHER_TOKEN, updated: 1_000 }, { id: TOKEN, updated: 5_000 }]);
+    expect(readCurrentSessionId(dbPath, deps, new Date(5_000))).toEqual({ ok: true, token: TOKEN });
+    expect(readCurrentSessionId(dbPath, deps, new Date(5_001))).toEqual({ ok: false, reason: "no_session" });
+  });
+
   it("refuses a malformed id in the database instead of persisting it", () => {
     createDb([{ id: "ses_bad", updated: 1 }]);
     expect(readCurrentSessionId(dbPath, deps)).toEqual({ ok: false, reason: "invalid_token" });

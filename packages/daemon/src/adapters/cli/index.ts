@@ -4,6 +4,10 @@
 // adapter".
 
 import type { CliRuntimeRegistration } from "./types.js";
+import { KILO_REGISTRATION } from "./kilo/index.js";
+import { OPENCODE_REGISTRATION } from "./opencode/index.js";
 
 export const CLI_RUNTIME_REGISTRATIONS: readonly CliRuntimeRegistration[] = [
+  KILO_REGISTRATION,
+  OPENCODE_REGISTRATION,
 ];
