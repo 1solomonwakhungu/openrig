@@ -1,0 +1,24 @@
+operator@host nogit-project-with-a-long-name % exec env BROWSER=true HOME=/home/
+operator ANTHROPIC_API_KEY=sk-ant-dummy /home/operator/.local/bin/aider --no-che
+ck-update --no-show-release-notes --no-analytics --no-gitignore --read AGENTS.md
+ --model sonnet --chat-history-file /home/operator/.openrig/state/aider/dev-impl
+@my-rig/w80g.md --input-history-file /home/operator/.openrig/state/aider/dev-imp
+l@my-rig/w80g.in
+────────────────────────────────────────────────────────────────────────────────
+No git repo found, create one to track aider's changes (recommended)? (Y)es/(N)o
+ [Yes]:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

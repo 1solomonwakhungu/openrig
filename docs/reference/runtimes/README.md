@@ -9,8 +9,10 @@ adapter", for how to add one.
 
 One line per runtime, alphabetical by id:
 
+- `aider`: [Aider](aider.md) (`aider`). Resume by per-seat chat history file, no fork, guidance via `--read AGENTS.md`.
 - `antigravity`: Antigravity CLI (`agy`). Resume by conversation id (captured late), no fork, managed `AGENTS.md` blocks. [antigravity.md](antigravity.md)
 - `claude-code`: Claude Code (`claude`). Resume, fork, managed `CLAUDE.md` blocks.
+- `cline`: [Cline CLI](cline.md) (`cline`). Resume by session id (captured after the first prompt), no fork, no per-seat model, managed `AGENTS.md` blocks.
 - `codex`: Codex (`codex`). Resume, fork, managed `AGENTS.md` blocks.
 - `copilot`: GitHub Copilot CLI (`copilot`). Resume by minted session id, managed `AGENTS.md` blocks, `.agents/skills`. No fork. See [copilot.md](copilot.md).
 - `cursor`: Cursor CLI (`cursor-agent`). Resume by captured chat id, managed `AGENTS.md` blocks, `.agents/skills`. No fork. See [cursor.md](cursor.md).

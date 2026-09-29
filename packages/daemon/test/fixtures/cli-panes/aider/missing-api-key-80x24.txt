@@ -1,0 +1,24 @@
+operator@host repo % exec env -u ANTHROPIC_API_KEY BROWSER=true HOME=/home/opera
+tor /home/operator/.local/bin/aider --no-check-update --no-show-release-notes --
+no-analytics --no-gitignore --read AGENTS.md --model sonnet --chat-history-file 
+/home/operator/.openrig/state/aider/dev-impl@my-rig/w80k.md --input-history-file
+ /home/operator/.openrig/state/aider/dev-impl@my-rig/w80k.in
+────────────────────────────────────────────────────────────────────────────────
+Update git name with: git config user.name "Your Name"
+Warning: claude-sonnet-4-5 expects these environment variables
+- ANTHROPIC_API_KEY: Not set
+Warning: claude-haiku-4-5 expects these environment variables
+- ANTHROPIC_API_KEY: Not set
+You can skip this check with --no-show-model-warnings
+
+https://aider.chat/docs/llms/warnings.html
+Open documentation url for more info? (Y)es/(N)o/(D)on't ask again [Yes]:
+
+
+
+
+
+
+
+
+

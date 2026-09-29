@@ -1,0 +1,24 @@
+operator@host repo % exec env BROWSER=true HOME=/home/operator ANTHROPIC_API_KEY
+=sk-ant-dummy /home/operator/.local/bin/aider --no-check-update --no-show-releas
+e-notes --no-analytics --no-gitignore --read AGENTS.md --model sonnet --chat-his
+tory-file /home/operator/.openrig/state/aider/dev-impl@my-rig/chat.md --input-hi
+story-file /home/operator/.openrig/state/aider/dev-impl@my-rig/w80r.in --restore
+-chat-history
+────────────────────────────────────────────────────────────────────────────────
+Error: Read-only file
+/home/operator/projects/a-very-long-workspace-directory-name-for-openrig-width-p
+robes/nested-project-with-long-name/repo/AGENTS.md does not exist. Skipping.
+Aider v0.86.2
+Main model: claude-sonnet-4-5 with diff edit format, infinite output
+Weak model: claude-haiku-4-5
+Git repo: .git with 0 files
+Repo-map: using 4096 tokens, auto refresh
+Restored previous conversation history.
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
