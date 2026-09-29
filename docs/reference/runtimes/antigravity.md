@@ -21,7 +21,7 @@ members:
 
 ## Launch
 
-The seat runs `exec env BROWSER=true agy [--model <m>] <posture>`.
+The seat runs `exec env AGY_CLI_DISABLE_AUTO_UPDATE=1 BROWSER=true agy [--model <m>] <posture>`.
 
 | Setting | Flag |
 |---|---|
@@ -58,9 +58,10 @@ Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or
 
 ## Self-update
 
-- Mechanism: agy runs a built-in background auto-updater at launch (it spawns a separate update process, downloads `updater.tar.gz`, and replaces the installed `agy`), throttled by `~/.gemini/antigravity-cli/last_check.timestamp`.
-- **No switch found.** agy 1.1.27 has no update flag (`--noUpdate`, `--no-update`, and similar are rejected as undefined), none of its twelve `AGY_*` environment variables controls updates, and the CLI reference documents no update setting. Managed seats therefore cannot turn it off without writing owner state, and the adapter does not.
-- Residual risk: a managed seat can update the operator's agy install. It updates only agy's own binary (not an npm or Homebrew global prefix) and happens at most once per update window. If agy adds a flag or environment variable for this, add it to the launch command.
+- Mechanism: agy runs a built-in background auto-updater at launch. It spawns a separate update process, downloads `updater.tar.gz`, and replaces the installed `agy`, throttled by `~/.gemini/antigravity-cli/last_check.timestamp`.
+- Disabled in every managed seat, on both launch paths (fresh and resume; agy has no fork), by `AGY_CLI_DISABLE_AUTO_UPDATE=1` in the launch environment. Nothing is written to the operator's agy config.
+- **Source-derived, not behavior-proven:** the variable name and the log line `Auto-update disabled via environment variable %s` are in the agy 1.1.27 binary. The accepted value was not observed live (the TUI is not launched, see below); `1` is the conventional truthy value. The first live launch should confirm that log line in `~/.gemini/antigravity-cli/cli.log`.
+- Correction: an earlier revision of this page said no update switch existed. That came from a strings search anchored on word boundaries, which missed variable names that the Go binary stores glued to the next string (`AGY_CLI_DISABLE_AUTO_UPDATE` among them). agy 1.1.27 has no update flag (`--noUpdate`, `--no-update`, and similar are rejected as undefined), and the CLI reference documents no update setting; the environment variable is the switch.
 
 ## Known limits
 
