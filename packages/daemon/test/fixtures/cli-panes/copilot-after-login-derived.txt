@@ -1,0 +1,46 @@
+
+  ╭─╮╭─╮
+  ╰─╯╰─╯  Copilot v1.0.89 uses AI.
+  █ ▘▝ █  Check for mistakes.
+   ▔▔▔▔
+
+ ✗ Failed to read model provider attribution: Error: Not authenticated
+
+ ✗ Failed to read model provider attribution: Error: Not authenticated
+
+ ● Tip: /help
+   └ Show help for interactive commands
+
+ ✗ Failed to read model provider attribution: Error: Not authenticated
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Please use /login to sign in to use Copilot
+ ● Signed in as octocat.
+
+ /home/user/work
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ← open sidebar · / commands · ? help · tab next tab

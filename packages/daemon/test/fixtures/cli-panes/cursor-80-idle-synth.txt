@@ -1,0 +1,10 @@
+
+  Cursor Agent
+  ~/work/a-very-long-directory-name-for-wrapping-tests/another-deeply-nested
+  -project-folder/work · main
+
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ → Plan, search, build anything                                             │
+ └────────────────────────────────────────────────────────────────────────────┘
+  Auto · 0%
+  / commands · @ files · ! shell

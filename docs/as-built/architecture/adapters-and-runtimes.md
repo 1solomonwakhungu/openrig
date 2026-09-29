@@ -372,6 +372,19 @@ tmux pane, driven by a `TuiCliRuntimeSpec`:
   an optional `recovery` and readiness `code`). Readiness honors the
   shell-foreground guard: a pane back at a shell is never ready and reports
   `runtime_exited`, whatever its scrollback says.
+- A gate may carry an `answer` (`TuiCliGateAnswer`: `keys`,
+  `expectOptionText`, `selectionMarker`, `dialogPath`, `describe`) for a
+  folder-trust dialog the CLI shows on every launch. The base sends the keys
+  once, and only during the seat's own launch wait, on lines this launch
+  printed, when `dialogPath` returns a folder that normalizes to exactly the
+  seat cwd or its realpath, and when the selected option on screen reads
+  `expectOptionText`. A dialog whose folder or selection cannot be read yet
+  (a capture taken mid-draw, or a folder that is not absolute) is retried for
+  a few polls; a different folder or a different selected option stops at
+  once. Otherwise, or if the dialog is still showing a few polls after the
+  answer, the launch is `attention_required`. Each answer is
+  logged and recorded in the seat's `launch.json` as `gateAnswers`. The GitHub
+  Copilot adapter uses it to trust the seat cwd for that session only.
 - Launch polls readiness with an injectable sleep up to `launchTimeoutMs`.
   Before typing it records the pane's absolute line position (tmux
   `history_size + cursor_y`); every poll captures only the lines after it, so
