@@ -158,3 +158,37 @@ export interface RuntimeAdapter {
   /** Check if the runtime harness is responsive and ready. */
   checkReady(binding: NodeBinding): Promise<ReadinessResult>;
 }
+
+// -- Restore-time resume contract --
+
+/** Everything the restore orchestrator knows when it resumes a seat. Each
+ *  adapter reads the fields its runtime understands and ignores the rest. */
+export interface RuntimeResumeRequest {
+  nodeId: string;
+  sessionName: string;
+  resumeType: string | null;
+  resumeToken: string | null;
+  cwd: string;
+  codexConfigProfile?: string | null;
+  model?: string | null;
+  resolvedPosture?: "floor" | "full_bypass";
+  permissionMode?: string;
+}
+
+export type RuntimeResumeResult =
+  | { ok: true; appliedLaunch?: import("./permission-drift.js").AppliedLaunchObservation }
+  | { ok: false; code: "attention_required"; message: string; evidence?: string }
+  | { ok: false; code: string; message: string };
+
+/**
+ * A runtime's restore-time resume adapter. The restore orchestrator walks its
+ * registered resume adapters in order and uses the first whose canResume()
+ * accepts the persisted (resumeType, resumeToken) pair. `code: "retry_fresh"`
+ * maps to the awaiting-decision stop-and-ask; `code: "attention_required"`
+ * maps to an attention outcome carrying `evidence`.
+ */
+export interface RuntimeResumeAdapter {
+  readonly runtime: string;
+  canResume(resumeType: string | null, resumeToken: string | null): boolean;
+  resume(request: RuntimeResumeRequest): Promise<RuntimeResumeResult>;
+}
