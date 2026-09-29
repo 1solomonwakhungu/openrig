@@ -46,6 +46,7 @@ Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never
 - The same limits as OpenCode. Also, Kilo-account organization settings stored in the session database are not visible to a seat with its own database.
 - Project skills under `.kilo/skills/` load, but Kilo treats them as project-scoped (not trusted for shell injection). Kilo only fully trusts global and `KILO_CONFIG_DIR` skills.
 - The npm package runs `node` as a launcher for a native `.kilo` binary, so the pane's foreground command is `node`. The runtime is identified from the launcher's arguments; `node` alone is never treated as Kilo.
+- A single `ctrl+c` at the idle prompt did not exit Kilo 7.8.1 in live testing, so stopping a seat never relies on keystrokes.
 - Kilo's one-time Claude migration shows a notification, not a blocking modal, so it needs no attention gate.
 
 ## What was verified live

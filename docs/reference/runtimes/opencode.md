@@ -79,6 +79,7 @@ The seat is ready when the pane shows the home placeholder `Ask anything` or the
 - OpenCode console accounts and their organization config are stored in the session database (the `account` tables), so a seat with its own database does not see them. Provider credentials work normally.
 - The footer marker assumes the default command palette key (`ctrl+p`). If you rebind it, a resumed seat is only detected as ready from the home placeholder.
 - npm installs run behind a `node` launcher, so the pane's foreground command is `node`. The runtime is identified from the launcher's arguments instead; `node` alone is never treated as OpenCode.
+- Stopping a seat never relies on keystrokes. The default exit keys (`ctrl+c`, `ctrl+d`, `<leader>q`) can be rebound, and in the Kilo fork a single `ctrl+c` at idle did not exit in live testing.
 
 ## What was verified live
 
