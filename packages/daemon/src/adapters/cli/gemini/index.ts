@@ -10,7 +10,7 @@ import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { GEMINI_DIALECT, validateSessionToken } from "../gemini-family/launch-args.js";
 import { GEMINI_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
 import { checkGeminiResumeTarget, findGeminiSessionFile } from "../gemini-family/session-store.js";
-import { createGeminiFamilyCapture, createGeminiFamilySpec, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
+import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 
 /**
  * Launch env that keeps gemini's env-triggered first-run dialogs off seat
@@ -49,6 +49,8 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   captureResumeToken: createGeminiFamilyCapture({
     sessionExists: (ctx, id) => findGeminiSessionFile(ctx, id) !== null,
   }),
+  // Maps the recorded approval mode back to a posture for permission drift.
+  permissionPostureFor: geminiFamilyPermissionPosture(GEMINI_DIALECT),
   supportsFork: false,
   // Gemini reads GEMINI.md by default, not AGENTS.md.
   guidanceFile: "GEMINI.md",

@@ -49,7 +49,7 @@ members:
 | floor (default) | `--approval-mode auto-edit`: file edits are auto-approved, shell commands and other tools still ask |
 | `full_bypass` (YOLO, or a `full_bypass` permission policy) | `--yolo`: every tool call is auto-approved |
 
-OpenRig records the approval mode it passed (`auto-edit` or `yolo`) as the seat's applied-launch observation (axis `permission`) for permission drift.
+OpenRig records the approval mode it passed (`auto-edit` or `yolo`) as the seat's applied-launch observation (axis `permission`). When the seat has a permission policy (member or rig), permission drift compares the posture that mode implies with the policy's posture and reports `aligned` or `drift`; with no policy attached it reports `unknown`. This checks the launch arguments OpenRig emitted, not the CLI's own enforcement.
 
 OpenRig always passes an approval mode because Qwen Code's own default is `auto`, where a model classifier decides which tool calls run. Note the hyphenated `auto-edit` (Gemini CLI spells it `auto_edit`).
 

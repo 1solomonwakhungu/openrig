@@ -3,6 +3,8 @@ import nodePath from "node:path";
 import { execFile } from "node:child_process";
 import type Database from "better-sqlite3";
 import { AppliedLaunchObservationStore } from "./applied-launch-observation-store.js";
+import { RigRepository } from "./rig-repository.js";
+import type { ResolvedLaunchPosture } from "../adapters/yolo-mode.js";
 import {
   diagnoseRuntimePosture,
   parseClaudePermissionModes,
@@ -92,6 +94,7 @@ function productionFs(permissionModes: ClaudePermissionModeCache, accessSync: Ac
 /** Strict, read-only, generation-aware observer for an explicitly requested seat. */
 export class PermissionDriftObserver implements PermissionDriftReader {
   private readonly observations: AppliedLaunchObservationStore;
+  private readonly rigRepo: RigRepository;
   private readonly fs: PermissionDriftFs;
   private readonly now?: () => Date;
 
@@ -105,6 +108,7 @@ export class PermissionDriftObserver implements PermissionDriftReader {
     },
   ) {
     this.observations = new AppliedLaunchObservationStore(input.db);
+    this.rigRepo = new RigRepository(input.db);
     // Hermeticity (hotfix qitem-20260822230440-da0d2ad6 FIX 2): construction no
     // longer eagerly warms the mode cache — `read()` self-warms (see the cache),
     // so the eager call added nothing but an execFile("claude","--help") from
@@ -117,9 +121,10 @@ export class PermissionDriftObserver implements PermissionDriftReader {
   }
 
   diagnose(nodeId: string): PermissionDriftDiagnostic | null {
-    const node = this.input.db.prepare("SELECT runtime, cwd FROM nodes WHERE id = ?").get(nodeId) as {
+    const node = this.input.db.prepare("SELECT runtime, cwd, rig_id FROM nodes WHERE id = ?").get(nodeId) as {
       runtime: string | null;
       cwd: string | null;
+      rig_id: string | null;
     } | undefined;
     if (!node) return null;
     return diagnoseRuntimePosture({
@@ -128,6 +133,23 @@ export class PermissionDriftObserver implements PermissionDriftReader {
       applied: this.observations.readCurrent(nodeId),
       fs: this.fs,
       now: this.now,
+      expectedPosture: this.policyPosture(nodeId, node.rig_id),
     });
+  }
+
+  /** The seat's persisted policy posture: the node attachment, else the rig
+   *  attachment (the same precedence launch and restore resolve), or null when
+   *  no policy is attached. The env-driven YOLO default is deliberately not
+   *  inferred here: fresh launches and restores apply it differently, so a
+   *  guess could report false drift. */
+  private policyPosture(nodeId: string, rigId: string | null): ResolvedLaunchPosture | null {
+    try {
+      const node = this.rigRepo.getNodePolicyProvenance(nodeId);
+      if (node) return node.launchPosture;
+      const rig = rigId ? this.rigRepo.getRigPolicyProvenance(rigId) : null;
+      return rig?.launchPosture ?? null;
+    } catch {
+      return null; // a read failure leaves drift unknown, never a false verdict
+    }
   }
 }

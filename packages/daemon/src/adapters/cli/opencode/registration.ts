@@ -55,6 +55,9 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
     processMatch: variant.processMatch,
     // LSP servers and MCP servers run as child processes of the TUI.
     reapProcessTreeOnStop: true,
+    // observeLaunch records "auto" only under full_bypass; the floor passes no
+    // permission flag (state unknown), so it is never compared.
+    permissionPostureFor: (observedValue) => (observedValue === "auto" ? "full_bypass" : null),
   };
 }
 

@@ -13,6 +13,7 @@ import type { RuntimeTokenCaptureInput, RuntimeVerifyContext } from "../../../do
 import type { TuiCliRuntimeSpec, TuiCliPrepareContext } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeAdapterDeps } from "../types.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import {
   buildGeminiFamilyArgv, mintSessionToken, validateSessionToken, type GeminiFamilyDialect,
 } from "./launch-args.js";
@@ -131,6 +132,16 @@ export function createGeminiFamilyCapture(options: GeminiFamilyCaptureOptions) {
     if (record.mode === "fork" && options.captureForkChild && input.launchStartedAt) {
       return options.captureForkChild(ctx, input.launchStartedAt);
     }
+    return null;
+  };
+}
+
+/** Descriptor `permissionPostureFor`: the approval mode observeLaunch records,
+ *  mapped back to the OpenRig posture that emits it. */
+export function geminiFamilyPermissionPosture(dialect: GeminiFamilyDialect) {
+  return (observedValue: string): ResolvedLaunchPosture | null => {
+    if (observedValue === "yolo") return "full_bypass";
+    if (observedValue === dialect.floorApprovalMode) return "floor";
     return null;
   };
 }

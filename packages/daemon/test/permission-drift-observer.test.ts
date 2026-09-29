@@ -123,4 +123,35 @@ describe("PermissionDriftObserver", () => {
       db.close();
     }
   });
+  it("compares a registry runtime's recorded posture with the seat's node or rig policy", () => {
+    const db = createFullTestDb();
+    try {
+      const rigs = new RigRepository(db);
+      const sessions = new SessionRegistry(db);
+      const store = new AppliedLaunchObservationStore(db);
+      const rig = rigs.createRig("posture-rig");
+      const fsStub = { readFile: () => "", cwdReadable: () => true, commandAvailable: () => true, claudePermissionModes: () => [] };
+      const observer = new PermissionDriftObserver({ db, fs: fsStub });
+      const seat = (id: string, runtime: string, value: string) => {
+        const node = rigs.addNode(rig.id, id, { runtime, cwd: "/work/project" });
+        sessions.registerClaimedSession(node.id, `${id.replace(".", "-")}@posture-rig`);
+        store.recordGeneration(sessions.currentOccupantTenure(node.id)!.generationUuid, {
+          runtime, axis: "permission", state: "observed", value, reason: "emitted_launch_arguments",
+        });
+        return node;
+      };
+
+      const noPolicy = seat("dev.a", "gemini", "yolo");
+      expect(observer.diagnose(noPolicy.id)?.enforcement).toMatchObject({ state: "unknown", reason: "expected_posture_unknown" });
+
+      rigs.setRigPolicyProvenance(rig.id, { origin: "builtin", resolvedTarget: null, declaringDir: null, launchPosture: "floor" });
+      expect(observer.diagnose(noPolicy.id)?.enforcement).toMatchObject({ state: "drift", expected: "floor", effective: "full_bypass" });
+
+      const nodeOverride = seat("dev.b", "qwen", "yolo");
+      rigs.setNodePolicyProvenance(nodeOverride.id, { origin: "builtin", resolvedTarget: null, declaringDir: null, launchPosture: "full_bypass" });
+      expect(observer.diagnose(nodeOverride.id)?.enforcement).toMatchObject({ state: "aligned", expected: "full_bypass" });
+    } finally {
+      db.close();
+    }
+  });
 });
