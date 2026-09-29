@@ -1,0 +1,24 @@
+       world pack to load either.
+     - Working dir /Users/.../rigs/opencode/work is a near-empty scratch repo:
+        one commit (c6cbc7c init), a one-line README, and untracked AGENTS.md.
+
+     No work is routed to this seat and no context pack defines what the rig
+     is for. Per the onboarding guidance, guessing at a purpose here is the
+     failu                                                            block
+     says     Commands                                         esc    ing a
+     task.
+              Search
+     To gi                                                            te --to
+     dev-s    Suggested                                                "..."
+     to ty    Switch session                              ctrl+x l
+              New session                                 ctrl+x n
+     ▣  Bu    Switch model                                ctrl+x m
+              Connect provider
+  ┃           Share session
+  ┃
+  ┃
+  ┃  Build · Big Pickle OpenCode Zen
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /home/operator/src/client-projects/some-team/work/smoke15.1K (8 ctrl+p
+   home/rigs/opencode/work                                         commands
+

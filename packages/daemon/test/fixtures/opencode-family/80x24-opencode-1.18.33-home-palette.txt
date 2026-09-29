@@ -1,0 +1,24 @@
+
+
+
+
+                                                      ▄
+                     █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+
+              Commands                                         esc
+
+   ┃          Search
+   ┃  Ask
+   ┃          Suggested
+   ┃  Buil    Switch model                                ctrl+x m
+   ╹▀▀▀▀▀▀    Connect provider                                        ▀▀▀▀▀▀▀▀
+                                                                      commands
+              System
+              Hide tips                                   ctrl+x h
+
+
+
+  /home/operator/src/client-projects/some-team/work/builder2-          1.18.33
+  probe80/work/client-workspaces/a-rather-long-project-directory-
+  name/service:main
+

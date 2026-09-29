@@ -72,12 +72,17 @@ Not supported. `--fork` only works on a session in the same database, and every 
 
 ## Readiness
 
-The seat is ready when the pane shows the home placeholder `Ask anything` or the prompt footer `ctrl+p commands`. A resumed session opens without the placeholder, so the footer covers it. A pane back at a shell is never ready. OpenCode shows no trust or login modal, so no attention gates are mapped.
+The seat is ready when the pane shows the home placeholder `Ask anything`, the prompt box's bottom border (`╹▀▀▀…`), or the prompt footer `ctrl+p commands`, and no dialog is open. A resumed session opens on the session route, which has no placeholder, so the border covers it. The footer alone is not enough: in the daemon's 80x24 panes it wraps across two lines when the cwd is long.
+
+The prompt box stays drawn underneath dialogs (the command palette, model and session pickers, alerts), so every marker is refused while a dialog header (title on the left, `esc` on the right) is on screen. A pane back at a shell is never ready. OpenCode shows no trust or login modal, so no attention gates are mapped.
+
+## Stop and teardown
+
+The seat is stopped by killing its tmux session, never by keystrokes. OpenRig then reaps the pane's process tree (`reapProcessTreeOnStop`), because OpenCode starts LSP servers and local MCP servers as child processes that can outlive the session. The reap is PID-scoped: it uses a snapshot of the pane's tree taken before the kill.
 
 ## Known limits
 
 - OpenCode console accounts (the hidden `opencode console login` command, used for organization-managed config) are stored in the session database, so a seat with its own database does not see them. OpenCode has no separate setting for the account store. Provider sign-in (`opencode auth login`, env keys) is unaffected.
-- The footer marker assumes the default command palette key (`ctrl+p`). If you rebind it, a resumed seat is only detected as ready from the home placeholder.
 - npm installs run behind a `node` launcher, so the pane's foreground command is `node`. The runtime is identified from the launcher's arguments instead; `node` alone is never treated as OpenCode.
 - Stopping a seat never relies on keystrokes. The default exit keys (`ctrl+c`, `ctrl+d`, `<leader>q`) can be rebound, and in the Kilo fork a single `ctrl+c` at idle did not exit in live testing.
 
@@ -90,6 +95,8 @@ Verified on 2026-09-29 against opencode 1.18.33 (Homebrew build), in an isolated
 - No session row exists at idle before the first prompt.
 - `opencode -s <unknown id>` prints `Error: Session not found: <id>` and exits to the shell.
 - The `session` table schema, and `OPENCODE_DB` path resolution.
+- 80x24 panes with a long cwd, for the home screen, a resumed session, the command palette open on both, and `Session not found`. These captures are the readiness test fixtures.
+- A real `rig up`, `rig down`, and restore on an isolated OpenRig daemon. See the pull request that added the 80x24 fixtures for the smoke evidence.
 - With a per-seat `OPENCODE_DB`, `opencode auth list` still reports the credential from the shared `auth.json` (probed with a fake key).
 
 Read from source (tag `v1.18.33`): the session-route prompt footer, the session id format, project skills scanning, `AGENTS.md` precedence, and where the database stores accounts.

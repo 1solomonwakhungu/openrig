@@ -1,0 +1,24 @@
+       onboarding-02 onboarding-width retrieval has nothing behind it. No
+       world pack to load either.
+     - Working dir /Users/.../rigs/opencode/work is a near-empty scratch repo:
+       one commit (c6cbc7c init), a one-line README, and untracked AGENTS.md.
+
+     No work is routed to this seat and no context pack defines what the rig
+     is fo                                                            s the
+     failu    Commands                                         esc    block
+     says                                                             ing a
+     task.    Search
+
+     To gi    Suggested                                               te --to
+     dev-s    Share session                                            "..."
+     to ty    Switch session                              ctrl+x l
+              New session                                 ctrl+x n
+     ▣  Bu    Switch model                                ctrl+x m
+
+  ┃
+  ┃
+  ┃
+  ┃  Code  · Auto Free Kilo Gateway
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                        15.1K  ctrl+p commands
+

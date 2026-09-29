@@ -39,7 +39,7 @@ pods:
 | Home placeholder | `Ask anything…` (Unicode ellipsis) | `Ask anything...` (three dots) |
 | Default agent | Build | Code |
 
-Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never does), resume (`-s <ses_ id>` with a pre-launch check of the seat's database), fork (refused), guidance (`AGENTS.md`), and readiness all match OpenCode.
+Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never does), resume (`-s <ses_ id>` with a pre-launch check of the seat's database), fork (refused), guidance (`AGENTS.md`), readiness (including the dialog guard), and stop all match OpenCode. Stop kills the tmux session and then reaps the pane's process tree (`reapProcessTreeOnStop`), which also covers the npm `node` launcher and its native `.kilo` child.
 
 ## Known limits
 
@@ -58,6 +58,7 @@ Verified on 2026-09-29 against kilo 7.8.1 (npm, installed into an isolated prefi
 - The home idle screen (`Ask anything...`, `Code · Auto Free Kilo Gateway`, `tab agents  ctrl+p commands` footer).
 - The pane's foreground process is `node`, with the child binary `.kilo`.
 - The `session` table schema is byte-identical to OpenCode 1.18.33's.
+- 80x24 panes with a long cwd, for the home screen, a session resumed from a local `kilo import`, the command palette open on both, `Session not found`, and a first start with a `~/.claude/CLAUDE.md` to migrate (no modal appeared). These captures are the readiness test fixtures.
 - With a per-seat `KILO_DB`, `kilo auth list` reports the credential from the shared `auth.json`, and the seat database's credential table holds the imported copy (probed with a fake key).
 
 Read from source (Kilo-Org/kilocode, main at 2026-09-29): `KILO_DB` resolution, the session id prefix, `.kilo` project config and skills scanning, the migration notification, the `Session not found` TUI error shared with OpenCode, and where Kilo Gateway login is stored (`auth.json`, read with `auth.get("kilo")`).

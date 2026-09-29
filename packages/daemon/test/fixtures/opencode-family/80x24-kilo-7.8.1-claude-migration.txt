@@ -1,0 +1,24 @@
+
+
+               ██  ██ ██🬺🬏   ██  ██   ██🬺🬏     ████ ██     ██🬺🬏
+               ████🬺🬏 ▀▀██   ██  ▀▀ ██▀▀██   ██▀▀▀▀ ██     ▀▀██
+               ██  ██ ██████ 🬁🬬████ 🬁🬬██▀▀   🬁🬬████ 🬁🬬████ ██████
+               ▀▀  ▀▀ ▀▀▀▀▀▀   ▀▀▀▀   ▀▀       ▀▀▀▀   ▀▀▀▀ ▀▀▀▀▀▀
+
+
+   ┃
+   ┃  Ask anything... "Fix broken tests"
+   ┃
+   ┃  Code  · Auto Free Kilo Gateway
+   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                   tab agents  ctrl+p commands
+
+
+
+
+
+              ● Tip Press tab to cycle between Build and Plan agents
+  /home/operator/src/client-projects/some-team/work/builder2-            7.8.1
+  probe80/work/client-workspaces/a-rather-long-project-directory-
+  name/service:main
+
