@@ -43,7 +43,8 @@ Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never
 
 ## Known limits
 
-- The same limits as OpenCode. Also, Kilo-account organization settings stored in the session database are not visible to a seat with its own database.
+- The same limits as OpenCode.
+- Kilo account sign-in is not affected by the per-seat database. `kilo auth login` stores the Kilo Gateway token in the shared `auth.json`, the gateway reads it from there, and on every startup Kilo copies `auth.json` into the seat database's credential table.
 - Project skills under `.kilo/skills/` load, but Kilo treats them as project-scoped (not trusted for shell injection). Kilo only fully trusts global and `KILO_CONFIG_DIR` skills.
 - The npm package runs `node` as a launcher for a native `.kilo` binary, so the pane's foreground command is `node`. The runtime is identified from the launcher's arguments; `node` alone is never treated as Kilo.
 - A single `ctrl+c` at the idle prompt did not exit Kilo 7.8.1 in live testing, so stopping a seat never relies on keystrokes.
@@ -57,5 +58,6 @@ Verified on 2026-09-29 against kilo 7.8.1 (npm, installed into an isolated prefi
 - The home idle screen (`Ask anything...`, `Code · Auto Free Kilo Gateway`, `tab agents  ctrl+p commands` footer).
 - The pane's foreground process is `node`, with the child binary `.kilo`.
 - The `session` table schema is byte-identical to OpenCode 1.18.33's.
+- With a per-seat `KILO_DB`, `kilo auth list` reports the credential from the shared `auth.json`, and the seat database's credential table holds the imported copy (probed with a fake key).
 
-Read from source (Kilo-Org/kilocode, main at 2026-09-29): `KILO_DB` resolution, the session id prefix, `.kilo` project config and skills scanning, the migration notification, and the `Session not found` TUI error shared with OpenCode.
+Read from source (Kilo-Org/kilocode, main at 2026-09-29): `KILO_DB` resolution, the session id prefix, `.kilo` project config and skills scanning, the migration notification, the `Session not found` TUI error shared with OpenCode, and where Kilo Gateway login is stored (`auth.json`, read with `auth.get("kilo")`).

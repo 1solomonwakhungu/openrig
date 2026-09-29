@@ -53,7 +53,7 @@ A seat is `full_bypass` when its resolved permission policy says so, or, with no
 
 ## Session database and resume
 
-Each seat gets its own session database: the launch sets `OPENCODE_DB=<OPENRIG_HOME>/state/opencode/<session>/opencode.db`. That keeps each seat's current session unambiguous even when pod-mates share a `cwd`. Provider credentials (`auth.json` and env vars) stay shared.
+Each seat gets its own session database: the launch sets `OPENCODE_DB=<OPENRIG_HOME>/state/opencode/<session>/opencode.db`. That keeps each seat's current session unambiguous even when pod-mates share a `cwd`. Provider credentials stay shared: OpenCode reads `auth.json` from its data directory, not from the session database, so a seat's own database does not affect sign-in.
 
 OpenCode creates a session only when the first prompt is sent, so a fresh launch has no resume token yet. OpenRig reads the token later, read-only, from the seat's database: the most recently updated top-level, unarchived session. It does this after launch, in the periodic resume-metadata refresh, and once at restore if no token was persisted.
 
@@ -76,7 +76,7 @@ The seat is ready when the pane shows the home placeholder `Ask anything` or the
 
 ## Known limits
 
-- OpenCode console accounts and their organization config are stored in the session database (the `account` tables), so a seat with its own database does not see them. Provider credentials work normally.
+- OpenCode console accounts (the hidden `opencode console login` command, used for organization-managed config) are stored in the session database, so a seat with its own database does not see them. OpenCode has no separate setting for the account store. Provider sign-in (`opencode auth login`, env keys) is unaffected.
 - The footer marker assumes the default command palette key (`ctrl+p`). If you rebind it, a resumed seat is only detected as ready from the home placeholder.
 - npm installs run behind a `node` launcher, so the pane's foreground command is `node`. The runtime is identified from the launcher's arguments instead; `node` alone is never treated as OpenCode.
 - Stopping a seat never relies on keystrokes. The default exit keys (`ctrl+c`, `ctrl+d`, `<leader>q`) can be rebound, and in the Kilo fork a single `ctrl+c` at idle did not exit in live testing.
@@ -90,5 +90,6 @@ Verified on 2026-09-29 against opencode 1.18.33 (Homebrew build), in an isolated
 - No session row exists at idle before the first prompt.
 - `opencode -s <unknown id>` prints `Error: Session not found: <id>` and exits to the shell.
 - The `session` table schema, and `OPENCODE_DB` path resolution.
+- With a per-seat `OPENCODE_DB`, `opencode auth list` still reports the credential from the shared `auth.json` (probed with a fake key).
 
 Read from source (tag `v1.18.33`): the session-route prompt footer, the session id format, project skills scanning, `AGENTS.md` precedence, and where the database stores accounts.
