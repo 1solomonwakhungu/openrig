@@ -81,6 +81,10 @@ installs are virtualenvs), never the owner's global or Homebrew Python. A uv too
 install ships no pip at all, so those installs fail harmlessly there. None of
 these knobs writes owner config.
 
+The variable is inherited by commands aider runs in the pane (for example
+`/run pip install ...`), so a global `pip install` from inside an aider seat is
+refused too; install into a virtualenv, or run it outside the seat.
+
 ## Readiness
 
 - Ready: aider's prompt (`> `, or `<edit format>> ` such as `architect> `,
