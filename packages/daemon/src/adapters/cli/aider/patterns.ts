@@ -11,6 +11,11 @@
 // Confirmations ("(Y)es/(N)o ... [Yes]:") block input until answered. Only a
 // confirmation at the tail of the capture counts; once answered the question
 // stays in scrollback followed by more output.
+//
+// Width: OpenRig panes are 80x24 and tmux capture hard-wraps long lines (no
+// -J), so a line break can fall anywhere in a long question, including inside
+// "(Y)es/(N)o" or "[Yes]:" (seen live: "...(Y)es/(N)o\n [Yes]:"). Phrases that
+// can wrap are matched with wrapTolerant(); short, line-leading text is not.
 
 export interface AiderGatePattern {
   pattern: RegExp;
@@ -23,23 +28,33 @@ export interface AiderErrorPattern {
   reason: string;
 }
 
+/** A regex source matching `literal` with an optional hard wrap (newline)
+ *  between any two characters. */
+export function wrapTolerant(literal: string): string {
+  return [...literal].map((ch) => ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("\\n?");
+}
+
 export const AIDER_READY_PATTERNS: readonly RegExp[] = [
   /(?:^|\n)(?:[A-Za-z][\w-]*(?: multi)?|multi)?> ?\s*$/,
 ];
 
-const PENDING_CONFIRM = String.raw`\(Y\)es\/\(N\)o[^\n]*\[(?:Yes|No)\]:[ \t]*\s*$`;
+// "(Y)es/(N)o", then up to a few wrapped lines of options ("/(D)on't ask
+// again"), then the default "[Yes]:" / "[No]:" as the last text in the pane.
+const PENDING_CONFIRM = `${wrapTolerant("(Y)es/(N)o")}[^]{0,200}?(?:${wrapTolerant("[Yes]:")}|${wrapTolerant("[No]:")})\\s*$`;
 
 export const AIDER_GATE_PATTERNS: readonly AiderGatePattern[] = [
   {
     // Printed before the prompt when the model's provider key is missing. It
     // is not tail-anchored: answering the doc-link offer does not fix the key,
     // and under --yes-always aider reaches its prompt with the warning above.
-    pattern: /expects these environment variables\s*\n\s*- [A-Z][A-Z0-9_]*: Not set/,
+    // Anchored on the short "- KEY: Not set" line: the "<model> expects these
+    // environment variables" line above it wraps for long model names.
+    pattern: /^- [A-Z][A-Z0-9_]*: Not set[ \t]*$/m,
     code: "login_required",
     reason: "aider is missing the API key for the selected model; set the provider key (for example ANTHROPIC_API_KEY) in the seat env",
   },
   {
-    pattern: new RegExp(String.raw`No git repo found, create one to track aider's changes[^\n]*` + PENDING_CONFIRM),
+    pattern: new RegExp(`${wrapTolerant("No git repo found, create one")}[^]{0,200}?${PENDING_CONFIRM}`),
     code: "trust_gate",
     reason: "aider is asking to create a git repo in the seat cwd",
   },

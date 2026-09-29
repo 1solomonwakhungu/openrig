@@ -119,4 +119,7 @@ no-git confirmation, the missing `--read` file message, per-seat history files
 written at startup, `--restore-chat-history` ("Restored previous conversation
 history."), and `BROWSER=true` neutralizing Python's `webbrowser.open`. Prompt
 and confirmation formats were also read from `aider/io.py`. The pane fixtures
-used in tests are these live captures.
+used in tests are these live captures, including 80x24 captures (OpenRig's pane
+size) with a long cwd: ready, resumed, missing key, and the no-git question,
+which hard-wraps at 80 columns (`...(Y)es/(N)o` / ` [Yes]:`). Confirmation
+patterns tolerate a wrap at any column.

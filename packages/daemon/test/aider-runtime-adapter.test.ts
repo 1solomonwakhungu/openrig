@@ -174,6 +174,37 @@ describe("aider pane patterns", () => {
     expect(classify(pane(fixture))).toBe(expected);
   });
 
+  describe("80x24 panes (OpenRig's pane size; tmux hard-wraps long lines)", () => {
+    it.each([
+      ["ready-80x24.txt", "ready"],
+      ["resumed-80x24.txt", "ready"],
+      ["missing-api-key-80x24.txt", "gate:login_required"],
+      ["no-git-repo-80x24.txt", "gate:trust_gate"],
+    ])("live 80x24 capture with a long cwd %s -> %s", (fixture, expected) => {
+      expect(classify(pane(fixture))).toBe(expected);
+    });
+
+    it("the no-git question wrapped at 80 columns still names its own reason", () => {
+      const hit = AIDER_GATE_PATTERNS.find((g) => g.pattern.test(pane("no-git-repo-80x24.txt")));
+      expect(hit?.reason).toMatch(/git repo/);
+    });
+
+    it("a confirmation hard-wrapped at any column is still a pending gate", () => {
+      const question = "No git repo found, create one to track aider's changes (recommended)? (Y)es/(N)o [Yes]: ";
+      for (let at = 1; at < question.length - 1; at++) {
+        const wrapped = `Aider v0.86.2\n${question.slice(0, at)}\n${question.slice(at)}`;
+        const hit = AIDER_GATE_PATTERNS.find((g) => g.pattern.test(wrapped));
+        expect(hit?.code, `wrap at ${at}`).toBe("trust_gate");
+        expect(hit?.reason, `wrap at ${at}`).toMatch(/git repo/);
+      }
+    });
+
+    it("the missing-key gate holds when a long model name wraps its warning line", () => {
+      const screen = "Warning: openrouter/anthropic/claude-sonnet-4.5-with-a-long-provider-suffix expec\nts these environment variables\n- OPENROUTER_API_KEY: Not set\n";
+      expect(classify(screen)).toBe("gate:login_required");
+    });
+  });
+
   it("the no-git gate names its own reason", () => {
     const hit = AIDER_GATE_PATTERNS.find((g) => g.pattern.test(pane("no-git-repo.txt")));
     expect(hit?.reason).toMatch(/git repo/);

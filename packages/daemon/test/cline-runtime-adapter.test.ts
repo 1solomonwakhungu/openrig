@@ -229,6 +229,16 @@ describe("cline pane patterns (live captures)", () => {
     expect(classify(pane(fixture))).toBe(expected);
   });
 
+  it.each([
+    ["home-ready-80x24.txt", "ready"],
+    ["resumed-chat-80x24.txt", "ready"],
+    ["login-required-80x24.txt", "gate:login_required"],
+    ["announcement-modal-80x24.txt", "gate:update_gate"],
+    ["resume-unknown-session-80x24.txt", "error:retry_fresh"],
+  ])("live 80x24 capture with a long cwd %s -> %s", (fixture, expected) => {
+    expect(classify(pane(fixture))).toBe(expected);
+  });
+
   it("an empty or shell-only pane is pending", () => {
     expect(classify("")).toBe("pending");
     expect(classify("user@host ~/work/repo % cline --auto-approve false\n")).toBe("pending");

@@ -133,4 +133,7 @@ screens (sign-in, notice modals, home, chat), `--auto-approve true|false`
 footer, `-m` persisting into `providers.json`, `CLINE_MODEL` having no effect on the TUI, `CLINE_DISABLE_CLINE_PASS_NOTICE`,
 lazy session creation, the session metadata layout, `--id` resume with history,
 the unknown-session error, and the alternate screen under `exec` launch. The skills and rules search paths were read from
-the bundled source. The pane fixtures used in tests are these live captures.
+the bundled source. The pane fixtures used in tests are these live captures, including 80x24
+captures (OpenRig's pane size) with a long cwd: home, resumed chat, sign-in,
+a notice modal, and the unknown-session error. Cline lays its TUI out to the
+pane width, so no pattern text wraps at 80 columns.
