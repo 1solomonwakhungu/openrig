@@ -187,7 +187,9 @@ function ctx(files: Record<string, string>, env: NodeJS.ProcessEnv = {}): Sessio
 const GEMINI_ROOT = `${HOME}/.gemini`;
 const GEMINI_CHATS = `${GEMINI_ROOT}/tmp/project/chats`;
 const GEMINI_REGISTRY = { [`${GEMINI_ROOT}/projects.json`]: JSON.stringify({ projects: { [CWD]: "project" } }) };
-const geminiSession = (id: string) => `${JSON.stringify({ sessionId: id, projectHash: "abc", kind: "main" })}\n{"$set":{}}\n`;
+const geminiSession = (id: string, exchange = true) => `${JSON.stringify({ sessionId: id, projectHash: "abc", kind: "main" })}\n${
+  exchange ? JSON.stringify({ $set: { messages: [{ type: "user", content: [{ text: "hi" }] }, { type: "gemini", content: "hello" }] } }) : '{"$set":{}}'
+}\n`;
 
 describe("gemini session store", () => {
   it("resolves the chats dir from projects.json and honors GEMINI_CLI_HOME", () => {
@@ -201,6 +203,13 @@ describe("gemini session store", () => {
     const c = ctx({ ...GEMINI_REGISTRY, [path]: geminiSession(ID) });
     expect(findGeminiSessionFile(c, ID)).toBe(path);
     expect(checkGeminiResumeTarget(c, ID)).toEqual({ ok: true });
+  });
+
+  it("a session file gemini wrote at launch, with no exchange yet, is not resumable", () => {
+    const path = `${GEMINI_CHATS}/session-2026-09-29T17-15-${ID.slice(0, 8)}.jsonl`;
+    const c = ctx({ ...GEMINI_REGISTRY, [path]: geminiSession(ID, false) });
+    expect(findGeminiSessionFile(c, ID)).toBe(path);
+    expect(checkGeminiResumeTarget(c, ID).ok).toBe(false);
   });
 
   it("does not accept a file whose 8-char prefix collides but full id differs", () => {
@@ -258,11 +267,17 @@ describe("qwen session store", () => {
 
     it("returns the single new runtime.json that is not the parent", () => {
       const c = ctx({
+        [`${QWEN_CHATS}/${ID}.jsonl`]: "{}\n",
         [`${QWEN_CHATS}/${PARENT}.runtime.json`]: status(PARENT, "2026-09-29T17:20:01.000Z"),
         [`${QWEN_CHATS}/${ID}.runtime.json`]: status(ID, "2026-09-29T17:20:02.500Z"),
         [`${QWEN_CHATS}/11111111-1111-4111-8111-111111111111.runtime.json`]: status("11111111-1111-4111-8111-111111111111", "2026-09-29T16:00:00.000Z"),
       });
       expect(captureQwenForkChild(c, { parentId: PARENT, launchStartedAt })).toBe(ID);
+    });
+
+    it("ignores a child without its conversation file (not resumable yet)", () => {
+      const c = ctx({ [`${QWEN_CHATS}/${ID}.runtime.json`]: status(ID, "2026-09-29T17:20:02.500Z") });
+      expect(captureQwenForkChild(c, { parentId: PARENT, launchStartedAt })).toBeNull();
     });
 
     it("returns null when two seats launched in the same cwd at once (no guessing)", () => {

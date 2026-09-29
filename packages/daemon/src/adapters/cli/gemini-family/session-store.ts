@@ -100,12 +100,30 @@ export function findGeminiSessionFile(ctx: SessionStoreContext, sessionId: strin
   return null;
 }
 
-/** Resume precheck. A found file can still hold no resumable message; gemini
- *  then exits with "Error resuming session:", which the pane error patterns
- *  map to retry_fresh. */
+/** A model reply in the session file. gemini writes the file at launch but
+ *  only resumes a session with a real exchange (chatRecordingService
+ *  hasResumableContent); the injected session-context user message alone does
+ *  not count, and a model reply only follows a real prompt. */
+const GEMINI_MODEL_REPLY_RE = /"type"\s*:\s*"gemini"/;
+
+/** Whether gemini can resume `sessionId` from this cwd: the session file
+ *  exists and holds a model reply. */
+export function geminiSessionIsResumable(ctx: SessionStoreContext, sessionId: string): boolean {
+  const path = findGeminiSessionFile(ctx, sessionId);
+  if (!path) return false;
+  try {
+    return GEMINI_MODEL_REPLY_RE.test(ctx.fs.readFile(path));
+  } catch {
+    return false;
+  }
+}
+
+/** Resume precheck. The same test as late capture, so a seat whose token was
+ *  captured is also one this accepts. gemini itself still guards with
+ *  "Error resuming session:" (pane error pattern, retry_fresh). */
 export function checkGeminiResumeTarget(ctx: SessionStoreContext, sessionId: string): ResumeTargetCheck {
-  if (findGeminiSessionFile(ctx, sessionId)) return { ok: true };
-  return { ok: false, reason: "gemini has no stored session with that id for this cwd" };
+  if (geminiSessionIsResumable(ctx, sessionId)) return { ok: true };
+  return { ok: false, reason: "gemini has no resumable session with that id for this cwd (no stored exchange)" };
 }
 
 // ── Qwen ─────────────────────────────────────────────────────────────────────
@@ -155,19 +173,6 @@ export function findQwenSessionFile(ctx: SessionStoreContext, sessionId: string)
     }
   }
   return null;
-}
-
-/** Whether qwen recorded a launch of `sessionId` in this cwd (runtime.json is
- *  written at launch, before any message). */
-export function qwenRuntimeStatusExists(ctx: SessionStoreContext, sessionId: string): boolean {
-  const id = sessionId.toLowerCase();
-  return qwenChatsDirs(ctx).some((dir) => {
-    try {
-      return ctx.fs.exists(nodePath.join(dir, `${id}.runtime.json`));
-    } catch {
-      return false;
-    }
-  });
 }
 
 /** Resume precheck: qwen writes <id>.jsonl on the first message, so a seat
@@ -220,6 +225,9 @@ export function captureQwenForkChild(
       const startedAt = parseStartedAt(status.started_at);
       const workDir = typeof status.work_dir === "string" ? nodePath.resolve(status.work_dir) : "";
       if (!id || id === parent || workDir !== cwd || !(startedAt >= since)) continue;
+      // The fork copies the parent history into <child>.jsonl; without it the
+      // child is not resumable, so it is not reported.
+      if (!findQwenSessionFile(ctx, id)) continue;
       found.add(id);
     }
   }

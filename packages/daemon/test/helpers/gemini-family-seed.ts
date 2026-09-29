@@ -16,14 +16,20 @@ function write(fs: SeedFs, path: string, content: string): void {
 }
 
 /** gemini: projects.json maps cwd -> slug; the session file sits in
- *  tmp/<slug>/chats with the full id on its first line. */
-export function seedGeminiSession(fs: SeedFs, input: { homedir: string; cwd: string; token: string; slug?: string }): string {
+ *  tmp/<slug>/chats with the full id on its first line. By default the file
+ *  holds a real exchange (resumable); `exchange: false` seeds what gemini
+ *  writes at launch before any prompt (not resumable). */
+export function seedGeminiSession(fs: SeedFs, input: { homedir: string; cwd: string; token: string; slug?: string; exchange?: boolean }): string {
   const root = nodePath.join(input.homedir, ".gemini");
   const slug = input.slug ?? "project";
   write(fs, nodePath.join(root, "projects.json"), `${JSON.stringify({ projects: { [nodePath.resolve(input.cwd)]: slug } }, null, 2)}\n`);
   const file = nodePath.join(root, "tmp", slug, "chats", `session-2026-09-29T12-00-${input.token.slice(0, 8)}.jsonl`);
   const meta = { sessionId: input.token, projectHash: "0".repeat(64), startTime: "2026-09-29T12:00:00.000Z", lastUpdated: "2026-09-29T12:00:00.000Z", kind: "main" };
-  write(fs, file, `${JSON.stringify(meta)}\n`);
+  const messages = input.exchange === false ? [] : [
+    { id: "m1", timestamp: "2026-09-29T12:00:10.000Z", type: "user", content: [{ text: "Summarize the repo." }] },
+    { id: "m2", timestamp: "2026-09-29T12:00:20.000Z", type: "gemini", content: "It has packages and docs." },
+  ];
+  write(fs, file, `${JSON.stringify(meta)}\n${JSON.stringify({ $set: { messages } })}\n`);
   return file;
 }
 
