@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { CURSOR_CHAT_SNAPSHOT_FILE, CURSOR_REGISTRATION, CURSOR_SPEC } from "../src/adapters/cli/cursor/index.js";
 import { createNodeFsOps } from "../src/adapters/node-fs-ops.js";
+import { runDescriptorTokenCapture } from "../src/domain/runtime-capture.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import {
@@ -313,6 +314,22 @@ describe("Cursor adapter launch", () => {
       rig.snapshot([]);
       rig.seed(OTHER_ID);
       expect(rig.capture()).toBe(OTHER_ID);
+    } finally {
+      rig.cleanup();
+    }
+  });
+
+  it("pod-mate race: the base sibling-seat guard skips cursor capture while another live cursor seat shares the cwd", async () => {
+    const rig = captureRig();
+    try {
+      expect(CURSOR_REGISTRATION.descriptor.captureIsSessionScoped).toBeFalsy();
+      rig.snapshot([]);
+      rig.seed(SEEDED_ID);
+      const request = { sessionName: HARNESS_SESSION, cwd: rig.cwd, seatStateDir: rig.seatStateDir, homedir: rig.homedir, launchStartedAt: new Date(Date.now() - 60_000) };
+      const shared = await runDescriptorTokenCapture(CURSOR_REGISTRATION.descriptor, request, { hasLiveSiblingSeat: () => "dev-other@harness-rig" });
+      expect(shared).toEqual({ outcome: "skipped", reason: "ambiguous_seat" });
+      const alone = await runDescriptorTokenCapture(CURSOR_REGISTRATION.descriptor, request, { hasLiveSiblingSeat: () => null });
+      expect(alone).toMatchObject({ outcome: "token", token: SEEDED_ID });
     } finally {
       rig.cleanup();
     }
