@@ -58,6 +58,15 @@ export const GEMINI_PANE_PATTERNS: GeminiFamilyPanePatterns = {
     // sets TERM_PROGRAM=tmux). Managed launches clear those, so this is the
     // fail-fast fallback, not the normal path.
     { pattern: /Do you want to connect .+ to Gemini CLI\?/, reason: "gemini is asking to connect an IDE; answer it in the pane or set ide.hasSeenNudge in ~/.gemini/settings.json", code: "startup_dialog" },
+    // terminalSetup.ts consent (env-triggered; the launch env clears its
+    // triggers). The box may wrap between the two phrases.
+    { pattern: /works best with[\s│]*Shift\+Enter/, reason: "gemini is asking to configure terminal keybindings; answer No in the pane (Yes edits the editor keybindings file)", code: "startup_dialog" },
+    // Content-triggered startup dialogs (repo or owner config, not env): fail
+    // fast with evidence instead of timing out.
+    { pattern: /New Agents Discovered/, reason: "gemini found unacknowledged project agents in .gemini/agents; acknowledge or decline them in the pane", code: "startup_dialog" },
+    { pattern: /New or changed \S+ policies detected/, reason: "gemini found new or changed policies; accept or ignore them in the pane", code: "startup_dialog" },
+    { pattern: /Authentication required for MCP Server:/, reason: "gemini needs OAuth consent for a configured MCP server", code: "startup_dialog" },
+    { pattern: /and installing updates\./, reason: "gemini is asking for consent to update an installed extension", code: "startup_dialog" },
   ],
 };
 
@@ -81,6 +90,10 @@ export const QWEN_PANE_PATTERNS: GeminiFamilyPanePatterns = {
     // WelcomeBackDialog.tsx: only when <cwd>/.qwen/PROJECT_SUMMARY.md exists
     // (written by /summary). Managed launches disable it for that cwd unless
     // the operator set ui.enableWelcomeBack themselves; fail fast then.
+    // Content-triggered startup dialogs (repo or owner config, not env).
+    { pattern: /Command Format Migration/, reason: "qwen found legacy TOML commands in .qwen/commands or ~/.qwen/commands and asks to migrate them", code: "startup_dialog" },
+    { pattern: /Approve this server/, reason: "qwen is asking to approve a project MCP server", code: "startup_dialog" },
+    { pattern: /Built-in Provider Updates?\b/, reason: "qwen is offering a built-in provider update", code: "startup_dialog" },
     { pattern: /Welcome back! \(Last updated:/, reason: "qwen is showing its Welcome back dialog (the cwd has .qwen/PROJECT_SUMMARY.md); choose in the pane or set ui.enableWelcomeBack: false", code: "startup_dialog" },
   ],
 };

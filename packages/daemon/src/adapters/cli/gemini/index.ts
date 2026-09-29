@@ -12,12 +12,25 @@ import { GEMINI_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
 import { checkGeminiResumeTarget, findGeminiSessionFile } from "../gemini-family/session-store.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 
-/** Clears the IDE-terminal markers a tmux server can inherit from the shell
- *  that started it (JetBrains, Zed, Xcode). With any of them set and
- *  ide.hasSeenNudge unset, gemini opens its IDE connection nudge on every
- *  launch. Managed seats are never IDE-integrated; nothing is written. */
+/**
+ * Launch env that keeps gemini's env-triggered first-run dialogs off seat
+ * launches. A tmux server passes its starting shell's env to every pane, so a
+ * server started from an IDE terminal would otherwise trigger:
+ * - the IDE connection nudge (detect-ide.ts: JetBrains TERMINAL_EMULATOR,
+ *   ZED_SESSION_ID, XCODE_VERSION_ACTUAL, or TERM_PROGRAM vscode/sublime/Zed);
+ * - the terminal keybinding consent prompt (terminalSetup.ts: CURSOR_TRACE_ID,
+ *   VSCODE_GIT_ASKPASS_MAIN, VSCODE_GIT_IPC_HANDLE, or TERM_PROGRAM=vscode),
+ *   whose preselected "Yes" writes the owner's editor keybindings.json.
+ * Every check is a truthiness or equality test, so an empty value disables it.
+ * TERM_PROGRAM is pinned to tmux, which tmux itself sets in panes. Managed
+ * seats are never IDE-integrated; nothing is written.
+ */
 export const GEMINI_LAUNCH_ENV: Record<string, string> = {
+  CURSOR_TRACE_ID: "",
   TERMINAL_EMULATOR: "",
+  TERM_PROGRAM: "tmux",
+  VSCODE_GIT_ASKPASS_MAIN: "",
+  VSCODE_GIT_IPC_HANDLE: "",
   XCODE_VERSION_ACTUAL: "",
   ZED_SESSION_ID: "",
 };

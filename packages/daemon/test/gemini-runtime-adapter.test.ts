@@ -109,10 +109,12 @@ describe("gemini runtime adapter", () => {
     expect(byEnv.pane.typed[0]).toContain("'--yolo'");
   });
 
-  it("clears inherited IDE-terminal markers so the IDE nudge never opens (no config write)", async () => {
+  it("clears inherited IDE-terminal markers so the IDE nudge and keybinding prompt never open (no config write)", async () => {
     const { adapter, pane, files } = launchRig();
     await adapter.launchHarness(harnessBinding(), { name: "x" });
-    expect(pane.typed[0]).toMatch(/^exec env 'TERMINAL_EMULATOR=' 'XCODE_VERSION_ACTUAL=' 'ZED_SESSION_ID=' 'gemini' /);
+    expect(pane.typed[0]).toMatch(
+      /^exec env 'CURSOR_TRACE_ID=' 'TERMINAL_EMULATOR=' 'TERM_PROGRAM=tmux' 'VSCODE_GIT_ASKPASS_MAIN=' 'VSCODE_GIT_IPC_HANDLE=' 'XCODE_VERSION_ACTUAL=' 'ZED_SESSION_ID=' 'gemini' /,
+    );
     expect(Object.keys(files.files).filter((f) => f.includes(".gemini"))).toEqual([]);
   });
 
@@ -123,6 +125,20 @@ describe("gemini runtime adapter", () => {
     expect(result).toMatchObject({ ok: false, recovery: "attention_required" });
     if (!result.ok) expect(result.evidence).toContain("Do you want to connect");
     const ready = await GEMINI_REGISTRATION.createAdapter(harnessDeps({ tmux: mockTmux([{ command: "node", content: nudge }]).tmux, fsOps: memFs() })).checkReady(harnessBinding());
+    expect(ready).toMatchObject({ ready: false, code: "startup_dialog" });
+  });
+
+  it.each([
+    ["terminal keybinding consent (wrapped in its box)", "│ Gemini CLI works best with\n│ Shift+Enter/Ctrl+Enter for multiline input. Would you like to automatically configure your terminal keybindings?\n│ Do you want to continue?\n│ ● 1. Yes   2. No"],
+    ["new project agents", "New Agents Discovered\nThe following agents were found in this project. Please review them:\n● 1. Acknowledge and Enable"],
+    ["policy update", "New or changed workspace policies detected\nLocation: /work/project/.gemini/policies\nDo you want to accept and load these policies?"],
+    ["MCP OAuth consent", "Authentication required for MCP Server: 'github.'\n\nDo you want to continue?"],
+    ["extension update consent", "Migrating extension \"x\" to a new repository and installing updates.\nDo you want to continue?"],
+  ])("fails fast with evidence on the %s dialog", async (_name, screen) => {
+    const { adapter } = launchRig([{ command: "node", content: screen }]);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required" });
+    const ready = await GEMINI_REGISTRATION.createAdapter(harnessDeps({ tmux: mockTmux([{ command: "node", content: screen }]).tmux, fsOps: memFs() })).checkReady(harnessBinding());
     expect(ready).toMatchObject({ ready: false, code: "startup_dialog" });
   });
 

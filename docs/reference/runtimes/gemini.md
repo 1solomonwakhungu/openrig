@@ -63,9 +63,25 @@ The command OpenRig types into the pane (each argument shell-quoted; `exec` make
 exec 'gemini' '--model' 'gemini-2.5-pro' '--approval-mode' 'auto_edit' '--skip-trust' '--session-id' '<uuid>'
 ```
 
-## Launch environment
+## Launch environment and startup dialogs
 
-The seat inherits the tmux pane environment (so `GEMINI_API_KEY` and friends reach the CLI). OpenRig clears three variables for the launch: `TERMINAL_EMULATOR`, `ZED_SESSION_ID`, and `XCODE_VERSION_ACTUAL`. A tmux server started from a JetBrains, Zed, or Xcode terminal passes those to every pane, and with any of them set (and `ide.hasSeenNudge` unset) Gemini CLI opens "Do you want to connect ... to Gemini CLI?" on every launch. tmux already sets `TERM_PROGRAM=tmux`, so a VS Code terminal does not trigger it. Nothing is written to config. If the nudge still appears, the launch fails fast with `attention_required`, code `startup_dialog`, and pane evidence.
+The seat inherits the tmux pane environment (so `GEMINI_API_KEY` and friends reach the CLI). A tmux server passes the environment of the shell that started it to every pane, and two Gemini CLI first-run dialogs key off IDE-terminal variables:
+
+- the IDE connection nudge ("Do you want to connect ... to Gemini CLI?"): `TERMINAL_EMULATOR` (JetBrains), `ZED_SESSION_ID`, `XCODE_VERSION_ACTUAL`, or `TERM_PROGRAM` of vscode, sublime, or Zed;
+- the terminal keybinding prompt ("Gemini CLI works best with Shift+Enter/Ctrl+Enter ..."): `CURSOR_TRACE_ID`, `VSCODE_GIT_ASKPASS_MAIN`, `VSCODE_GIT_IPC_HANDLE`, or `TERM_PROGRAM=vscode`. Its preselected "Yes" rewrites the editor's `keybindings.json`.
+
+OpenRig clears those variables for the launch and pins `TERM_PROGRAM=tmux` (what tmux sets in panes anyway). Nothing is written to config.
+
+Other startup dialogs come from repo or owner content, not the environment. OpenRig does not answer them; the launch fails fast with `attention_required`, code `startup_dialog`, and pane evidence:
+
+| Dialog | Trigger |
+|---|---|
+| New Agents Discovered | unacknowledged agents in the cwd's `.gemini/agents` (loaded because seats trust the cwd) |
+| New or changed ... policies detected | new or changed policy files |
+| Authentication required for MCP Server | a configured MCP server needs OAuth |
+| Extension update consent | an installed extension update needs consent |
+
+Trust and auth dialogs are covered under Launch posture, Auth, and Readiness. Dialogs that only open from slash commands (theme, settings, privacy, permissions) and in-session prompts (tool approvals, quota) are not launch-time.
 
 ## Readiness
 

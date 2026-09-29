@@ -228,6 +228,20 @@ describe("qwen Welcome back dialog", () => {
   });
 });
 
+describe("qwen content-triggered startup dialogs", () => {
+  it.each([
+    ["command format migration", "Command Format Migration\nFound 2 TOML command files:\n  user: deploy.toml\nThe TOML format is deprecated. Would you like to migrate them to Markdown format?"],
+    ["project MCP server approval", "MCP server 'db' from .qwen/settings.json\n● Approve this server\n  Approve all pending servers in this workspace"],
+    ["built-in provider update", "Built-in Provider Update · DashScope\nModel parameters updated (context window, capabilities, etc.)"],
+  ])("fails fast with evidence on the %s dialog", async (_name, screen) => {
+    const pane = mockTmux([atShell(), { command: "node", content: screen }]);
+    const adapter = QWEN_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: memFs() }));
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required" });
+    if (!result.ok) expect(result.evidence).toBeTruthy();
+  });
+});
+
 describe("qwen late capture", () => {
   const seatStateDir = nodePath.join(HARNESS_STATE_ROOT, "qwen", HARNESS_SESSION);
   const launchStartedAt = new Date("2026-09-29T12:00:00.000Z");

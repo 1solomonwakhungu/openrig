@@ -62,7 +62,8 @@ No positional prompt is ever passed: `qwen "text"` runs one shot and exits.
 ## Startup dialogs
 
 - "Welcome back!": Qwen Code shows it on every launch, resume included, in a cwd that has `.qwen/PROJECT_SUMMARY.md` (only the `/summary` command writes that file). When the file exists, OpenRig sets `ui.enableWelcomeBack: false` in the cwd's `.qwen/settings.json` before launch (merge-only and atomic; an existing `ui.enableWelcomeBack` value is kept). If the dialog shows anyway, the launch fails fast with `attention_required`, code `startup_dialog`, and pane evidence.
-- IDE connection nudge: Qwen Code only offers it when `TERM_PROGRAM=vscode` or the CLI runs under an IDE process. tmux sets `TERM_PROGRAM=tmux` and detaches from the starting terminal, so it does not appear in seats.
+- IDE connection nudge: Qwen Code only offers it when `TERM_PROGRAM=vscode` or the CLI runs under an IDE process. tmux sets `TERM_PROGRAM=tmux` and detaches from the starting terminal, so it does not appear in seats. Qwen Code has no terminal keybinding prompt (Gemini CLI's is not in the fork).
+- Content-triggered dialogs fail fast with `attention_required`, code `startup_dialog`, and pane evidence: "Command Format Migration" (legacy `.toml` commands in `.qwen/commands` or `~/.qwen/commands`), project MCP server approval ("Approve this server"), and "Built-in Provider Update".
 
 ## Readiness
 
