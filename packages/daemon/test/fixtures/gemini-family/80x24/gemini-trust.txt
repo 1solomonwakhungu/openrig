@@ -1,0 +1,24 @@
+ℹ Skipping project agents due to untrusted folder. To enable, ensure that the
+  project root is trusted.
+
+⚠  Warning: True color (24-bit) support not detected. Using a terminal with true
+   color enabled will result in a better visual experience.
+
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ Do you trust the files in this folder?                                     │
+ │                                                                            │
+ │ Trusting a folder allows Gemini CLI to load its local configurations,      │
+ │ including custom commands, hooks, MCP servers, agent skills, and settings. │
+ │ These configurations could execute code on your behalf or change the       │
+ │ behavior of the CLI.                                                       │
+ │                                                                            │
+ │                                                                            │
+ │ ● 1. Trust folder (nested-service-module-with-long-name)                   │
+ │   2. Trust parent folder (a-very-long-project-directory-name-for-wrap-che… │
+ │   3. Don't trust                                                           │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
+

@@ -1,0 +1,24 @@
+  │ /Users/.../nested-service-module-with-long-name                          │
+  └──────────────────────────────────────────────────────────────────────────┘
+  Tips: You can resume a previous conversation by running qwen --continue or
+  qwen --resume.
+  ●︎ Extensions changed on disk. Run /reload-plugins to apply updates.
+   ╭──────────────────────────────────────────────────────────────────────────
+   │
+   │ Do you trust this folder?
+   │ Trusting a folder allows Qwen Code to execute commands it suggests. This
+   │  is a security feature to prevent accidental execution in untrusted
+   │ directories.
+   │
+   │ › 1. Trust folder (nested-service-module-with-long-name)
+   │   2. Trust parent folder (a-very-long-project-directory-name-for-wrap-c…
+   │   3. Don't trust (esc)
+   │
+   ╰──────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+

@@ -1,0 +1,24 @@
+  │ /Users/.../summary-service-module-with-long-name                         │
+  └──────────────────────────────────────────────────────────────────────────┘
+  Tips: You can resume a previous conversation by running qwen --continue or
+  qwen --resume.
+  ●︎ Extensions changed on disk. Run /reload-plugins to apply updates.
+   ╭──────────────────────────────────────────────────────────────────────────
+   │
+   │ Welcome back! (Last updated: 1 hour ago)
+   │
+   │
+   │ What would you like to do?
+   │ Choose how to proceed with your session:
+   │
+   │ › 1. Start new chat session
+   │   2. Continue previous conversation
+   │
+   ╰──────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
