@@ -89,6 +89,16 @@ describe("qwen runtime adapter", () => {
     expect(pane.typed[0]).not.toContain("--skip-trust");
   });
 
+  it("records the emitted approval mode as the applied-launch observation", async () => {
+    const floor = await launchRig().adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(floor).toMatchObject({
+      ok: true,
+      appliedLaunch: { runtime: "qwen", axis: "permission", state: "observed", value: "auto-edit", reason: "emitted_launch_arguments" },
+    });
+    const bypass = await launchRig().adapter.launchHarness(harnessBinding({ launchPosture: "full_bypass" }), { name: "x" });
+    expect(bypass).toMatchObject({ ok: true, appliedLaunch: { runtime: "qwen", axis: "permission", state: "observed", value: "yolo" } });
+  });
+
   it("full_bypass passes --yolo instead of an approval mode", async () => {
     const { adapter, pane } = launchRig();
     await adapter.launchHarness(harnessBinding({ launchPosture: "full_bypass" }), { name: "x" });

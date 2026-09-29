@@ -12,6 +12,7 @@ import { LAUNCH_RECORD_FILE, type LaunchRecord } from "../../../domain/runtime-c
 import type { RuntimeTokenCaptureInput, RuntimeVerifyContext } from "../../../domain/runtime-registry.js";
 import type { TuiCliRuntimeSpec, TuiCliPrepareContext } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeAdapterDeps } from "../types.js";
+import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
 import {
   buildGeminiFamilyArgv, mintSessionToken, validateSessionToken, type GeminiFamilyDialect,
 } from "./launch-args.js";
@@ -76,6 +77,15 @@ export function createGeminiFamilySpec(
     errorPatterns: patterns.errorPatterns,
     // Node startup plus the first screen takes a few seconds on a warm cache.
     launchTimeoutMs: 45_000,
+    // Permission-drift observation of the approval mode actually passed on the
+    // command line (buildGeminiFamilyArgv always passes one).
+    observeLaunch: ({ posture }): AppliedLaunchObservation => ({
+      runtime: descriptor.id,
+      axis: "permission",
+      state: "observed",
+      value: posture === "full_bypass" ? "yolo" : dialect.floorApprovalMode,
+      reason: "emitted_launch_arguments",
+    }),
   };
 }
 

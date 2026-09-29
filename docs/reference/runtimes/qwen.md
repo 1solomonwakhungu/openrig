@@ -1,4 +1,4 @@
-# Qwen Code runtime (`qwen`)
+# Qwen Code runtime (`runtime: qwen`)
 
 OpenRig runs [Qwen Code](https://github.com/QwenLM/qwen-code) as an interactive TUI in the seat's tmux pane. Qwen Code is a fork of Gemini CLI and shares most of the OpenRig adapter with the `gemini` runtime. Verified against Qwen Code 0.24.7.
 
@@ -38,6 +38,8 @@ members:
     restore_policy: resume_if_possible
 ```
 
+## Model
+
 `model` is passed as `--model <value>`. Omit it to use Qwen Code's own default (`model.name` in settings, then the provider's model variable).
 
 ## Launch posture
@@ -46,6 +48,8 @@ members:
 |---|---|
 | floor (default) | `--approval-mode auto-edit`: file edits are auto-approved, shell commands and other tools still ask |
 | `full_bypass` (YOLO, or a `full_bypass` permission policy) | `--yolo`: every tool call is auto-approved |
+
+OpenRig records the approval mode it passed (`auto-edit` or `yolo`) as the seat's applied-launch observation (axis `permission`) for permission drift.
 
 OpenRig always passes an approval mode because Qwen Code's own default is `auto`, where a model classifier decides which tool calls run. Note the hyphenated `auto-edit` (Gemini CLI spells it `auto_edit`).
 
@@ -86,6 +90,10 @@ Supported for `session_source` with `ref.kind: native_id` and the parent session
 
 - Guidance: OpenRig merges managed blocks into `QWEN.md` in the seat cwd. Qwen Code reads `QWEN.md` and `AGENTS.md` by default; `QWEN.md` keeps OpenRig's blocks separate from Codex and Pi seats that share the cwd `AGENTS.md`. `rig-role` content is delivered per seat through the pane, not merged. Rig teardown removes OpenRig's managed blocks from `QWEN.md`.
 - Skills: projected into `<cwd>/.qwen/skills/<name>/SKILL.md`, a project skills location Qwen Code discovers.
+
+## Stop
+
+Qwen Code exits cleanly when its tmux session is killed (verified live), so OpenRig does not reap its process tree. Stopping never relies on keystrokes.
 
 ## Known limits
 

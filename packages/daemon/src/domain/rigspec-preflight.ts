@@ -463,7 +463,7 @@ export async function verifyCliRuntimesAvailable(
       await exec(cmd);
     } catch {
       errors.push(
-        `Runtime "${runtime}" not available ('${cmd}' failed). The spec declares a ${runtime} member, so the launch would fail. Fix: install ${descriptor.displayName}${descriptor.installHint ? ` (${descriptor.installHint})` : ""} and ensure '${descriptor.binary}' is on PATH.`,
+        `Runtime "${runtime}" not available ('${cmd}' failed). The spec declares a member with runtime "${runtime}", so the launch would fail. Fix: install ${descriptor.displayName}${descriptor.installHint ? ` (${descriptor.installHint})` : ""} and ensure '${descriptor.binary}' is on PATH.`,
       );
     }
   }
