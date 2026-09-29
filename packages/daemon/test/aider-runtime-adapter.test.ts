@@ -199,9 +199,34 @@ describe("aider pane patterns", () => {
       }
     });
 
+    it("'- X_API_KEY: Not set' inside ordinary chat output after ready does not gate the seat", () => {
+      const ready = pane("ready-80x24.txt").trimEnd().replace(/>\s*$/, "");
+      const chat = [
+        ready,
+        "> #### which env vars does the deploy script need?",
+        "",
+        "The script reads these; on this machine:",
+        "- STRIPE_API_KEY: Not set",
+        "- DATABASE_URL: Not set",
+        "",
+        "Tokens: 1.2k sent, 80 received.",
+        "─".repeat(80),
+        "> ",
+      ].join("\n");
+      expect(classify(chat)).toBe("ready");
+    });
+
     it("the missing-key gate holds when a long model name wraps its warning line", () => {
       const screen = "Warning: openrouter/anthropic/claude-sonnet-4.5-with-a-long-provider-suffix expec\nts these environment variables\n- OPENROUTER_API_KEY: Not set\n";
       expect(classify(screen)).toBe("gate:login_required");
+    });
+
+    it("the missing-key gate holds with the warning phrase hard-wrapped at any column", () => {
+      const phrase = "expects these environment variables";
+      for (let at = 1; at < phrase.length; at++) {
+        const wrapped = `Warning: sonnet ${phrase.slice(0, at)}\n${phrase.slice(at)}\n- ANTHROPIC_API_KEY: Not set\n`;
+        expect(classify(wrapped), `wrap at ${at}`).toBe("gate:login_required");
+      }
     });
   });
 

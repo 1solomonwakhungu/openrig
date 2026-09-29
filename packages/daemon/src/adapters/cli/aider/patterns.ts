@@ -47,9 +47,11 @@ export const AIDER_GATE_PATTERNS: readonly AiderGatePattern[] = [
     // Printed before the prompt when the model's provider key is missing. It
     // is not tail-anchored: answering the doc-link offer does not fix the key,
     // and under --yes-always aider reaches its prompt with the warning above.
-    // Anchored on the short "- KEY: Not set" line: the "<model> expects these
-    // environment variables" line above it wraps for long model names.
-    pattern: /^- [A-Z][A-Z0-9_]*: Not set[ \t]*$/m,
+    // The "<model> expects these environment variables" warning, which wraps
+    // for long model names, followed within a few lines by a "- KEY: Not set"
+    // entry. The context keeps an unrelated "- X: Not set" chat line from
+    // gating a ready seat.
+    pattern: new RegExp(`${wrapTolerant("expects these environment variables")}[ \\t]*\\n(?:[^\\n]*\\n){0,6}?- [A-Z][A-Z0-9_]*: Not set`),
     code: "login_required",
     reason: "aider is missing the API key for the selected model; set the provider key (for example ANTHROPIC_API_KEY) in the seat env",
   },
