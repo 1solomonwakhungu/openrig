@@ -1,0 +1,3 @@
+No saved session found with ID 22222222-2222-4333-8444-555555555555. Run `qwen --resume` without an ID to choose from ex
+isting sessions.
+user@host project % 
