@@ -22,7 +22,8 @@ export interface OpencodeFamilyVariant {
   /** Native executable names that show up as the pane's foreground command.
    *  npm installs run behind a `node` launcher, which is never identity. */
   readonly paneCommands: readonly string[];
-  /** Matches the npm launcher's argv (`node .../bin/<binary>`). */
+  /** Matches the program path of the CLI process: the native binary, or the
+   *  script an npm `node` launcher runs (`.../bin/<binary>`). */
   readonly processMatch: RegExp;
   /** Env var that overrides the session database path. */
   readonly dbEnvVar: string;
@@ -38,7 +39,7 @@ export const OPENCODE_VARIANT: OpencodeFamilyVariant = {
   displayName: "OpenCode",
   binary: "opencode",
   paneCommands: ["opencode"],
-  processMatch: /(?:^|[\s/])opencode(?:\s|$)/,
+  processMatch: /(?:^|\/)opencode$/,
   dbEnvVar: "OPENCODE_DB",
   dbFileName: "opencode.db",
   projectConfigDir: ".opencode",
@@ -51,7 +52,7 @@ export const KILO_VARIANT: OpencodeFamilyVariant = {
   binary: "kilo",
   // The npm package's native binary is `.kilo`, spawned by a node launcher.
   paneCommands: ["kilo", "kilocode", ".kilo"],
-  processMatch: /(?:^|[\s/])(?:kilo|kilocode|\.kilo)(?:\s|$)/,
+  processMatch: /(?:^|\/)(?:kilo|kilocode|\.kilo)$/,
   dbEnvVar: "KILO_DB",
   dbFileName: "kilo.db",
   projectConfigDir: ".kilo",

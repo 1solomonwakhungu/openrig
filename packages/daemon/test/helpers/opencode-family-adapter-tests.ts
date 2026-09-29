@@ -21,7 +21,6 @@ import {
 import { getRuntimeDescriptor } from "../../src/domain/runtime-registry.js";
 import type { CliRuntimeRegistration } from "../../src/adapters/cli/types.js";
 import type { OpencodeFamilyVariant } from "../../src/adapters/cli/opencode/family.js";
-import { createOpencodeFamilyRegistration } from "../../src/adapters/cli/opencode/registration.js";
 
 const FIXTURES = nodePath.join(import.meta.dirname, "..", "fixtures", "opencode-family");
 export const fixture = (name: string) => fs.readFileSync(nodePath.join(FIXTURES, name), "utf8");
@@ -62,21 +61,16 @@ export function runOpencodeFamilyAdapterTests(input: {
     expect(getRuntimeDescriptor(variant.id)).toBe(descriptor);
   });
 
-  // The contract harness keeps pane state in memory, where no session database
-  // exists, so its resume cases get a resume-target lookup that knows which
-  // tokens exist. The real SQLite lookup is exercised below.
   runTuiCliAdapterContract({
-    registration: createOpencodeFamilyRegistration(variant, descriptor, {
-      sessionPresence: (_dbPath, token) => (token === MISSING_TOKEN ? "missing" : "present"),
-    }),
+    registration,
     readyScreen,
     earlyExit: { screen: fixture("opencode-1.18.33-session-not-found.txt"), recovery: "retry_fresh" },
     validResumeToken: VALID_TOKEN,
     invalidResumeToken: "ses_bad;touch /tmp/pwned",
     missingResumeToken: MISSING_TOKEN,
-    // OpenCode needs provider/model; the contract's placeholder model is not
-    // one, so model passthrough is asserted below with a real model id.
-    passesModel: false,
+    // OpenCode refuses a model without a provider.
+    modelExample: MODEL,
+    seedResumeTarget: ({ seatStateDir, token }) => { seedSessionDb(nodePath.join(seatStateDir, variant.dbFileName), token); },
     seedSession: ({ seatStateDir }) => seedSessionDb(nodePath.join(seatStateDir, variant.dbFileName), VALID_TOKEN),
   });
 
@@ -107,13 +101,13 @@ export function runOpencodeFamilyAdapterTests(input: {
       const { adapter, pane } = launch();
       const result = await adapter.launchHarness(harnessBinding({ model: MODEL }), { name: "x" });
       expect(result).toMatchObject({ ok: true });
-      expect(pane.typed).toEqual([`env ${dbEnv()} '${variant.binary}' '-m' '${MODEL}'`]);
+      expect(pane.typed).toEqual([`exec env ${dbEnv()} '${variant.binary}' '-m' '${MODEL}'`]);
     });
 
     it("maps a full_bypass policy and OPENRIG_YOLO to --auto", async () => {
       const policy = launch();
       await policy.adapter.launchHarness(harnessBinding({ launchPosture: "full_bypass" }), { name: "x" });
-      expect(policy.pane.typed).toEqual([`env ${dbEnv()} '${variant.binary}' '--auto'`]);
+      expect(policy.pane.typed).toEqual([`exec env ${dbEnv()} '${variant.binary}' '--auto'`]);
 
       const yolo = launch([ready], { OPENRIG_YOLO: "1" });
       await yolo.adapter.launchHarness(harnessBinding(), { name: "x" });
@@ -149,7 +143,7 @@ export function runOpencodeFamilyAdapterTests(input: {
       const { adapter, pane } = launch();
       const result = await adapter.launchHarness(harnessBinding({ model: MODEL }), { name: "x", resumeToken: VALID_TOKEN });
       expect(result).toMatchObject({ ok: true, resumeToken: VALID_TOKEN, resumeType: descriptor.resumeType });
-      expect(pane.typed).toEqual([`env ${dbEnv()} '${variant.binary}' '-m' '${MODEL}' '-s' '${VALID_TOKEN}'`]);
+      expect(pane.typed).toEqual([`exec env ${dbEnv()} '${variant.binary}' '-m' '${MODEL}' '-s' '${VALID_TOKEN}'`]);
     });
 
     it("refuses as retry_fresh, before typing, when the seat database lacks the session", async () => {

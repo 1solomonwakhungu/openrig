@@ -26,6 +26,7 @@ import {
   sessionPresence,
   type SessionStoreDeps,
 } from "../src/adapters/cli/opencode/session-store.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
 
 const FIXTURES = nodePath.join(import.meta.dirname, "fixtures", "opencode-family");
 const fixture = (name: string) => fs.readFileSync(nodePath.join(FIXTURES, name), "utf8");
@@ -133,13 +134,19 @@ describe("per-seat env, guidance, skills, identity", () => {
     expect(opencodeFamilySkillsDir(KILO_VARIANT, "/work/repo")).toBe("/work/repo/.kilo/skills");
   });
 
-  it("never treats node as identity; the npm launcher is matched by argv", () => {
+  it("never treats node as identity; the npm launcher is matched by its script path", () => {
     for (const variant of [OPENCODE_VARIANT, KILO_VARIANT]) expect(variant.paneCommands).not.toContain("node");
-    expect(OPENCODE_VARIANT.processMatch.test("node /usr/local/lib/node_modules/opencode-ai/bin/opencode -m a/b")).toBe(true);
-    expect(OPENCODE_VARIANT.processMatch.test("node /usr/local/bin/opencoder")).toBe(false);
-    expect(KILO_VARIANT.processMatch.test("node /opt/npm/node_modules/.bin/kilo")).toBe(true);
-    expect(KILO_VARIANT.processMatch.test("/opt/npm/node_modules/@kilocode/cli/bin/.kilo --auto")).toBe(true);
-    expect(KILO_VARIANT.processMatch.test("node /srv/kilobyte-server.js")).toBe(false);
+    const oc = (cmd: string) => processMatches(cmd, OPENCODE_VARIANT.processMatch);
+    const kilo = (cmd: string) => processMatches(cmd, KILO_VARIANT.processMatch);
+    expect(oc("node /usr/local/lib/node_modules/opencode-ai/bin/opencode -m a/b")).toBe(true);
+    expect(oc("/opt/homebrew/Cellar/opencode/1.18.33/bin/opencode --auto")).toBe(true);
+    expect(oc("node /usr/local/bin/opencoder")).toBe(false);
+    expect(oc("node /srv/app.js --name opencode")).toBe(false);
+    // Live process tree of an npm kilo 7.8.1 install: node launcher, then the native binary.
+    expect(kilo("node /opt/npm/node_modules/.bin/kilo")).toBe(true);
+    expect(kilo("/opt/npm/node_modules/@kilocode/cli/bin/.kilo --auto")).toBe(true);
+    expect(kilo("node /srv/kilobyte-server.js")).toBe(false);
+    expect(kilo("node")).toBe(false);
   });
 });
 

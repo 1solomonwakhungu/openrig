@@ -21,7 +21,7 @@ import {
   validateOpencodeSessionId,
   type OpencodeFamilyVariant,
 } from "./family.js";
-import { readCurrentSessionId, sessionPresence, type SessionPresence } from "./session-store.js";
+import { readCurrentSessionId, sessionPresence } from "./session-store.js";
 
 export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): RuntimeDescriptor {
   return {
@@ -29,6 +29,7 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
     displayName: variant.displayName,
     kind: "agent",
     binary: variant.binary,
+    installHint: variant.installHint,
     resumeType: `${variant.id.replace(/-/g, "_")}_session_id`,
     validateResumeToken: validateOpencodeSessionId,
     // Sessions appear on the first prompt, so this usually finds nothing right
@@ -53,20 +54,7 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
   };
 }
 
-export interface OpencodeFamilySpecOptions {
-  /** Resume-target lookup. Defaults to a read-only query of the seat's
-   *  session database; tests substitute it where no database exists. */
-  sessionPresence?: (dbPath: string, token: string) => SessionPresence;
-}
-
-export function createOpencodeFamilySpec(
-  variant: OpencodeFamilyVariant,
-  descriptor: RuntimeDescriptor,
-  options: OpencodeFamilySpecOptions = {},
-): TuiCliRuntimeSpec {
-  const presence = options.sessionPresence
-    ?? ((dbPath: string, token: string) => sessionPresence(dbPath, token, { exists: (path) => fs.existsSync(path) }));
-
+export function createOpencodeFamilySpec(variant: OpencodeFamilyVariant, descriptor: RuntimeDescriptor): TuiCliRuntimeSpec {
   return {
     descriptor,
     buildLaunchCommand: ({ binding, posture, resumeToken, forkSource }) =>
@@ -75,7 +63,8 @@ export function createOpencodeFamilySpec(
     // session database on fresh and resume launches alike.
     env: { set: ({ seatStateDir }) => opencodeFamilySeatEnv(variant, seatStateDir) },
     validateResumeTarget: ({ token, seatStateDir }) => {
-      if (presence(opencodeFamilyDbPath(variant, seatStateDir), token) !== "missing") return { ok: true };
+      const dbPath = opencodeFamilyDbPath(variant, seatStateDir);
+      if (sessionPresence(dbPath, token, { exists: (path) => fs.existsSync(path) }) !== "missing") return { ok: true };
       return {
         ok: false,
         reason: `${variant.id} resume: the session is not in this seat's session database`,
@@ -98,11 +87,8 @@ export function createOpencodeFamilySpec(
   };
 }
 
-export function createOpencodeFamilyRegistration(
-  variant: OpencodeFamilyVariant,
-  descriptor: RuntimeDescriptor = createOpencodeFamilyDescriptor(variant),
-  options: OpencodeFamilySpecOptions = {},
-): CliRuntimeRegistration {
-  const spec = createOpencodeFamilySpec(variant, descriptor, options);
+export function createOpencodeFamilyRegistration(variant: OpencodeFamilyVariant): CliRuntimeRegistration {
+  const descriptor = createOpencodeFamilyDescriptor(variant);
+  const spec = createOpencodeFamilySpec(variant, descriptor);
   return { descriptor, createAdapter: (deps) => new TuiCliRuntimeAdapter(spec, deps) };
 }
