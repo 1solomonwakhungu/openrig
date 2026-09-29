@@ -7,7 +7,7 @@ import fs, { readFileSync } from "node:fs";
 import nodePath from "node:path";
 import { describe, it, expect } from "vitest";
 import { COPILOT_REGISTRATION, COPILOT_SEAT_FILE, COPILOT_SPEC } from "../src/adapters/cli/copilot/index.js";
-import { unwrapBoxedLines } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
+import { TuiCliRuntimeAdapter, unwrapBoxedLines } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import {
@@ -383,6 +383,36 @@ describe("Copilot trust dialog answer", () => {
     const result = await r.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD }), { name: "x" });
     expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("selected option") });
     expect(r.keys()).toEqual([]);
+  });
+
+  it("waits out a dialog captured mid-draw, then answers once it is readable", async () => {
+    const midDraw = TRUST.split("\n").filter((line) => !line.includes("❯")).join("\n");
+    const r = rig([trustFrame(midDraw), trustFrame(), readyFrame]);
+    const result = await r.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD }), { name: "x" });
+    expect(result.ok).toBe(true);
+    expect(r.keys()).toEqual([["Enter"]]);
+  });
+
+  it("stops for the operator when the dialog stays unreadable for a few polls", async () => {
+    const midDraw = TRUST.split("\n").filter((line) => !line.includes("❯")).join("\n");
+    const r = rig([trustFrame(midDraw)]);
+    const result = await r.adapter.launchHarness(harnessBinding({ cwd: LONG_CWD }), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("could not be read") });
+    expect(r.keys()).toEqual([]);
+    expect((r.pane.tmux.getPaneCommand as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBeLessThan(10);
+  });
+
+  it("refuses a relative folder even when it would resolve to the cwd", async () => {
+    const [trustGate, ...rest] = COPILOT_SPEC.gatePatterns!;
+    const spec = {
+      ...COPILOT_SPEC,
+      gatePatterns: [{ ...trustGate!, answer: { ...trustGate!.answer!, dialogPath: () => "relative/work" } }, ...rest],
+    };
+    const pane = mockTmux([atShell(), trustFrame()]);
+    const adapter = new TuiCliRuntimeAdapter(spec, harnessDeps({ tmux: pane.tmux, fsOps: harnessMemFs() }));
+    const result = await adapter.launchHarness(harnessBinding({ cwd: nodePath.resolve("relative/work") }), { name: "x" });
+    expect(result).toMatchObject({ ok: false, recovery: "attention_required", error: expect.stringContaining("absolute folder") });
+    expect((pane.tmux.sendKeys as unknown as { mock: { calls: unknown[] } }).mock.calls).toEqual([]);
   });
 
   it("fails as attention_required when the dialog is still there after the answer", async () => {

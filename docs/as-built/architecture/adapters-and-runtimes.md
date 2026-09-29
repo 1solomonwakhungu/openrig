@@ -378,8 +378,11 @@ tmux pane, driven by a `TuiCliRuntimeSpec`:
   once, and only during the seat's own launch wait, on lines this launch
   printed, when `dialogPath` returns a folder that normalizes to exactly the
   seat cwd or its realpath, and when the selected option on screen reads
-  `expectOptionText`. Otherwise, or if the dialog is still showing a few
-  polls after the answer, the launch is `attention_required`. Each answer is
+  `expectOptionText`. A dialog whose folder or selection cannot be read yet
+  (a capture taken mid-draw, or a folder that is not absolute) is retried for
+  a few polls; a different folder or a different selected option stops at
+  once. Otherwise, or if the dialog is still showing a few polls after the
+  answer, the launch is `attention_required`. Each answer is
   logged and recorded in the seat's `launch.json` as `gateAnswers`. The GitHub
   Copilot adapter uses it to trust the seat cwd for that session only.
 - Launch polls readiness with an injectable sleep up to `launchTimeoutMs`.

@@ -118,6 +118,9 @@ export interface TuiCliGateAnswer {
 
 /** Polls the gate may keep showing after an answer before it counts as not taken. */
 const ANSWER_SETTLE_POLLS = 3;
+/** Polls a dialog may stay unreadable (folder or selection not parsed, e.g. a
+ *  capture taken mid-draw) before the launch stops for the operator. */
+const ANSWER_READ_POLLS = 3;
 
 export interface TuiCliErrorPattern {
   pattern: RegExp;
@@ -613,6 +616,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     const attempts = Math.max(1, Math.ceil(timeoutMs / pollMs));
     let sawRuntime = false;
     let answered = null as { gate: TuiCliGatePattern; pollsSince: number } | null;
+    let unreadablePolls = 0;
     let last: { state: PaneState; content: string } = { state: { kind: "pending" }, content: "" };
     for (let attempt = 0; attempt < attempts; attempt++) {
       last = await this.readPane(sessionName, window);
@@ -628,7 +632,13 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
         } else if (state.gate.answer && !answered) {
           const fresh = window.line === null ? freshLines(content, window.lines) : content;
           const refusal = this.answerRefusal(state.gate, state.gate.answer, fresh, launch.binding);
-          if (refusal) return this.failure(`${state.gate.reason} (not answered automatically: ${refusal})`, "attention_required", content);
+          if (refusal && (refusal.final || ++unreadablePolls >= ANSWER_READ_POLLS)) {
+            return this.failure(`${state.gate.reason} (not answered automatically: ${refusal.why})`, "attention_required", content);
+          }
+          if (refusal) {
+            if (attempt < attempts - 1) await this.sleep(pollMs);
+            continue;
+          }
           const sent = await this.tmux.sendKeys(sessionName, [...state.gate.answer.keys]);
           if (!sent.ok) return this.failure(`${state.gate.reason} (sending the answer failed: ${sent.message})`, "attention_required", content);
           answered = { gate: state.gate, pollsSince: 0 };
@@ -661,21 +671,29 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return this.failure(why, "attention_required", last.content);
   }
 
-  /** Why a gate answer must not be sent, or null when every guard holds. */
-  private answerRefusal(gate: TuiCliGatePattern, answer: TuiCliGateAnswer, fresh: string, binding: NodeBinding): string | null {
-    if (!gate.pattern.test(fresh)) return "the dialog is not in this launch's output";
+  /** Why a gate answer must not be sent, or null when every guard holds. A
+   *  final refusal stops the launch now; an unreadable dialog is retried for a
+   *  few polls in case the capture caught it mid-draw. */
+  private answerRefusal(
+    gate: TuiCliGatePattern,
+    answer: TuiCliGateAnswer,
+    fresh: string,
+    binding: NodeBinding,
+  ): { final: boolean; why: string } | null {
+    if (!gate.pattern.test(fresh)) return { final: true, why: "the dialog is not in this launch's output" };
     let named: string | null;
     try {
       named = answer.dialogPath(fresh);
     } catch {
       named = null;
     }
-    if (!named) return "the dialog does not name a folder OpenRig could read";
-    const folder = normalizeDialogPath(named, this.homedir);
-    if (!cwdKeys(binding.cwd).includes(folder)) return "the dialog names a different folder than the seat's cwd";
+    const folder = named ? normalizeDialogPath(named, this.homedir) : null;
+    if (!folder) return { final: false, why: "the dialog does not name an absolute folder OpenRig could read" };
+    if (!cwdKeys(binding.cwd).includes(folder)) return { final: true, why: "the dialog names a different folder than the seat's cwd" };
     const selected = selectedOptions(fresh, answer.selectionMarker ?? "❯");
-    if (selected.length !== 1) return "the selected option could not be read";
-    if (selected[0] !== answer.expectOptionText.trim()) return `the selected option is "${selected[0]}", not "${answer.expectOptionText.trim()}"`;
+    if (selected.length !== 1) return { final: false, why: "the selected option could not be read" };
+    const expected = answer.expectOptionText.trim();
+    if (selected[0] !== expected) return { final: true, why: `the selected option is "${selected[0]}", not "${expected}"` };
     return null;
   }
 
@@ -810,9 +828,13 @@ function cwdKeys(cwd: string): string[] {
   return [...keys];
 }
 
-function normalizeDialogPath(raw: string, homedir: string): string {
+/** The dialog's folder as an absolute normalized path, or null. A relative
+ *  path is refused here so no extractor can make the guard resolve it against
+ *  the daemon's own working directory. */
+function normalizeDialogPath(raw: string, homedir: string): string | null {
   const path = raw.trim();
   const expanded = path === "~" ? homedir : path.startsWith("~/") ? nodePath.join(homedir, path.slice(2)) : path;
+  if (!nodePath.isAbsolute(expanded)) return null;
   return trimSlash(nodePath.resolve(expanded));
 }
 
