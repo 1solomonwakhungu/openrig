@@ -41,6 +41,8 @@ agy draws a full-screen TUI on the terminal's alternate screen; the base adapter
 
 ## Readiness
 
+Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or by dialog-box borders (`adapters/cli/pane-phrase.ts`); `test/pane-80col.test.ts` holds 80-column fixtures (resumed conversation, long cwd, wrapped status line, box-wrapped dialogs). These fixtures are modeled on agy's strings, not captured live.
+
 | Pane text | Result |
 |---|---|
 | `? for shortcuts` (status line) | ready |

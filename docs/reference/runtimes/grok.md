@@ -42,6 +42,8 @@ The seat runs `exec env GROK_DISABLE_AUTOUPDATER=1 BROWSER=true grok --no-alt-sc
 
 ## Readiness
 
+Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or by dialog-box borders (`adapters/cli/pane-phrase.ts`); `test/pane-80col.test.ts` holds 80-column fixtures (resumed session, long cwd, box-wrapped trust prompt, wrapped errors).
+
 | Pane text | Result |
 |---|---|
 | `Build anything` (empty prompt placeholder) | ready |

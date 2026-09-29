@@ -15,6 +15,7 @@ import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeRegistration } from "../types.js";
+import { anyPanePhrase, panePhrase } from "../pane-phrase.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
@@ -113,19 +114,20 @@ export const GROK_SPEC: TuiCliRuntimeSpec = {
   validateResumeTarget: ({ token, homedir }) => grokSessionExists(grokHome(homedir), token)
     ? { ok: true }
     : { ok: false, reason: "no grok session with that id under the grok sessions directory" },
-  readyPatterns: [/Build anything/],
+  // Patterns tolerate the wrapping and box borders of an 80x24 pane (pane-phrase.ts).
+  readyPatterns: [panePhrase("Build anything")],
   gatePatterns: [
-    { pattern: /Do you trust the contents of this directory\?/, code: "trust_gate", reason: "grok is asking to trust the working directory" },
+    { pattern: panePhrase("Do you trust the contents of this directory?"), code: "trust_gate", reason: "grok is asking to trust the working directory" },
     {
-      pattern: /Approve in your browser to finish signing in|Waiting for approval\.\.\.|Paste your token here/,
+      pattern: anyPanePhrase(["Approve in your browser to finish signing in", "Waiting for approval...", "Paste your token here"]),
       code: "login_required",
       reason: "grok needs a sign-in (run `grok login` for this account, or set XAI_API_KEY)",
     },
   ],
   errorPatterns: [
-    { pattern: /No session found with id/, reason: "grok could not find the session to resume", recovery: "retry_fresh", code: "session_missing" },
-    { pattern: /No session found for current directory/, reason: "grok found no session for this directory", recovery: "retry_fresh", code: "session_missing" },
-    { pattern: /must not already exist/, reason: "grok refused the minted session id" },
+    { pattern: panePhrase("No session found with id"), reason: "grok could not find the session to resume", recovery: "retry_fresh", code: "session_missing" },
+    { pattern: panePhrase("No session found for current directory"), reason: "grok found no session for this directory", recovery: "retry_fresh", code: "session_missing" },
+    { pattern: panePhrase("must not already exist"), reason: "grok refused the minted session id" },
   ],
 };
 

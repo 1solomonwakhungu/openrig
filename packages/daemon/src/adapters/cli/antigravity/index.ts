@@ -17,6 +17,7 @@ import fs from "node:fs";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeRegistration } from "../types.js";
+import { anyPanePhrase, panePhrase, panePhraseSource } from "../pane-phrase.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
@@ -78,10 +79,17 @@ function siblingSharesCwd(seatStateDir: string, cwd: string, launchStartedAt: Da
  * Residual risk: the live screens were never observed (see the runtime doc);
  * a dialog agy words differently is not caught here and would read as ready.
  */
-export const ANTIGRAVITY_NOT_READY_RE = /initializing\.\.\.|esc to cancel|to navigate|\(y\/n\)|Yes, allow|No, deny|Welcome to|Action required/i;
+export const ANTIGRAVITY_NOT_READY_RE = anyPanePhrase(
+  ["initializing...", "esc to cancel", "to navigate", "(y/n)", "Yes, allow", "No, deny", "Welcome to", "Action required"],
+  "i",
+);
 
-/** Ready: the `? for shortcuts` status line with no dialog marker on screen. */
-export const ANTIGRAVITY_READY_RE = new RegExp(`^(?![\\s\\S]*(?:${ANTIGRAVITY_NOT_READY_RE.source}))[\\s\\S]*\\? for shortcuts`, "i");
+/** Ready: the `? for shortcuts` status line with no dialog marker on screen.
+ *  Both tolerate the wrapping and box borders of an 80x24 pane (pane-phrase.ts). */
+export const ANTIGRAVITY_READY_RE = new RegExp(
+  `^(?![\\s\\S]*(?:${ANTIGRAVITY_NOT_READY_RE.source}))[\\s\\S]*${panePhraseSource("? for shortcuts")}`,
+  "i",
+);
 
 export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
   id: "antigravity",
@@ -146,15 +154,18 @@ export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
   // pane evidence, never a false ready.
   readyPatterns: [ANTIGRAVITY_READY_RE],
   gatePatterns: [
-    { pattern: /Do you trust the contents of this project\?/, code: "trust_gate", reason: "agy is asking to trust the project" },
+    { pattern: panePhrase("Do you trust the contents of this project?"), code: "trust_gate", reason: "agy is asking to trust the project" },
     {
-      pattern: /Select login method:|Other sign-in options|Authentication required\. Please visit the URL to log in|Waiting for authentication|Paste the authorization code|Enter the authorization code/,
+      pattern: anyPanePhrase([
+        "Select login method:", "Other sign-in options", "Authentication required. Please visit the URL to log in",
+        "Waiting for authentication", "Paste the authorization code", "Enter the authorization code",
+      ]),
       code: "login_required",
       reason: "agy needs a sign-in (run `agy` once interactively for this account)",
     },
   ],
   errorPatterns: [
-    { pattern: /conversation not found/i, reason: "agy could not find the conversation to resume", recovery: "retry_fresh", code: "session_missing" },
+    { pattern: panePhrase("conversation not found", "i"), reason: "agy could not find the conversation to resume", recovery: "retry_fresh", code: "session_missing" },
     { pattern: /\[Auth Error\]/, reason: "agy reported an authentication error" },
   ],
 };
