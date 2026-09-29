@@ -157,6 +157,19 @@ export function findQwenSessionFile(ctx: SessionStoreContext, sessionId: string)
   return null;
 }
 
+/** Whether qwen recorded a launch of `sessionId` in this cwd (runtime.json is
+ *  written at launch, before any message). */
+export function qwenRuntimeStatusExists(ctx: SessionStoreContext, sessionId: string): boolean {
+  const id = sessionId.toLowerCase();
+  return qwenChatsDirs(ctx).some((dir) => {
+    try {
+      return ctx.fs.exists(nodePath.join(dir, `${id}.runtime.json`));
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** Resume precheck: qwen writes <id>.jsonl on the first message, so a seat
  *  that never received one has nothing to resume. */
 export function checkQwenResumeTarget(ctx: SessionStoreContext, sessionId: string): ResumeTargetCheck {
@@ -178,14 +191,15 @@ const FORK_CAPTURE_SKEW_MS = 5_000;
 /**
  * The child session id of a `qwen --resume <parent> --fork-session` launch:
  * the one runtime.json in this cwd's chats dir started at or after the launch
- * and not the parent. Returns null when zero or several candidates match (a
- * pod-mate launching in the same cwd at the same moment), never a guess.
+ * and not the parent (when known; the parent's runtime.json predates the
+ * launch anyway). Returns null when zero or several candidates match (a
+ * pod-mate launching in the same cwd after this seat), never a guess.
  */
 export function captureQwenForkChild(
   ctx: SessionStoreContext,
-  input: { parentId: string; launchStartedAt: Date },
+  input: { parentId?: string; launchStartedAt: Date },
 ): string | null {
-  const parent = input.parentId.toLowerCase();
+  const parent = input.parentId?.toLowerCase();
   const since = input.launchStartedAt.getTime() - FORK_CAPTURE_SKEW_MS;
   const cwd = nodePath.resolve(ctx.cwd);
   const found = new Set<string>();

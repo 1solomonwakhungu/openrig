@@ -11,9 +11,11 @@ One line per runtime, alphabetical by id:
 
 - `claude-code`: Claude Code (`claude`). Resume, fork, managed `CLAUDE.md` blocks.
 - `codex`: Codex (`codex`). Resume, fork, managed `AGENTS.md` blocks.
+- `gemini`: Gemini CLI (`gemini`). Resume by minted session id, no fork, managed `GEMINI.md` blocks. See [gemini.md](gemini.md).
 - `kilo`: Kilo CLI (`kilo`), an OpenCode fork. Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.kilo/skills`. No fork. See [kilo.md](kilo.md).
 - `opencode`: OpenCode (`opencode`). Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.opencode/skills`. No fork. See [opencode.md](opencode.md).
 - `pi`: Pi coding agent (`pi`, RPC runner in the pane). Resume by session file, fork.
+- `qwen`: Qwen Code (`qwen`). Resume by minted session id, fork, managed `QWEN.md` blocks. See [qwen.md](qwen.md).
 - `terminal`: a plain shell for infrastructure nodes (servers, log tails). Requires `agent_ref: builtin:terminal` and `profile: none`.
 
 The internal `stub` runtime exists for OpenRig's own tests and is not listed.

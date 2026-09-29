@@ -49,7 +49,7 @@ members:
 
 OpenRig always passes an approval mode because Qwen Code's own default is `auto`, where a model classifier decides which tool calls run. Note the hyphenated `auto-edit` (Gemini CLI spells it `auto_edit`).
 
-Qwen Code has no flag to trust a folder for one session. Folder trust is off by default (`security.folderTrust.enabled: false`), so seats start normally. If you enable it, trust each seat cwd once in `qwen`, or the seat reports `attention_required` with code `trust_gate`. In an untrusted folder Qwen Code skips the cwd `QWEN.md` and downgrades `--yolo`.
+Qwen Code has no flag to trust a folder for one session. Folder trust is off by default (`security.folderTrust.enabled: false`), so seats start normally and OpenRig writes nothing. If you enable it, OpenRig adds the seat cwd as `TRUST_FOLDER` to `~/.qwen/trustedFolders.json` (or `$QWEN_CODE_TRUSTED_FOLDERS_PATH`) before launch. The edit is merge-only and atomic: an existing entry for the cwd, including `DO_NOT_TRUST`, is never changed, and an unparseable file is left alone; in those cases the seat reports `attention_required` with code `trust_gate`. This matches the Claude Code adapter, which pre-accepts its trust dialog for the managed cwd. In an untrusted folder Qwen Code skips the cwd `QWEN.md` and downgrades `--yolo`.
 
 The exact command OpenRig types:
 
@@ -74,7 +74,7 @@ Qwen Code writes `<id>.runtime.json` at launch but writes the conversation file 
 
 ## Fork
 
-Supported for `session_source` with `ref.kind: native_id` and the parent session UUID. OpenRig launches `qwen --resume <parent> --fork-session`. Qwen Code picks the child id at random (it rejects `--session-id` together with `--resume`), so OpenRig captures it afterwards from the one new `<id>.runtime.json` in the cwd's chats directory that started after the launch and is not the parent. If two seats fork in the same cwd at the same moment, the capture finds more than one candidate and records no token rather than guess; the seat still runs.
+Supported for `session_source` with `ref.kind: native_id` and the parent session UUID. OpenRig launches `qwen --resume <parent> --fork-session`. Qwen Code picks the child id at random (it rejects `--session-id` together with `--resume`), so OpenRig captures it afterwards from the one `<id>.runtime.json` in the cwd's chats directory that started after the launch. The capture runs after readiness and again from the periodic resume refresher. If another qwen seat also launched in the same cwd after the fork, the capture finds more than one candidate and records no token rather than guess; the seat still runs.
 
 ## Guidance and skills
 

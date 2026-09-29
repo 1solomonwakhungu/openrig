@@ -87,6 +87,10 @@ Not supported. Gemini CLI has no fork or branch-session primitive (`/rewind` and
 - Guidance: OpenRig merges managed blocks into `GEMINI.md` in the seat cwd, the file Gemini CLI reads by default (it does not read `AGENTS.md` unless `context.fileName` says so). `rig-role` content is delivered per seat through the pane, not merged. Rig teardown removes OpenRig's managed blocks from `GEMINI.md`.
 - Skills: projected into `<cwd>/.gemini/skills/<name>/SKILL.md`, a project skills location Gemini CLI discovers in trusted folders (see Launch posture).
 
+## Stop
+
+The `gemini` launcher is a small parent process that ignores SIGHUP and SIGTERM and waits for the real CLI child, which does not finish its SIGHUP cleanup once the pane is gone. Both processes outlive `tmux kill-session` (verified live). OpenRig therefore reaps the pane's process tree when it stops a `gemini` seat: it records the pane's processes before killing the session, sends SIGTERM to that process group, and SIGKILL to anything left. Stopping never relies on typing Ctrl-C into the pane.
+
 ## Known limits
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../gemini`), never from the process name alone.
