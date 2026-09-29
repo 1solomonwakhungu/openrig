@@ -1,11 +1,20 @@
-// Hermetic tests for the Cursor CLI runtime pieces: launch argv and posture,
-// the `agent` name collision guard, token format, pane patterns, version
-// identity, and chat-store capture. No real `cursor-agent` binary.
+// Hermetic tests for the Cursor CLI runtime adapter: the shared TUI CLI
+// contract, launch argv and posture, the `agent` name collision guard, token
+// format, pane patterns, version identity, and chat-store capture. No real
+// `cursor-agent` binary.
 
+import fs, { readFileSync } from "node:fs";
+import os from "node:os";
 import nodePath from "node:path";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { CURSOR_CHAT_SNAPSHOT_FILE, CURSOR_REGISTRATION } from "../src/adapters/cli/cursor/index.js";
+import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
+import {
+  HARNESS_CWD, HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps,
+  memFs as harnessMemFs, mockTmux,
+} from "./helpers/tui-cli-adapter-harness.js";
 import {
   buildCursorArgv, validateCursorChatId, CURSOR_READY_PATTERNS, CURSOR_GATE_PATTERNS,
   parseCursorVersion, verifyCursorVersionOutput, cursorConfigDir, cursorChatsDirForCwd,
@@ -146,3 +155,115 @@ describe("Cursor chat store", () => {
     expect(parseCursorChatSnapshot(JSON.stringify({ chatIds: [1] }))).toBeNull();
   });
 });
+
+// ── adapter on the TUI CLI base ─────────────────────────────────────────────
+
+const READY = fixture("cursor-idle-synth.txt");
+const SEEDED_ID = "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d";
+const MISSING_ID = "11111111-2222-4333-8444-555555555555";
+
+function storeDbUnder(homedir: string, cwd: string, id: string): string {
+  return nodePath.join(cursorChatsDirForCwd(cursorConfigDir(process.env, homedir), cwd), id, "store.db");
+}
+
+runTuiCliAdapterContract({
+  registration: CURSOR_REGISTRATION,
+  readyScreen: READY,
+  // The wrapper execs node; the harness only needs a non-shell foreground.
+  runningCommand: "node",
+  gateScreens: [
+    { screen: fixture("cursor-trust-synth.txt"), code: "trust_gate" },
+    { screen: fixture("cursor-first-run.txt"), code: "login_required" },
+  ],
+  validResumeToken: SEEDED_ID,
+  invalidResumeToken: "$(whoami)",
+  missingResumeToken: MISSING_ID,
+  modelExample: "gpt-5",
+  seedResumeTarget: ({ fs: files, homedir, cwd, token }) => {
+    const file = storeDbUnder(homedir, cwd, token);
+    files.mkdirp(nodePath.dirname(file));
+    files.writeFile(file, "");
+  },
+  // Cursor creates the chat lazily; seeding writes the chat store it creates.
+  seedSession: ({ cwd, homedir }) => {
+    const file = storeDbUnder(homedir, cwd, SEEDED_ID);
+    fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "");
+    return SEEDED_ID;
+  },
+});
+
+describe("Cursor adapter launch", () => {
+  const running = { command: "node", content: READY };
+  const seatDir = nodePath.join(HARNESS_STATE_ROOT, "cursor", HARNESS_SESSION);
+
+  function launch(files = harnessMemFs()) {
+    const pane = mockTmux([atShell(), running]);
+    const adapter = CURSOR_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: files }));
+    return { adapter, pane, files };
+  }
+
+  it("types cursor-agent with --trust and the model; floor has no --force", async () => {
+    const { adapter, pane } = launch();
+    const result = await adapter.launchHarness(harnessBinding({ model: "gpt-5" }), { name: "x" });
+    expect(result).toEqual({ ok: true });
+    expect(pane.typed[0]).toContain("'cursor-agent' '--trust' '--model' 'gpt-5'");
+    expect(pane.typed[0]).not.toContain("--force");
+  });
+
+  it("full_bypass types --force", async () => {
+    const { adapter, pane } = launch();
+    await adapter.launchHarness(harnessBinding({ launchPosture: "full_bypass" }), { name: "x" });
+    expect(pane.typed[0]).toContain("'--force'");
+  });
+
+  it("snapshots the chats that already exist for the cwd before launch", async () => {
+    const files = harnessMemFs({ [storeDbUnder(HARNESS_HOME, HARNESS_CWD, SEEDED_ID)]: "" });
+    await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(parseCursorChatSnapshot(files.files[nodePath.join(seatDir, CURSOR_CHAT_SNAPSHOT_FILE)]!)).toEqual([SEEDED_ID]);
+  });
+
+  it("resumes an existing chat by exact id", async () => {
+    const files = harnessMemFs({ [storeDbUnder(HARNESS_HOME, HARNESS_CWD, SEEDED_ID)]: "" });
+    const { adapter, pane } = launch(files);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: SEEDED_ID });
+    expect(result).toMatchObject({ ok: true, resumeToken: SEEDED_ID, resumeType: "cursor_chat_id" });
+    expect(pane.typed[0]).toContain(`'--resume' '${SEEDED_ID}'`);
+  });
+
+  it("late capture ignores chats that existed before launch and refuses to guess", () => {
+    const root = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "openrig-cursor-"));
+    const homedir = nodePath.join(root, "home");
+    const cwd = nodePath.join(root, "work");
+    const seatStateDir = nodePath.join(root, "seat");
+    fs.mkdirSync(seatStateDir, { recursive: true });
+    const seed = (id: string) => {
+      const file = storeDbUnder(homedir, cwd, id);
+      fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+      fs.writeFileSync(file, "");
+    };
+    const capture = () => CURSOR_REGISTRATION.descriptor.captureResumeToken!(
+      { sessionName: HARNESS_SESSION, cwd, seatStateDir, homedir }, {} as never,
+    );
+    expect(capture()).toBeNull(); // no snapshot yet
+    seed(OTHER_ID);
+    fs.writeFileSync(nodePath.join(seatStateDir, CURSOR_CHAT_SNAPSHOT_FILE), serializeCursorChatSnapshot([OTHER_ID]));
+    expect(capture()).toBeNull(); // nothing new since launch
+    seed(SEEDED_ID);
+    expect(capture()).toBe(SEEDED_ID);
+    seed(ID);
+    expect(capture()).toBeNull(); // two new chats: ambiguous
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("identifies itself by process argv, never by the node host", () => {
+    const d = CURSOR_REGISTRATION.descriptor;
+    expect(d.paneCommands ?? []).not.toContain("node");
+    const matches = (command: string) => processMatches(command, d.processMatch!);
+    expect(matches("/home/u/.local/bin/cursor-agent --use-system-ca /home/u/.local/share/cursor-agent/versions/2026.09.28-64d2043/index.js")).toBe(true);
+    expect(matches("/home/u/.grok/bin/agent")).toBe(false);
+    expect(matches("node /srv/tools/other.js --cwd /home/u/.local/bin/cursor-agent")).toBe(false);
+    expect(d.reapProcessTreeOnStop).toBe(true);
+  });
+});
+

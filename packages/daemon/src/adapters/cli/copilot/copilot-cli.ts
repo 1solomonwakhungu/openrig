@@ -106,6 +106,16 @@ export const COPILOT_GATE_PATTERNS: ReadonlyArray<{ pattern: RegExp; code: strin
   },
 ];
 
+export const COPILOT_ERROR_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string; recovery?: "retry_fresh"; code?: string }> = [
+  {
+    // Live: `copilot --resume=<unknown id>` prints this and exits 1.
+    pattern: /No session, task, or name matched/,
+    reason: "copilot could not find the session to resume",
+    recovery: "retry_fresh",
+    code: "session_missing",
+  },
+];
+
 // ── identity / version ──────────────────────────────────────────────────────
 
 /** `copilot --version` prints "GitHub Copilot CLI 1.0.89." */
@@ -216,32 +226,4 @@ export function captureCopilotSessionId(input: CopilotCaptureInput): string | nu
   } catch {
     return null;
   }
-}
-
-/**
- * Merge-only trust edit for <COPILOT_HOME>/settings.json: add `folder` to
- * `trustedFolders` and change nothing else. Returns the new content, or null
- * when no write should happen (already trusted, or the file is not a plain
- * JSON object with an array-or-absent `trustedFolders`; an unparseable file is
- * left alone and the trust gate then surfaces as attention_required).
- */
-export function addCopilotTrustedFolder(existing: string | null, folder: string): string | null {
-  let settings: Record<string, unknown> = {};
-  if (existing !== null && existing.trim() !== "") {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(existing);
-    } catch {
-      return null;
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-    settings = parsed as Record<string, unknown>;
-  }
-  const current = settings.trustedFolders;
-  if (current !== undefined && !(Array.isArray(current) && current.every((entry) => typeof entry === "string"))) {
-    return null;
-  }
-  const folders = (current as string[] | undefined) ?? [];
-  if (folders.includes(folder)) return null;
-  return `${JSON.stringify({ ...settings, trustedFolders: [...folders, folder] }, null, 2)}\n`;
 }

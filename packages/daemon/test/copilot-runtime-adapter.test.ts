@@ -1,14 +1,21 @@
-// Hermetic tests for the GitHub Copilot CLI runtime pieces: launch argv and
-// posture, token format, pane patterns against live captures, the on-disk
-// session store, and the merge-only trust edit. No real `copilot` binary.
+// Hermetic tests for the GitHub Copilot CLI runtime adapter: the shared TUI
+// CLI contract, launch argv and posture, token format, pane patterns against
+// live captures, the on-disk session store, and folder-trust provisioning.
+// No real `copilot` binary.
 
+import fs, { readFileSync } from "node:fs";
 import nodePath from "node:path";
-import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { COPILOT_REGISTRATION } from "../src/adapters/cli/copilot/index.js";
+import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
+import { processMatches } from "../src/domain/session-fingerprinter.js";
+import {
+  HARNESS_CWD, HARNESS_HOME, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux,
+} from "./helpers/tui-cli-adapter-harness.js";
 import {
   buildCopilotArgv, validateCopilotSessionId, COPILOT_READY_PATTERNS, COPILOT_GATE_PATTERNS,
   parseCopilotVersion, verifyCopilotVersionOutput, copilotHome, copilotSettingsPath, copilotWorkspaceFile,
-  parseCopilotWorkspaceYaml, copilotResumeTargetExists, captureCopilotSessionId, addCopilotTrustedFolder,
+  parseCopilotWorkspaceYaml, copilotResumeTargetExists, captureCopilotSessionId,
   type ReadOnlyFs,
 } from "../src/adapters/cli/copilot/copilot-cli.js";
 
@@ -161,22 +168,112 @@ describe("Copilot session store", () => {
   });
 });
 
-describe("addCopilotTrustedFolder", () => {
-  it("creates the entry when settings.json is absent or empty", () => {
-    expect(JSON.parse(addCopilotTrustedFolder(null, CWD)!)).toEqual({ trustedFolders: [CWD] });
-    expect(JSON.parse(addCopilotTrustedFolder("  \n", CWD)!)).toEqual({ trustedFolders: [CWD] });
+// ── adapter on the TUI CLI base ─────────────────────────────────────────────
+
+const READY = fixture("copilot-idle-derived.txt");
+const SEEDED_ID = "5f0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
+const MISSING_ID = "11111111-2222-4333-8444-555555555555";
+
+function workspaceFileUnder(homedir: string, id: string): string {
+  return copilotWorkspaceFile(nodePath.join(homedir, ".copilot"), id);
+}
+
+runTuiCliAdapterContract({
+  registration: COPILOT_REGISTRATION,
+  readyScreen: READY,
+  gateScreens: [
+    { screen: fixture("copilot-first-run.txt"), code: "trust_gate" },
+    { screen: fixture("copilot-idle-unauth.txt"), code: "login_required" },
+  ],
+  earlyExit: {
+    // Live output of `copilot --resume=<unknown id>`, which then exits 1.
+    screen: `Error: No session, task, or name matched '${MISSING_ID}'.\nTo resume by session or task ID:  copilot --resume=<id>`,
+    recovery: "retry_fresh",
+  },
+  validResumeToken: SEEDED_ID,
+  invalidResumeToken: "not-a-uuid; rm -rf /",
+  missingResumeToken: MISSING_ID,
+  modelExample: "gpt-5.4",
+  seedResumeTarget: ({ fs: files, homedir, cwd, token }) => {
+    const file = workspaceFileUnder(homedir, token);
+    files.mkdirp(nodePath.dirname(file));
+    files.writeFile(file, workspaceYaml(token, cwd, "2026-09-29T12:00:00Z"));
+  },
+  // Copilot is not lazy: the minted id is the token. Seeding writes the
+  // session-state record Copilot creates at startup for that id.
+  seedSession: ({ seatStateDir, cwd, homedir }) => {
+    const launch = JSON.parse(fs.readFileSync(nodePath.join(seatStateDir, "launch.json"), "utf-8")) as { presetToken: string };
+    const file = workspaceFileUnder(homedir, launch.presetToken);
+    fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+    fs.writeFileSync(file, workspaceYaml(launch.presetToken, cwd, new Date().toISOString()));
+    return launch.presetToken;
+  },
+});
+
+describe("Copilot adapter launch", () => {
+  const SETTINGS = nodePath.join(HARNESS_HOME, ".copilot", "settings.json");
+  const running = { command: "copilot", content: READY };
+
+  function launch(files = harnessMemFs(), env: NodeJS.ProcessEnv = {}) {
+    const pane = mockTmux([atShell(), running]);
+    const adapter = COPILOT_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: files, env }));
+    return { adapter, pane, files };
+  }
+
+  it("mints the session id, types it, and reports it as the resume token", async () => {
+    const { adapter, pane } = launch();
+    const result = await adapter.launchHarness(harnessBinding({ model: "gpt-5.4" }), { name: "x" });
+    expect(result.ok).toBe(true);
+    const token = result.ok ? result.resumeToken : undefined;
+    expect(validateCopilotSessionId(token ?? "").ok).toBe(true);
+    expect(pane.typed[0]).toContain(`'--session-id' '${token}'`);
+    expect(pane.typed[0]).toContain("'--model' 'gpt-5.4'");
+    expect(pane.typed[0]).not.toContain("--yolo");
   });
 
-  it("appends to existing folders and keeps every other key", () => {
-    const next = addCopilotTrustedFolder(JSON.stringify({ model: "gpt-5.4", trustedFolders: ["/a"] }), CWD);
-    expect(JSON.parse(next!)).toEqual({ model: "gpt-5.4", trustedFolders: ["/a", CWD] });
+  it("full_bypass types --yolo", async () => {
+    const { adapter, pane } = launch();
+    await adapter.launchHarness(harnessBinding({ launchPosture: "full_bypass" }), { name: "x" });
+    expect(pane.typed[0]).toContain("--yolo");
   });
 
-  it("does not write when already trusted or when the file is not safe to merge", () => {
-    expect(addCopilotTrustedFolder(JSON.stringify({ trustedFolders: [CWD] }), CWD)).toBeNull();
-    expect(addCopilotTrustedFolder("// comment\n{}", CWD)).toBeNull();
-    expect(addCopilotTrustedFolder("[]", CWD)).toBeNull();
-    expect(addCopilotTrustedFolder(JSON.stringify({ trustedFolders: "/a" }), CWD)).toBeNull();
-    expect(addCopilotTrustedFolder(JSON.stringify({ trustedFolders: [1] }), CWD)).toBeNull();
+  it("trusts the seat cwd in the owner settings, merge-only", async () => {
+    const files = harnessMemFs({ [SETTINGS]: JSON.stringify({ model: "gpt-5.4", trustedFolders: ["/elsewhere"] }) });
+    await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(JSON.parse(files.files[SETTINGS]!)).toEqual({ model: "gpt-5.4", trustedFolders: ["/elsewhere", HARNESS_CWD] });
+  });
+
+  it("honors COPILOT_HOME for the settings file", async () => {
+    const files = harnessMemFs();
+    await launch(files, { COPILOT_HOME: "/data/copilot" }).adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(JSON.parse(files.files["/data/copilot/settings.json"]!)).toEqual({ trustedFolders: [HARNESS_CWD] });
+    expect(files.files[SETTINGS]).toBeUndefined();
+  });
+
+  it("leaves an unparseable settings file untouched and still launches", async () => {
+    const files = harnessMemFs({ [SETTINGS]: "// user comment\n{ \"trustedFolders\": [] }" });
+    const result = await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result.ok).toBe(true);
+    expect(files.files[SETTINGS]).toBe("// user comment\n{ \"trustedFolders\": [] }");
+  });
+
+  it("resumes an existing session by exact id without minting a new one", async () => {
+    const files = harnessMemFs({ [workspaceFileUnder(HARNESS_HOME, SEEDED_ID)]: workspaceYaml(SEEDED_ID, HARNESS_CWD, "2026-09-29T12:00:00Z") });
+    const { adapter, pane } = launch(files);
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: SEEDED_ID });
+    expect(result).toMatchObject({ ok: true, resumeToken: SEEDED_ID, resumeType: "copilot_session_id" });
+    expect(pane.typed[0]).toContain(`--resume=${SEEDED_ID}`);
+    expect(pane.typed[0]).not.toContain("--session-id");
+  });
+
+  it("describes discovery identity without claiming the generic node host", () => {
+    const d = COPILOT_REGISTRATION.descriptor;
+    expect(d.paneCommands).toEqual(["copilot"]);
+    const matches = (command: string) => processMatches(command, d.processMatch!);
+    expect(matches("node /opt/tools/node_modules/.bin/copilot --no-auto-update")).toBe(true);
+    expect(matches("/opt/tools/node_modules/@github/copilot-darwin-arm64/copilot --session-id x")).toBe(true);
+    expect(matches("node /usr/local/bin/opencode --prompt copilot")).toBe(false);
+    expect(matches("gh copilot suggest")).toBe(false);
+    expect(d.reapProcessTreeOnStop).toBe(true);
   });
 });
