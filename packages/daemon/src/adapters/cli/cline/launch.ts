@@ -7,9 +7,12 @@
 // - `--auto-approve <boolean>` DEFAULTS TO TRUE, so the floor posture must pass
 //   `--auto-approve false` explicitly; full_bypass passes `--auto-approve true`.
 //   (The hidden `-y/--yolo` forces headless plain output and is never used.)
-// - `-m <model-id>` selects a model for the provider configured with
-//   `cline auth`. Provider ids are not split out of the model string because
-//   OpenRouter-style model ids contain "/" themselves.
+// - `-m <model-id>` is NOT per-launch: cline saves it as the provider's default
+//   model in ~/.cline/data/settings/providers.json (verified). CLINE_MODEL does
+//   not reach the TUI, and a per-seat CLINE_PROVIDER_SETTINGS_PATH would need a
+//   copy of the operator's provider secrets. So a seat never passes -m, and a
+//   seat that declares `model:` is refused rather than silently rewriting the
+//   operator's default (and racing pod-mates).
 // - `--id <session-id>` resumes an existing session and stays interactive.
 //   There is no fork primitive.
 
@@ -31,6 +34,9 @@ export const CLINE_LAUNCH_ENV: Readonly<Record<string, string>> = Object.freeze(
   CLINE_NO_AUTO_UPDATE: "1",
 });
 
+export const CLINE_MODEL_UNSUPPORTED_ERROR =
+  "cline cannot set a per-seat model without changing the operator default; set the model in Cline or omit model:";
+
 export type ClineLaunchPosture = "floor" | "full_bypass";
 
 export interface ClineForkRef {
@@ -49,9 +55,8 @@ export function buildClineArgv(input: ClineArgvInput): string[] {
   if (input.forkSource) {
     throw new Error("cline has no native fork primitive; remove session_source for cline members");
   }
+  if (input.model?.trim()) throw new Error(CLINE_MODEL_UNSUPPORTED_ERROR);
   const argv = [CLINE_BINARY, "--auto-approve", input.posture === "full_bypass" ? "true" : "false"];
-  const model = input.model?.trim();
-  if (model) argv.push("-m", model);
   if (input.resumeToken !== undefined) {
     const validation = validateClineSessionId(input.resumeToken);
     if (!validation.ok) throw new Error(validation.error);

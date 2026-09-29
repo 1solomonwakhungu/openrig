@@ -25,7 +25,6 @@ pods:
         agent_ref: "local:agents/impl"
         profile: default
         runtime: cline
-        model: claude-sonnet-4-5
         cwd: "."
     edges: []
 ```
@@ -35,12 +34,29 @@ pods:
 | OpenRig | Cline |
 |---|---|
 | launch | `cline --auto-approve false` (typed into the pane; no prompt argument, which would run one-shot) |
-| `model` | `-m <model>` for the provider chosen with `cline auth`. The value is passed as is, so OpenRouter-style ids such as `anthropic/claude-sonnet-4.5` work. |
+| `model` | not supported: a member with `model:` is refused at launch (see below). The seat uses the provider and model selected in Cline. |
 | floor posture | `--auto-approve false`. Cline defaults auto-approve to **true**, so the floor always passes `false` explicitly. |
 | full_bypass posture (`OPENRIG_YOLO=1` or a full-bypass permission policy) | `--auto-approve true`. The hidden `--yolo` flag is never used because it forces headless output. |
 | resume | `--id <session id>` |
 | fork | refused: Cline has no fork primitive |
 | launch env | `CLINE_DISABLE_CLINE_PASS_NOTICE=1` (suppresses launch notice modals, which swallow the first keystroke and open a browser on Enter) and `CLINE_NO_AUTO_UPDATE=1` (releases up to 3.0.54 killed live sessions when they auto-updated) |
+
+## Model selection
+
+Set the model in Cline itself (`cline auth <provider> -m <model>`, or the model
+picker in the TUI) and omit `model:` for cline members. A member that sets
+`model:` fails to launch with:
+
+```
+cline cannot set a per-seat model without changing the operator default; set the model in Cline or omit model:
+```
+
+Why: `cline -m <model>` is not per-launch. Cline saves it as the provider's
+default model in `~/.cline/data/settings/providers.json`, so a seat would
+silently rewrite the operator's default, and pod-mates with different models
+would race each other. `CLINE_MODEL` does not affect the TUI (verified). A
+per-seat `CLINE_PROVIDER_SETTINGS_PATH` would need a copy of the operator's
+provider keys or OAuth tokens, which OpenRig does not make.
 
 ## Readiness
 
@@ -78,10 +94,8 @@ guess.
 
 ## Known limits
 
-- `-m` persists: Cline saves the chosen model as the provider's default in
-  `~/.cline/data/settings/providers.json`. A seat with `model:` changes the
-  default model for later Cline runs that use the same provider. `CLINE_MODEL`
-  has no effect on the TUI (verified), so no non-persisting alternative exists.
+- No per-seat model (see "Model selection"). All cline seats on a host share
+  the operator's Cline provider and model.
 - The pane's foreground process is `node` (the npm launcher), which is too broad
   to identify Cline. Pane-command fingerprinting is not used.
 - The busy (model working) footer has not been verified with a live provider.
@@ -91,7 +105,7 @@ guess.
 Verified live against cline 3.0.65 (npm, darwin-arm64) in an isolated prefix and
 scratch `HOME`, with a dummy provider key (no real account): `--help`, TUI
 screens (sign-in, notice modals, home, chat), `--auto-approve true|false`
-footer, `-m` display and persistence, `CLINE_DISABLE_CLINE_PASS_NOTICE`,
+footer, `-m` persisting into `providers.json`, `CLINE_MODEL` having no effect on the TUI, `CLINE_DISABLE_CLINE_PASS_NOTICE`,
 lazy session creation, the session metadata layout, `--id` resume with history,
 and the unknown-session error. The skills and rules search paths were read from
 the bundled source. The pane fixtures used in tests are these live captures.

@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
-  buildClineArgv, validateClineSessionId, CLINE_LAUNCH_ENV,
+  buildClineArgv, validateClineSessionId, CLINE_LAUNCH_ENV, CLINE_MODEL_UNSUPPORTED_ERROR,
 } from "../src/adapters/cli/cline/launch.js";
 import {
   clineSessionsDir, clineSessionMetadataPath, checkClineResumeTarget, findClineSessionForLaunch,
@@ -72,15 +72,22 @@ describe("cline launch argv", () => {
     expect(argv).not.toContain("-y");
   });
 
-  it("passes the model through -m untouched, including provider-style ids", () => {
-    expect(buildClineArgv({ posture: "floor", model: " anthropic/claude-sonnet-4.5 " }))
-      .toEqual(["cline", "--auto-approve", "false", "-m", "anthropic/claude-sonnet-4.5"]);
-    expect(buildClineArgv({ posture: "floor", model: "" })).toEqual(["cline", "--auto-approve", "false"]);
+  it("refuses a seat model, because cline -m rewrites the operator's default", () => {
+    expect(() => buildClineArgv({ posture: "floor", model: "anthropic/claude-sonnet-4.5" })).toThrow(CLINE_MODEL_UNSUPPORTED_ERROR);
+    expect(() => buildClineArgv({ posture: "full_bypass", model: "x", resumeToken: "1790702191676_lovnf" })).toThrow(CLINE_MODEL_UNSUPPORTED_ERROR);
+  });
+
+  it("never passes -m when the seat has no model", () => {
+    for (const model of [undefined, null, "", "   "]) {
+      const argv = buildClineArgv({ posture: "floor", model });
+      expect(argv).not.toContain("-m");
+      expect(argv).not.toContain("--model");
+    }
   });
 
   it("resumes with --id and never adds a positional prompt (which would run one-shot)", () => {
-    expect(buildClineArgv({ posture: "floor", model: "m", resumeToken: " 1790702191676_lovnf " }))
-      .toEqual(["cline", "--auto-approve", "false", "-m", "m", "--id", "1790702191676_lovnf"]);
+    expect(buildClineArgv({ posture: "floor", resumeToken: " 1790702191676_lovnf " }))
+      .toEqual(["cline", "--auto-approve", "false", "--id", "1790702191676_lovnf"]);
   });
 
   it("refuses fork clearly", () => {
