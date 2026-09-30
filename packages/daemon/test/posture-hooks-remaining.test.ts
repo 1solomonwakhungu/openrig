@@ -44,24 +44,42 @@ function diagnose(runtime: string, applied: AppliedLaunchObservation | null, exp
 interface Case {
   runtime: string;
   spec: TuiCliRuntimeSpec;
-  /** The argv tokens that carry each posture's permission value. */
+  /** The argv tokens that carry each posture's permission value (independent
+   *  expectation, written out literally). */
   emits: { floor: string[] | null; full_bypass: string[] };
+  /** The argv tokens a recorded value stands for: ties the observation to what
+   *  the launch really typed, so a renamed constant or flag cannot pass unseen. */
+  tokensFor: (value: string) => string[];
 }
 
+const flagOnly = (value: string) => [`--${value}`];
+
 const CASES: Case[] = [
-  { runtime: "cline", spec: createClineSpec({}), emits: { floor: ["--auto-approve", "false"], full_bypass: ["--auto-approve", "true"] } },
-  { runtime: "aider", spec: createAiderSpec("/openrig-home/state", () => "id"), emits: { floor: null, full_bypass: ["--yes-always"] } },
-  { runtime: "grok", spec: GROK_SPEC, emits: { floor: ["--permission-mode", "acceptEdits"], full_bypass: ["--always-approve"] } },
-  { runtime: "antigravity", spec: ANTIGRAVITY_SPEC, emits: { floor: ["--mode", "accept-edits"], full_bypass: ["--dangerously-skip-permissions"] } },
-  { runtime: "copilot", spec: COPILOT_SPEC, emits: { floor: null, full_bypass: ["--yolo"] } },
-  { runtime: "cursor", spec: CURSOR_SPEC, emits: { floor: null, full_bypass: ["--force"] } },
+  {
+    runtime: "cline", spec: createClineSpec({}),
+    emits: { floor: ["--auto-approve", "false"], full_bypass: ["--auto-approve", "true"] },
+    tokensFor: (value) => { const [flag, arg] = value.split("="); return [`--${flag}`, arg!]; },
+  },
+  { runtime: "aider", spec: createAiderSpec("/openrig-home/state", () => "id"), emits: { floor: null, full_bypass: ["--yes-always"] }, tokensFor: flagOnly },
+  {
+    runtime: "grok", spec: GROK_SPEC,
+    emits: { floor: ["--permission-mode", "acceptEdits"], full_bypass: ["--always-approve"] },
+    tokensFor: (value) => (value === "acceptEdits" ? ["--permission-mode", value] : flagOnly(value)),
+  },
+  {
+    runtime: "antigravity", spec: ANTIGRAVITY_SPEC,
+    emits: { floor: ["--mode", "accept-edits"], full_bypass: ["--dangerously-skip-permissions"] },
+    tokensFor: (value) => (value === "accept-edits" ? ["--mode", value] : flagOnly(value)),
+  },
+  { runtime: "copilot", spec: COPILOT_SPEC, emits: { floor: null, full_bypass: ["--yolo"] }, tokensFor: flagOnly },
+  { runtime: "cursor", spec: CURSOR_SPEC, emits: { floor: null, full_bypass: ["--force"] }, tokensFor: flagOnly },
 ];
 
 function containsRun(argv: string[], run: string[]): boolean {
   return argv.some((_, i) => run.every((token, j) => argv[i + j] === token));
 }
 
-describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits }) => {
+describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits, tokensFor }) => {
   const descriptor = getRuntimeDescriptor(runtime)!;
   const observe = (posture: "floor" | "full_bypass") => spec.observeLaunch!(input(posture))!;
 
@@ -73,13 +91,19 @@ describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits })
   it("records the permission value the launch actually emits", () => {
     const bypass = observe("full_bypass");
     expect(bypass).toMatchObject({ runtime, axis: "permission", state: "observed", reason: "emitted_launch_arguments" });
-    expect(containsRun(spec.buildLaunchCommand(input("full_bypass")), emits.full_bypass)).toBe(true);
+    const bypassArgv = spec.buildLaunchCommand(input("full_bypass"));
+    expect(containsRun(bypassArgv, emits.full_bypass)).toBe(true);
+    expect(tokensFor(bypass.value!)).toEqual(emits.full_bypass);
+    expect(containsRun(bypassArgv, tokensFor(bypass.value!))).toBe(true);
     expect(descriptor.permissionPostureFor!(bypass.value!)).toBe("full_bypass");
 
     const floor = observe("floor");
     if (emits.floor) {
       expect(floor).toMatchObject({ runtime, axis: "permission", state: "observed", reason: "emitted_launch_arguments" });
-      expect(containsRun(spec.buildLaunchCommand(input("floor")), emits.floor)).toBe(true);
+      const floorArgv = spec.buildLaunchCommand(input("floor"));
+      expect(containsRun(floorArgv, emits.floor)).toBe(true);
+      expect(tokensFor(floor.value!)).toEqual(emits.floor);
+      expect(containsRun(floorArgv, tokensFor(floor.value!))).toBe(true);
       expect(descriptor.permissionPostureFor!(floor.value!)).toBe("floor");
     } else {
       // No permission flag on the floor: the CLI's own config governs.
