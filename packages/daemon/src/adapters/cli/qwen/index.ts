@@ -77,7 +77,8 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   validateResumeToken: validateSessionToken,
   captureResumeToken: createGeminiFamilyCapture({
     // The conversation file, the same test as the resume precheck: a seat that
-    // never got a message has only runtime.json, so no token, and restores fresh.
+    // never got a message has only runtime.json, so no token; restore then stops
+    // for an explicit --fresh (the no-token policy) and never resumes a wrong conversation.
     sessionExists: (ctx, id) => findQwenSessionFile(ctx, id) !== null,
     captureForkChild: (ctx, launchStartedAt) => captureQwenForkChild(ctx, { launchStartedAt }),
   }),

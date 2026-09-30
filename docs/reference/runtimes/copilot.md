@@ -100,8 +100,9 @@ So OpenRig records the id as the seat's resume token only once
 `$COPILOT_HOME/session-state/<uuid>/events.jsonl` holds a user message (the
 same test Copilot uses for sessions with user-visible history). It checks
 right after launch, from the periodic resume refresher, and at restore. A seat
-that was started but never prompted has no token and restores fresh instead of
-stopping to ask.
+that was started but never prompted has no token, so restore stops at
+awaiting-decision and asks for an explicit `--fresh <seat>` (OpenRig's no-token
+policy); no wrong conversation is ever resumed.
 
 Resume launches `copilot --no-auto-update --resume=<uuid>`. Before resuming,
 OpenRig checks that `$COPILOT_HOME/session-state/<uuid>/workspace.yaml` still
