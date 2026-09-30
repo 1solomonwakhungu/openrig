@@ -16,6 +16,8 @@ import { createClineSpec } from "../src/adapters/cli/cline/index.js";
 import { createAiderSpec } from "../src/adapters/cli/aider/index.js";
 import { GROK_SPEC } from "../src/adapters/cli/grok/index.js";
 import { ANTIGRAVITY_SPEC } from "../src/adapters/cli/antigravity/index.js";
+import { COPILOT_SPEC } from "../src/adapters/cli/copilot/index.js";
+import { CURSOR_SPEC } from "../src/adapters/cli/cursor/index.js";
 import type { NodeBinding } from "../src/domain/runtime-adapter.js";
 
 const cwd = "/work/project";
@@ -51,6 +53,8 @@ const CASES: Case[] = [
   { runtime: "aider", spec: createAiderSpec("/openrig-home/state", () => "id"), emits: { floor: null, full_bypass: ["--yes-always"] } },
   { runtime: "grok", spec: GROK_SPEC, emits: { floor: ["--permission-mode", "acceptEdits"], full_bypass: ["--always-approve"] } },
   { runtime: "antigravity", spec: ANTIGRAVITY_SPEC, emits: { floor: ["--mode", "accept-edits"], full_bypass: ["--dangerously-skip-permissions"] } },
+  { runtime: "copilot", spec: COPILOT_SPEC, emits: { floor: null, full_bypass: ["--yolo"] } },
+  { runtime: "cursor", spec: CURSOR_SPEC, emits: { floor: null, full_bypass: ["--force"] } },
 ];
 
 function containsRun(argv: string[], run: string[]): boolean {

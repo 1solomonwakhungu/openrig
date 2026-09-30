@@ -62,6 +62,11 @@ export interface CopilotLaunchInput {
   binary?: string;
 }
 
+/** The permission value full_bypass emits (`--yolo`), as recorded for
+ *  permission drift. The floor passes no permission flag: Copilot keeps its
+ *  own tool approval prompts. */
+export const COPILOT_FULL_BYPASS_PERMISSION_VALUE = "yolo";
+
 /**
  * argv for an interactive Copilot launch. Throws (refusing the launch) on a
  * fork request, a malformed token, or an ambiguous fresh/resume mix.
@@ -94,7 +99,7 @@ export function buildCopilotArgv(input: CopilotLaunchInput): string[] {
     if (model.startsWith("-")) throw new Error("copilot launch: model must not start with '-'");
     argv.push("--model", model);
   }
-  if (input.posture === "full_bypass") argv.push("--yolo");
+  if (input.posture === "full_bypass") argv.push(`--${COPILOT_FULL_BYPASS_PERMISSION_VALUE}`);
   return argv;
 }
 

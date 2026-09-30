@@ -53,6 +53,8 @@ Posture comes from the member or rig `permission_policy` (for example
 `builtin:yolo` selects `full_bypass`). `rig seat set-permissions` is currently
 limited to `claude-code` and `codex`.
 
+Under `full_bypass` OpenRig records `force` as the seat's applied-launch observation (axis `permission`); when the seat has a permission policy, permission drift compares the posture it implies with the policy's posture and reports `aligned` or `drift`. The floor passes no permission flag, so its observation is `unknown` (Cursor's own settings govern) and never compared. This checks the launch arguments OpenRig emitted, not Cursor's own enforcement.
+
 `--trust` is passed on every launch. It marks the seat's workspace as trusted
 so the "Workspace Trust Required" dialog does not block the seat; `--force`
 alone does not skip that dialog in the interactive CLI. This mirrors how

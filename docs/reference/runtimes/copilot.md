@@ -51,6 +51,8 @@ Posture comes from the member or rig `permission_policy` (for example
 limited to `claude-code` and `codex`. With `floor`, a `defaultPermissionMode`
 you set in Copilot's own settings still applies; OpenRig does not override it.
 
+Under `full_bypass` OpenRig records `yolo` as the seat's applied-launch observation (axis `permission`); when the seat has a permission policy, permission drift compares the posture it implies with the policy's posture and reports `aligned` or `drift`. The floor passes no permission flag, so its observation is `unknown` (Copilot's own settings govern) and never compared. This checks the launch arguments OpenRig emitted, not Copilot's own enforcement.
+
 ## Folder trust
 
 Copilot asks "Do you trust the files in this folder?" the first time it runs

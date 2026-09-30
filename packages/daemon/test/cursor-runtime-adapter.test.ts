@@ -221,7 +221,7 @@ describe("Cursor adapter launch", () => {
   it("types cursor-agent with --trust and the model; floor has no --force", async () => {
     const { adapter, pane } = launch();
     const result = await adapter.launchHarness(harnessBinding({ model: "gpt-5" }), { name: "x" });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, appliedLaunch: { runtime: "cursor", axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" } });
     expect(pane.typed[0]).toContain("'cursor-agent' '--disable-auto-update' '--trust' '--model' 'gpt-5'");
     expect(pane.typed[0]).not.toContain("--force");
   });
