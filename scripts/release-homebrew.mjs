@@ -10,6 +10,9 @@
 // repository, then open a pull request on the tap that updates Formula/openrig.rb
 // (url, version, sha256). Merge that pull request once the tap's Tests pass.
 //
+// Even a dry run changes the working copy's build outputs: it reinstalls node_modules
+// with `npm ci` and rewrites the staged package under packages/cli (daemon/, ui/, tui/).
+//
 // Environment overrides:
 //   OPENRIG_RELEASE_REPO  owner/name of the repository that hosts the release (default: origin)
 //   OPENRIG_TAP_REPO      owner/name of the Homebrew tap (default: <owner>/homebrew-tap)
@@ -43,7 +46,7 @@ export function rewriteFormula(text, { url, version, sha256 }) {
   for (const [key, value] of Object.entries(fields)) {
     const line = new RegExp(`^(\\s*)${key} "[^"]*"$`, "m");
     if (!line.test(out)) throw new Error(`formula has no ${key} line`);
-    out = out.replace(line, `$1${key} "${value}"`);
+    out = out.replace(line, (_match, indent) => `${indent}${key} "${value}"`);
   }
   return out;
 }
@@ -63,8 +66,14 @@ function main() {
   step("Checking the working tree");
   const branch = run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (branch !== "main") throw new Error(`release from main, not ${branch}`);
-  if (run("git", ["status", "--porcelain", "--", "packages", "scripts"])) {
-    throw new Error("packages/ or scripts/ has uncommitted changes");
+  // Any tracked change anywhere, or an untracked file among the inputs the package ships
+  // or builds from, would publish bytes that "Built from <head>" does not describe.
+  if (run("git", ["status", "--porcelain", "--untracked-files=no"])) {
+    throw new Error("the working tree has uncommitted changes");
+  }
+  const shippedInputs = ["packages", "scripts", "docs/reference", "LICENSE", "package.json", "package-lock.json"];
+  if (run("git", ["status", "--porcelain", "--untracked-files=all", "--", ...shippedInputs])) {
+    throw new Error("untracked files exist among the package inputs");
   }
   run("git", ["fetch", "--quiet", "origin", "main", "--tags"]);
   const head = run("git", ["rev-parse", "HEAD"]);
@@ -76,8 +85,16 @@ function main() {
   const formulaPath = process.env.OPENRIG_TAP_FORMULA || "Formula/openrig.rb";
 
   const version = JSON.parse(readFileSync(path.join(REPO_ROOT, "packages/cli/package.json"), "utf8")).version;
-  const tags = run("git", ["tag", "--list", `v${version}-fork.*`]).split("\n").filter(Boolean);
-  const released = tags.find((tag) => run("git", ["rev-list", "-n", "1", tag]) === head);
+  // Read tags from the repository that hosts the release, which may differ from origin.
+  const remoteTags = new Map();
+  for (const line of run("git", ["ls-remote", "--tags", `https://github.com/${releaseRepo}.git`, `v${version}-fork.*`]).split("\n")) {
+    const [sha, ref] = line.split("\t");
+    if (!ref) continue;
+    const name = ref.replace(/^refs\/tags\//, "").replace(/\^\{\}$/, "");
+    if (ref.endsWith("^{}") || !remoteTags.has(name)) remoteTags.set(name, sha);
+  }
+  const tags = [...remoteTags.keys()];
+  const released = tags.find((tag) => remoteTags.get(tag) === head);
   if (released && publish) throw new Error(`${head.slice(0, 8)} is already released as ${released}`);
   const tag = nextForkTag(version, tags);
   const formulaVersion = tag.slice(1);

@@ -42,3 +42,8 @@ test("rewriteFormula refuses a formula missing one of the fields", () => {
     /no version line/,
   );
 });
+
+test("rewriteFormula inserts values literally, even when they contain $ patterns", () => {
+  const out = rewriteFormula(FORMULA, { url: "https://x/$1$&.tgz", version: "0.6.1-fork.2", sha256: "c".repeat(64) });
+  assert.match(out, /^  url "https:\/\/x\/\$1\$&\.tgz"$/m);
+});
