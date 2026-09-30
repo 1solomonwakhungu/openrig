@@ -111,10 +111,11 @@ stays fresh: a later restore replays only the conversation since that launch,
 never one from before it. A resume keeps writing to the file it restored.
 Earlier files stay in the seat state dir until the seat is removed.
 
-The token counts only once the file holds a real exchange (a user message,
-written as a `#### ` line). Late capture waits for it, so a seat that never got
-a prompt has no token and restores fresh; and the resume precheck refuses a file
-with no exchange, as for Gemini and Qwen.
+The file counts as resumable only once it holds a real exchange (a user
+message, written as a `#### ` line), as for Gemini and Qwen. Late capture waits
+for one, and the resume precheck refuses a file without one. A seat that never
+got a prompt is therefore never resumed: restore stops at awaiting-decision and
+asks for an explicit `--fresh`; it does not start fresh on its own.
 
 If the file is gone at resume time, or has no exchange, the resume reports
 `retry_fresh` (stop and ask), because restoring it would silently start an empty

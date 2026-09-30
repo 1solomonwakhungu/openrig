@@ -217,7 +217,8 @@ export type AiderCaptureFsOps = AiderFsOps;
 
 /** Token capture: the history file minted for the seat's latest fresh launch
  *  (the base records it as launch.json presetToken), once it holds a real
- *  exchange, so a seat that never got a prompt has no token and restores fresh.
+ *  exchange (the resume precheck's test), so a seat that never got a prompt is
+ *  never resumed; restore stops at awaiting-decision instead.
  *  Only a file inside the seat's own state dir is accepted. Read-only; never
  *  throws. */
 export function captureAiderChatHistory(ctx: { fs: AiderCaptureFsOps; seatStateDir: string }): string | undefined {
