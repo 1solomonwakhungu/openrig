@@ -34,6 +34,10 @@ export function wrapTolerant(literal: string): string {
   return [...literal].map((ch) => ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("\\n?");
 }
 
+function anyOf(phrases: readonly string[]): string {
+  return phrases.map(wrapTolerant).join("|");
+}
+
 export const AIDER_READY_PATTERNS: readonly RegExp[] = [
   /(?:^|\n)(?:[A-Za-z][\w-]*(?: multi)?|multi)?> ?\s*$/,
 ];
@@ -54,6 +58,18 @@ export const AIDER_GATE_PATTERNS: readonly AiderGatePattern[] = [
     pattern: new RegExp(`${wrapTolerant("expects these environment variables")}[ \\t]*\\n(?:[^\\n]*\\n){0,6}?- [A-Z][A-Z0-9_]*: Not set`),
     code: "login_required",
     reason: "aider is missing the API key for the selected model; set the provider key (for example ANTHROPIC_API_KEY) in the seat env",
+  },
+  {
+    // aider's OpenRouter onboarding (no --model and no key, or an openrouter/
+    // model without OPENROUTER_API_KEY). Never auto-accepted: full_bypass
+    // withholds --yes-always in exactly these cases (launch.ts).
+    pattern: new RegExp(anyOf([
+      "Login to OpenRouter or create a free account?",
+      "No LLM model was specified and no API keys were provided",
+      "requires an OpenRouter API key, which was not found",
+    ])),
+    code: "login_required",
+    reason: "aider has no model or provider key and is offering an OpenRouter sign-in; set model: and the provider key (for example ANTHROPIC_API_KEY) in the seat env",
   },
   {
     pattern: new RegExp(`${wrapTolerant("No git repo found, create one")}[^]{0,200}?${PENDING_CONFIRM}`),

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   buildAiderArgv, aiderLaunchEnv, aiderSeatPaths, validateAiderChatHistoryToken,
-  checkAiderResumeTarget, captureAiderChatHistory, mintAiderChatHistoryFile,
+  checkAiderResumeTarget, captureAiderChatHistory, mintAiderChatHistoryFile, aiderBypassAllowed, hasAiderExchange,
 } from "../src/adapters/cli/aider/launch.js";
 import { AIDER_READY_PATTERNS, AIDER_GATE_PATTERNS, AIDER_ERROR_PATTERNS } from "../src/adapters/cli/aider/patterns.js";
 import { ATTENTION_REQUIRED_READINESS_CODES } from "../src/domain/runtime-adapter.js";
@@ -150,12 +150,12 @@ describe("aider chat history token", () => {
 
     it("returns the latest launch's minted file once aider has written it", () => {
       expect(captureAiderChatHistory({ fs: fsOf({ [`${SEAT}/launch.json`]: record(minted) }), seatStateDir: SEAT })).toBeUndefined();
-      expect(captureAiderChatHistory({ fs: fsOf({ [`${SEAT}/launch.json`]: record(minted), [minted]: "#" }), seatStateDir: SEAT })).toBe(minted);
+      expect(captureAiderChatHistory({ fs: fsOf({ [`${SEAT}/launch.json`]: record(minted), [minted]: "# aider chat started\n#### fix the bug\n" }), seatStateDir: SEAT })).toBe(minted);
     });
 
     it("never falls back to an older launch's file", () => {
       const older = mintAiderChatHistoryFile(SEAT, "launch-0");
-      const files = { [`${SEAT}/launch.json`]: record(minted), [older]: "# old", [CHAT]: "# legacy" };
+      const files = { [`${SEAT}/launch.json`]: record(minted), [older]: "#### old", [CHAT]: "#### legacy" };
       expect(captureAiderChatHistory({ fs: fsOf(files), seatStateDir: SEAT })).toBeUndefined();
     });
 
@@ -169,10 +169,11 @@ describe("aider chat history token", () => {
   });
 
   it("resume check maps a vanished history file to retry_fresh", () => {
-    expect(checkAiderResumeTarget(CHAT, { fs: { exists: () => true } })).toEqual({ ok: true });
-    expect(checkAiderResumeTarget(CHAT, { fs: { exists: () => false } }))
+    const withExchange = { exists: () => true, readFile: () => "# aider chat started\n#### fix the bug\n" };
+    expect(checkAiderResumeTarget(CHAT, { fs: withExchange })).toEqual({ ok: true });
+    expect(checkAiderResumeTarget(CHAT, { fs: { exists: () => false, readFile: () => "" } }))
       .toEqual({ ok: false, error: "the persisted aider chat history file no longer exists", recovery: "retry_fresh" });
-    expect(checkAiderResumeTarget("nope", { fs: { exists: () => true } })).toMatchObject({ ok: false, recovery: "retry_fresh" });
+    expect(checkAiderResumeTarget("nope", { fs: withExchange })).toMatchObject({ ok: false, recovery: "retry_fresh" });
   });
 });
 
@@ -296,13 +297,13 @@ runTuiCliAdapterContract({
   missingResumeToken: "/openrig-home/state/aider/gone@harness-rig/aider.chat.history.md",
   seedResumeTarget: ({ fs: seatFs, token }) => {
     seatFs.mkdirp(nodePath.dirname(token));
-    seatFs.writeFile(token, "# aider chat started at 2026-09-29 12:19:22\n");
+    seatFs.writeFile(token, "# aider chat started at 2026-09-29 12:19:22\n\n#### fix the bug\n");
   },
   // The launch minted its history file (launch.json presetToken); aider
   // writes the header there at startup.
   seedSession: ({ seatStateDir }) => {
     const { presetToken } = JSON.parse(fs.readFileSync(nodePath.join(seatStateDir, "launch.json"), "utf-8")) as { presetToken: string };
-    fs.writeFileSync(presetToken, "\n# aider chat started at 2026-09-29 12:19:22\n");
+    fs.writeFileSync(presetToken, "\n# aider chat started at 2026-09-29 12:19:22\n\n#### fix the bug\n");
     return presetToken;
   },
 });
@@ -339,15 +340,16 @@ describe("aider adapter", () => {
   });
 
   it("full_bypass types --yes-always behind BROWSER=true", async () => {
-    for (const [binding, env] of [[harnessBinding(), { OPENRIG_YOLO: "1" }], [harnessBinding({ launchPosture: "full_bypass" }), {}]] as const) {
+    for (const [binding, env] of [[harnessBinding({ model: "sonnet" }), { OPENRIG_YOLO: "1" }], [harnessBinding({ model: "sonnet", launchPosture: "full_bypass" }), {}]] as const) {
       const { adapter, pane: p } = fixedIdRig(undefined, env);
       await adapter.launchHarness(binding, { name: "x" });
-      expect(p.typed[0]).toBe(`exec env 'PIP_REQUIRE_VIRTUALENV=true' 'BROWSER=true' ${q(buildAiderArgv({ posture: "full_bypass", seatStateDir: HARNESS_SEAT, sessionToken: MINTED }))}`);
+      expect(p.typed[0]).toBe(`exec env 'PIP_REQUIRE_VIRTUALENV=true' 'BROWSER=true' ${q(buildAiderArgv({ posture: "full_bypass", seatStateDir: HARNESS_SEAT, model: "sonnet", sessionToken: MINTED }))}`);
+      expect(p.typed[0]).toContain("'--yes-always'");
     }
   });
 
   it("resumes with --restore-chat-history when the history file exists, keeping the install guards", async () => {
-    const { adapter, pane: p } = launchRig(undefined, {}, { [HARNESS_CHAT]: "# aider chat started\n" });
+    const { adapter, pane: p } = launchRig(undefined, {}, { [HARNESS_CHAT]: "# aider chat started\n#### fix the bug\n" });
     const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: HARNESS_CHAT });
     expect(result).toMatchObject({ ok: true, resumeToken: HARNESS_CHAT, resumeType: "aider_chat_history_file" });
     expect(p.typed[0]).toContain("'--restore-chat-history'");
@@ -373,7 +375,7 @@ describe("aider adapter", () => {
     expect(tmuxPane.typed[1]).not.toContain("--restore-chat-history");
 
     // A restore of the persisted (second) token replays only that file.
-    seatFs.writeFile(secondToken, "# aider chat started\n");
+    seatFs.writeFile(secondToken, "# aider chat started\n#### fix the bug\n");
     tmuxPane.setFrames([atShell(), { command: PYTHON, content: pane("ready.txt") }]);
     const resumed = await adapter.resume({
       nodeId: "n", sessionName: HARNESS_SESSION, resumeType: "aider_chat_history_file", resumeToken: secondToken, cwd: "/work/project",
@@ -417,5 +419,76 @@ describe("aider adapter", () => {
     ["vim aider.md", false],
   ])("processMatch %j -> %s", (command, expected) => {
     expect(processMatches(command, AIDER_DESCRIPTOR.processMatch!)).toBe(expected);
+  });
+});
+
+describe("aider OpenRouter onboarding is never auto-accepted", () => {
+  it("allows --yes-always only with a declared model, and for openrouter/ models only with OPENROUTER_API_KEY", () => {
+    expect(aiderBypassAllowed({ model: undefined, env: {} })).toBe(false);
+    expect(aiderBypassAllowed({ model: "  ", env: { ANTHROPIC_API_KEY: "k" } })).toBe(false);
+    expect(aiderBypassAllowed({ model: "sonnet", env: {} })).toBe(true);
+    expect(aiderBypassAllowed({ model: "openrouter/anthropic/claude-sonnet-4.5", env: {} })).toBe(false);
+    expect(aiderBypassAllowed({ model: "openrouter/anthropic/claude-sonnet-4.5", env: { OPENROUTER_API_KEY: "k" } })).toBe(true);
+  });
+
+  it("full_bypass without a model withholds --yes-always and records the posture as unknown", async () => {
+    const tmuxPane = mockTmux([atShell(), { command: PYTHON, content: pane("ready.txt") }]);
+    const adapter = AIDER_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: memFs(), env: { OPENRIG_YOLO: "1" } }));
+    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: true });
+    expect(tmuxPane.typed[0]).not.toContain("--yes-always");
+    expect(result.ok && result.appliedLaunch).toEqual({
+      runtime: "aider", axis: "permission", state: "unknown", value: null, reason: "yes_always_withheld_onboarding",
+    });
+  });
+
+  it("full_bypass with an openrouter/ model withholds --yes-always unless OPENROUTER_API_KEY is in the launch env", async () => {
+    for (const [env, expectYes] of [[{}, false], [{ OPENROUTER_API_KEY: "k" }, true]] as const) {
+      const tmuxPane = mockTmux([atShell(), { command: PYTHON, content: pane("ready.txt") }]);
+      const adapter = AIDER_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: memFs(), env }));
+      await adapter.launchHarness(harnessBinding({ model: "openrouter/anthropic/claude-sonnet-4.5", launchPosture: "full_bypass" }), { name: "x" });
+      expect(tmuxPane.typed[0]!.includes("'--yes-always'")).toBe(expectYes);
+    }
+  });
+
+  it("the OpenRouter sign-in offer (live 80x24 capture) is login_required, not a generic confirmation", () => {
+    expect(classify(pane("openrouter-onboarding-80x24.txt"))).toBe("gate:login_required");
+    const hit = AIDER_GATE_PATTERNS.find((g) => g.pattern.test(pane("openrouter-onboarding-80x24.txt")));
+    expect(hit?.reason).toMatch(/OpenRouter/);
+  });
+
+  it.each([
+    "No LLM model was specified and no API keys were provided.\nOpen documentation URL for more info? (Y)es/(N)o/(D)on't ask again [Yes]: ",
+    "Warning: The specified model 'openrouter/x/y' requires an OpenRouter API key, which was not\n found.\nLogin to OpenRouter or create a free account? (Y)es/(N)o [Yes]: ",
+  ])("onboarding screen %# maps to login_required even when hard-wrapped", (screen) => {
+    expect(classify(screen)).toBe("gate:login_required");
+  });
+});
+
+describe("aider chat history: only a real exchange is restorable", () => {
+  const HEADER_ONLY = "\n# aider chat started at 2026-09-29 12:19:22\n\n> Update git name with: git config user.name\n";
+  const WITH_EXCHANGE = `${HEADER_ONLY}\n#### fix the failing test\n\nI will update app.py.\n`;
+  const fsOf = (files: Record<string, string>) => ({
+    exists: (p: string) => p in files,
+    readFile: (p: string) => { if (!(p in files)) throw new Error("ENOENT"); return files[p]!; },
+  });
+
+  it("recognizes a user message line", () => {
+    expect(hasAiderExchange(fsOf({ [CHAT]: HEADER_ONLY }), CHAT)).toBe(false);
+    expect(hasAiderExchange(fsOf({ [CHAT]: WITH_EXCHANGE }), CHAT)).toBe(true);
+    expect(hasAiderExchange(fsOf({}), CHAT)).toBe(false);
+  });
+
+  it("capture waits for the first exchange, so a never-prompted seat has no token", () => {
+    const minted = mintAiderChatHistoryFile(SEAT, "launch-7");
+    const launch = JSON.stringify({ launchId: "l", mode: "fresh", presetToken: minted });
+    expect(captureAiderChatHistory({ fs: fsOf({ [`${SEAT}/launch.json`]: launch, [minted]: HEADER_ONLY }), seatStateDir: SEAT })).toBeUndefined();
+    expect(captureAiderChatHistory({ fs: fsOf({ [`${SEAT}/launch.json`]: launch, [minted]: WITH_EXCHANGE }), seatStateDir: SEAT })).toBe(minted);
+  });
+
+  it("the resume precheck refuses a header-only history as retry_fresh", () => {
+    expect(checkAiderResumeTarget(CHAT, { fs: fsOf({ [CHAT]: HEADER_ONLY }) }))
+      .toEqual({ ok: false, error: "the persisted aider chat history has no exchange to restore", recovery: "retry_fresh" });
+    expect(checkAiderResumeTarget(CHAT, { fs: fsOf({ [CHAT]: WITH_EXCHANGE }) })).toEqual({ ok: true });
   });
 });
