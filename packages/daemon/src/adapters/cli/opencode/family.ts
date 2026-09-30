@@ -27,6 +27,8 @@ export interface OpencodeFamilyVariant {
   readonly processMatch: RegExp;
   /** Env var that overrides the session database path. */
   readonly dbEnvVar: string;
+  /** Env var that turns off the TUI's startup self-update. */
+  readonly disableAutoUpdateEnvVar: string;
   /** Database file name inside the seat state dir. */
   readonly dbFileName: string;
   /** Project config dir whose `skills/<name>/SKILL.md` the CLI loads. */
@@ -43,6 +45,7 @@ export const OPENCODE_VARIANT: OpencodeFamilyVariant = {
   paneCommands: ["opencode"],
   processMatch: /(?:^|\/)opencode$/,
   dbEnvVar: "OPENCODE_DB",
+  disableAutoUpdateEnvVar: "OPENCODE_DISABLE_AUTOUPDATE",
   dbFileName: "opencode.db",
   projectConfigDir: ".opencode",
   installHint: "brew install anomalyco/tap/opencode, or npm i -g opencode-ai",
@@ -56,6 +59,7 @@ export const KILO_VARIANT: OpencodeFamilyVariant = {
   paneCommands: ["kilo", "kilocode", ".kilo"],
   processMatch: /(?:^|\/)(?:kilo|kilocode|\.kilo)$/,
   dbEnvVar: "KILO_DB",
+  disableAutoUpdateEnvVar: "KILO_DISABLE_AUTOUPDATE",
   dbFileName: "kilo.db",
   projectConfigDir: ".kilo",
   installHint: "npm i -g @kilocode/cli",
@@ -134,7 +138,14 @@ export function buildOpencodeFamilyArgv(variant: OpencodeFamilyVariant, input: O
  *  session is unambiguous even when pod-mates share a cwd. Provider
  *  credentials (auth.json, provider env vars) stay shared. */
 export function opencodeFamilySeatEnv(variant: OpencodeFamilyVariant, seatStateDir: string): Record<string, string> {
-  return { [variant.dbEnvVar]: opencodeFamilyDbPath(variant, seatStateDir) };
+  return {
+    [variant.dbEnvVar]: opencodeFamilyDbPath(variant, seatStateDir),
+    // The TUI checks for a new release at startup and installs a patch
+    // release in place through the detected method (npm -g, brew, the curl
+    // script), which rewrites the owner's global installation from inside a
+    // managed seat. The env var only affects this seat's process.
+    [variant.disableAutoUpdateEnvVar]: "1",
+  };
 }
 
 export function opencodeFamilyDbPath(variant: OpencodeFamilyVariant, seatStateDir: string): string {

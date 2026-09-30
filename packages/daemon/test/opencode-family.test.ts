@@ -122,9 +122,15 @@ describe("session id format", () => {
 describe("per-seat env, guidance, skills, identity", () => {
   const seat = "/openrig-home/state/opencode/dev-impl@rig";
 
-  it("isolates the session database per seat", () => {
-    expect(opencodeFamilySeatEnv(OPENCODE_VARIANT, seat)).toEqual({ OPENCODE_DB: `${seat}/opencode.db` });
-    expect(opencodeFamilySeatEnv(KILO_VARIANT, "/s/kilo/k@rig")).toEqual({ KILO_DB: "/s/kilo/k@rig/kilo.db" });
+  it("isolates the session database per seat and turns off the startup self-update", () => {
+    expect(opencodeFamilySeatEnv(OPENCODE_VARIANT, seat)).toEqual({
+      OPENCODE_DB: `${seat}/opencode.db`,
+      OPENCODE_DISABLE_AUTOUPDATE: "1",
+    });
+    expect(opencodeFamilySeatEnv(KILO_VARIANT, "/s/kilo/k@rig")).toEqual({
+      KILO_DB: "/s/kilo/k@rig/kilo.db",
+      KILO_DISABLE_AUTOUPDATE: "1",
+    });
     // An absolute path: both CLIs join a relative value onto their shared data dir instead.
     expect(nodePath.isAbsolute(opencodeFamilyDbPath(OPENCODE_VARIANT, seat))).toBe(true);
   });

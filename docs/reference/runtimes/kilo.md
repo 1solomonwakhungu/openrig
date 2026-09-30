@@ -38,6 +38,7 @@ pods:
 | Skills dir | `<cwd>/.opencode/skills/` | `<cwd>/.kilo/skills/` |
 | Home placeholder | `Ask anything…` (Unicode ellipsis) | `Ask anything...` (three dots) |
 | Default agent | Build | Code |
+| Self-update off at launch | `OPENCODE_DISABLE_AUTOUPDATE=1` | `KILO_DISABLE_AUTOUPDATE=1` |
 
 Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never does), resume (`-s <ses_ id>` with a pre-launch check of the seat's database), fork (refused), guidance (`AGENTS.md`), readiness (including the dialog guard), and stop all match OpenCode. Stop kills the tmux session and then reaps the pane's process tree (`reapProcessTreeOnStop`), which also covers the npm `node` launcher and its native `.kilo` child.
 
