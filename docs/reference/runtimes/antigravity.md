@@ -30,6 +30,8 @@ The seat runs `exec env AGY_CLI_DISABLE_AUTO_UPDATE=1 BROWSER=true agy [--model 
 | Posture `full_bypass` (policy or `OPENRIG_YOLO`) | `--dangerously-skip-permissions` (agy has no `--yolo`) |
 | Browser | `BROWSER=true`, so sign-in never opens a tab on the operator's desktop |
 
+OpenRig records the permission argument it passed (`accept-edits` or `dangerously-skip-permissions`) as the seat's applied-launch observation (axis `permission`). When the seat has a permission policy (member or rig), permission drift compares the posture that value implies with the policy's posture and reports `aligned` or `drift`; with no policy attached it reports `unknown`. This checks the launch arguments OpenRig emitted, not the CLI's own enforcement.
+
 agy draws a full-screen TUI on the terminal's alternate screen; the base adapter reads that screen whole while the new process holds the pane.
 
 ## Resume and fork

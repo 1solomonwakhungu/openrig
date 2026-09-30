@@ -58,6 +58,8 @@ where `<seat state>` is `$OPENRIG_HOME/state/aider/<session name>`.
 | resume | `--restore-chat-history` with the persisted history file |
 | fork | refused: Aider has no fork primitive |
 
+Under full_bypass OpenRig records `yes-always` as the seat's applied-launch observation (axis `permission`); when the seat has a permission policy, permission drift compares the posture it implies with the policy's posture and reports `aligned` or `drift`. The floor passes no permission flag (`--yes-always` has no negation, so `.aider.conf.yml` or `AIDER_YES_ALWAYS` could still turn it on), so its observation is `unknown` and never compared. This checks the launch arguments OpenRig emitted, not aider's own enforcement.
+
 All flags are session-scoped. None writes global aider config. For example,
 `--analytics-disable` is avoided because it persists. `--no-gitignore` stops aider
 from offering to add `.aider*` to the repo's `.gitignore`; the seat's history

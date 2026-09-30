@@ -19,6 +19,8 @@ import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime
 import type { CliRuntimeRegistration } from "../types.js";
 import { anyPanePhrase, panePhrase, panePhraseSource } from "../pane-phrase.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
+import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
 
@@ -91,6 +93,14 @@ export const ANTIGRAVITY_READY_RE = new RegExp(
   "i",
 );
 
+/** The permission argument each posture emits, as recorded for permission
+ *  drift: `--mode accept-edits` (floor) or `--dangerously-skip-permissions`
+ *  (full_bypass). Both postures pass one explicitly. */
+export const ANTIGRAVITY_PERMISSION_VALUES: Readonly<Record<ResolvedLaunchPosture, string>> = Object.freeze({
+  floor: "accept-edits",
+  full_bypass: "dangerously-skip-permissions",
+});
+
 export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
   id: "antigravity",
   displayName: "Antigravity CLI",
@@ -129,6 +139,10 @@ export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
   // Survival after kill-session is unverified, so reap the pane's process
   // tree on stop (PID-scoped; never by name).
   reapProcessTreeOnStop: true,
+  permissionPostureFor: (observedValue): ResolvedLaunchPosture | null =>
+    observedValue === ANTIGRAVITY_PERMISSION_VALUES.full_bypass ? "full_bypass"
+      : observedValue === ANTIGRAVITY_PERMISSION_VALUES.floor ? "floor"
+      : null,
 };
 
 export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
@@ -137,7 +151,7 @@ export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
     const argv = ["agy"];
     if (binding.model) argv.push("--model", binding.model);
     // The floor matches Claude's acceptEdits; agy has no --yolo spelling.
-    argv.push(...(posture === "full_bypass" ? ["--dangerously-skip-permissions"] : ["--mode", "accept-edits"]));
+    argv.push(...(posture === "full_bypass" ? [`--${ANTIGRAVITY_PERMISSION_VALUES.full_bypass}`] : ["--mode", ANTIGRAVITY_PERMISSION_VALUES.floor]));
     if (resumeToken) argv.push("--conversation", resumeToken);
     return argv;
   },
@@ -172,6 +186,13 @@ export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
     { pattern: panePhrase("conversation not found", "i"), reason: "agy could not find the conversation to resume", recovery: "retry_fresh", code: "session_missing" },
     { pattern: /\[Auth Error\]/, reason: "agy reported an authentication error" },
   ],
+  observeLaunch: ({ posture }): AppliedLaunchObservation => ({
+    runtime: ANTIGRAVITY_DESCRIPTOR.id,
+    axis: "permission",
+    state: "observed",
+    value: ANTIGRAVITY_PERMISSION_VALUES[posture],
+    reason: "emitted_launch_arguments",
+  }),
 };
 
 export const ANTIGRAVITY_REGISTRATION: CliRuntimeRegistration = {

@@ -75,7 +75,7 @@ describe("antigravity adapter", () => {
 
   it("launches with the floor posture and no browser, and cannot know the token yet", async () => {
     const { pane, adapter } = launch();
-    expect(await adapter.launchHarness(harnessBinding(), { name: "x" })).toEqual({ ok: true });
+    expect(await adapter.launchHarness(harnessBinding(), { name: "x" })).toEqual({ ok: true, appliedLaunch: { runtime: "antigravity", axis: "permission", state: "observed", value: "accept-edits", reason: "emitted_launch_arguments" } });
     expect(pane.typed[0]).toBe("exec env 'AGY_CLI_DISABLE_AUTO_UPDATE=1' 'BROWSER=true' 'agy' '--mode' 'accept-edits'");
   });
 
@@ -87,7 +87,7 @@ describe("antigravity adapter", () => {
     seedConversation(home, TOKEN);
     const pane = mockTmux([atShell(), { command: "agy", content: READY }]);
     const adapter = new TuiCliRuntimeAdapter(ANTIGRAVITY_SPEC, harnessDeps({ tmux: pane.tmux, fsOps: memFs(), homedir: home }));
-    expect(await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: TOKEN })).toEqual({ ok: true, resumeToken: TOKEN, resumeType: "antigravity_conversation_id" });
+    expect(await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: TOKEN })).toEqual({ ok: true, resumeToken: TOKEN, resumeType: "antigravity_conversation_id", appliedLaunch: { runtime: "antigravity", axis: "permission", state: "observed", value: "accept-edits", reason: "emitted_launch_arguments" } });
     expect(pane.typed[0]!.endsWith(`'--mode' 'accept-edits' '--conversation' '${TOKEN}'`)).toBe(true);
   });
 

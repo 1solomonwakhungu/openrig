@@ -33,6 +33,8 @@ The seat runs `exec env GROK_DISABLE_AUTOUPDATER=1 BROWSER=true grok --no-alt-sc
 | Updates | `GROK_DISABLE_AUTOUPDATER=1` and `--no-auto-update` (see Self-update) |
 | Browser | `BROWSER=true`, so sign-in never opens a tab on the operator's desktop; the device code shows in the pane |
 
+OpenRig records the permission argument it passed (`acceptEdits` or `always-approve`) as the seat's applied-launch observation (axis `permission`). When the seat has a permission policy (member or rig), permission drift compares the posture that value implies with the policy's posture and reports `aligned` or `drift`; with no policy attached it reports `unknown`. This checks the launch arguments OpenRig emitted, not the CLI's own enforcement.
+
 ## Resume and fork
 
 - The adapter mints the session UUID (`--session-id`) before launch, so the resume token is known at readiness and never confused with another seat in the same cwd.

@@ -17,6 +17,8 @@ import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime
 import type { CliRuntimeRegistration } from "../types.js";
 import { anyPanePhrase, panePhrase } from "../pane-phrase.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
+import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
 
@@ -45,6 +47,14 @@ export function grokSessionExists(home: string, sessionId: string): boolean {
   }
   return groups.some((group) => fs.existsSync(nodePath.join(root, group, sessionId)));
 }
+
+/** The permission argument each posture emits, as recorded for permission
+ *  drift: `--permission-mode acceptEdits` (floor) or `--always-approve`
+ *  (full_bypass). Both postures pass one explicitly. */
+export const GROK_PERMISSION_VALUES: Readonly<Record<ResolvedLaunchPosture, string>> = Object.freeze({
+  floor: "acceptEdits",
+  full_bypass: "always-approve",
+});
 
 export const GROK_DESCRIPTOR: RuntimeDescriptor = {
   id: "grok",
@@ -84,6 +94,10 @@ export const GROK_DESCRIPTOR: RuntimeDescriptor = {
   processMatch: "grok",
   // Verified: no grok process survived tmux kill-server in the isolated probe.
   reapProcessTreeOnStop: false,
+  permissionPostureFor: (observedValue): ResolvedLaunchPosture | null =>
+    observedValue === GROK_PERMISSION_VALUES.full_bypass ? "full_bypass"
+      : observedValue === GROK_PERMISSION_VALUES.floor ? "floor"
+      : null,
 };
 
 export const GROK_SPEC: TuiCliRuntimeSpec = {
@@ -97,7 +111,7 @@ export const GROK_SPEC: TuiCliRuntimeSpec = {
     // managed install under ~/.grok; neither writes owner config.
     const argv = ["grok", "--no-alt-screen", "--trust", "--no-auto-update"];
     if (binding.model) argv.push("--model", binding.model);
-    argv.push(...(posture === "full_bypass" ? ["--always-approve"] : ["--permission-mode", "acceptEdits"]));
+    argv.push(...(posture === "full_bypass" ? [`--${GROK_PERMISSION_VALUES.full_bypass}`] : ["--permission-mode", GROK_PERMISSION_VALUES.floor]));
     if (resumeToken) {
       argv.push("--resume", resumeToken);
     } else if (forkSource) {
@@ -136,6 +150,13 @@ export const GROK_SPEC: TuiCliRuntimeSpec = {
     { pattern: panePhrase("No session found for current directory"), reason: "grok found no session for this directory", recovery: "retry_fresh", code: "session_missing" },
     { pattern: panePhrase("must not already exist"), reason: "grok refused the minted session id" },
   ],
+  observeLaunch: ({ posture }): AppliedLaunchObservation => ({
+    runtime: GROK_DESCRIPTOR.id,
+    axis: "permission",
+    state: "observed",
+    value: GROK_PERMISSION_VALUES[posture],
+    reason: "emitted_launch_arguments",
+  }),
 };
 
 export const GROK_REGISTRATION: CliRuntimeRegistration = {

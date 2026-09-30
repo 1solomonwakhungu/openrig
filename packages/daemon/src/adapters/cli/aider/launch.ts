@@ -45,6 +45,11 @@ const LAUNCH_RECORD_FILE = "launch.json";
 
 export type AiderLaunchPosture = "floor" | "full_bypass";
 
+/** The permission value full_bypass emits (`--yes-always`), as recorded for
+ *  permission drift. The floor emits no permission flag: `--yes-always` has no
+ *  negation, so aider's own config (.aider.conf.yml, AIDER_YES_ALWAYS) governs. */
+export const AIDER_FULL_BYPASS_PERMISSION_VALUE = "yes-always";
+
 export interface AiderForkRef {
   kind: string;
   value?: string;
