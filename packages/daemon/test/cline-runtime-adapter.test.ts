@@ -22,7 +22,11 @@ import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import { CLINE_DESCRIPTOR, CLINE_REGISTRATION } from "../src/adapters/cli/cline/index.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
-import { HARNESS_HOME, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux } from "./helpers/tui-cli-adapter-harness.js";
+import {
+  HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux,
+} from "./helpers/tui-cli-adapter-harness.js";
+import { clineSeatHubPaths } from "../src/adapters/cli/cline/hub.js";
+import { seatStateDirFor } from "../src/domain/runtime-capture.js";
 
 const FIXTURES = nodePath.join(nodePath.dirname(fileURLToPath(import.meta.url)), "fixtures", "cli-panes", "cline");
 const pane = (name: string) => readFileSync(nodePath.join(FIXTURES, name), "utf8");
@@ -286,19 +290,23 @@ runTuiCliAdapterContract({
 describe("cline adapter", () => {
   function launchRig(frames = [{ command: "node", content: pane("home-ready.txt") }], env: NodeJS.ProcessEnv = {}, files: Record<string, string> = {}) {
     const tmuxPane = mockTmux([atShell(), ...frames]);
-    const adapter = CLINE_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: harnessMemFs(files), env }));
-    return { adapter, pane: tmuxPane };
+    const seatFs = harnessMemFs(files);
+    const adapter = CLINE_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: seatFs, env }));
+    return { adapter, pane: tmuxPane, fs: seatFs };
   }
+  const seatHub = clineSeatHubPaths(seatStateDirFor(HARNESS_STATE_ROOT, "cline", HARNESS_SESSION));
 
   it("is registered under runtime: cline", () => {
     expect(getRuntimeDescriptor("cline")).toBe(CLINE_DESCRIPTOR);
   });
 
-  it("types the exact floor launch with the additive launch env", async () => {
-    const { adapter, pane: p } = launchRig();
+  it("types the exact floor launch with the additive launch env and the seat's own hub", async () => {
+    const { adapter, pane: p, fs: seatFs } = launchRig();
     expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+    const seatPort = Number(seatFs.readFile(seatHub.portFile).trim());
+    expect(seatPort).toBeGreaterThanOrEqual(1024);
     expect(p.typed).toEqual([
-      "exec env 'CLINE_DISABLE_CLINE_PASS_NOTICE=1' 'CLINE_NO_AUTO_UPDATE=1' 'cline' '--auto-approve' 'false'",
+      `exec env 'CLINE_DISABLE_CLINE_PASS_NOTICE=1' 'CLINE_NO_AUTO_UPDATE=1' 'CLINE_HUB_DISCOVERY_PATH=${seatHub.discoveryFile}' 'CLINE_HUB_PORT=${seatPort}' 'cline' '--auto-approve' 'false'`,
     ]);
   });
 
@@ -352,8 +360,8 @@ describe("cline adapter", () => {
     expect(CLINE_DESCRIPTOR.captureIsSessionScoped ?? false).toBe(false);
   });
 
-  it("does not reap the pane process tree (the shared hub daemon lives there)", () => {
-    expect(CLINE_DESCRIPTOR.reapProcessTreeOnStop).toBe(false);
+  it("reaps the pane process tree on stop (the seat's own hub lives there)", () => {
+    expect(CLINE_DESCRIPTOR.reapProcessTreeOnStop).toBe(true);
     expect(CLINE_DESCRIPTOR.paneCommands).toBeUndefined();
   });
 
