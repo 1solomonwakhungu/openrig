@@ -16,7 +16,8 @@ import {
 import {
   buildCopilotArgv, validateCopilotSessionId, COPILOT_READY_PATTERNS, COPILOT_GATE_PATTERNS,
   parseCopilotVersion, verifyCopilotVersionOutput, copilotHome, copilotWorkspaceFile,
-  parseCopilotWorkspaceYaml, copilotResumeTargetExists, captureCopilotSessionId, copilotTrustDialogPath, COPILOT_ERROR_PATTERNS,
+  parseCopilotWorkspaceYaml, copilotResumeTargetExists, captureCopilotSessionId, copilotEventsTextIsResumable,
+  copilotSessionIsResumable, copilotEventsFile, copilotTrustDialogPath, COPILOT_ERROR_PATTERNS,
   type ReadOnlyFs,
 } from "../src/adapters/cli/copilot/copilot-cli.js";
 
@@ -43,6 +44,13 @@ function memFs(files: Record<string, string>): ReadOnlyFs {
     },
     listFiles: (dir) => Object.keys(files).filter((f) => f.startsWith(`${dir}/`)).map((f) => f.slice(dir.length + 1)),
   };
+}
+
+/** One line per event, as Copilot journals them. */
+const USER_PROMPT = `${JSON.stringify({ type: "session.start", data: {} })}\n${JSON.stringify({ type: "user.message", data: { content: "hi" } })}\n`;
+
+function eventsFileOf(home: string, id: string): string {
+  return `${home}/session-state/${id}/events.jsonl`;
 }
 
 function workspaceYaml(id: string, cwd: string, createdAt: string): string {
@@ -158,23 +166,52 @@ describe("Copilot session store", () => {
     expect(copilotResumeTargetExists(mismatched, HOME, ID)).toBe(false);
   });
 
-  it("capture confirms a minted id on disk, and is null until Copilot writes it", () => {
+  it("capture reports a minted id only once the session is resumable", () => {
     expect(captureCopilotSessionId({ fs: memFs({}), home: HOME, cwd: CWD, mintedSessionId: ID })).toBeNull();
-    const fs = memFs({ [copilotWorkspaceFile(HOME, ID)]: workspaceYaml(ID, CWD, "2026-09-29T17:14:50Z") });
-    expect(captureCopilotSessionId({ fs, home: HOME, cwd: CWD, mintedSessionId: ID })).toBe(ID);
+    const started = { [copilotWorkspaceFile(HOME, ID)]: workspaceYaml(ID, CWD, "2026-09-29T17:14:50Z") };
+    // Never prompted: Copilot wrote workspace.yaml at startup but no journal.
+    expect(captureCopilotSessionId({ fs: memFs(started), home: HOME, cwd: CWD, mintedSessionId: ID })).toBeNull();
+    const housekeeping = { ...started, [eventsFileOf(HOME, ID)]: `${JSON.stringify({ type: "session.start", data: {} })}\n` };
+    expect(captureCopilotSessionId({ fs: memFs(housekeeping), home: HOME, cwd: CWD, mintedSessionId: ID })).toBeNull();
+    const prompted = { ...started, [eventsFileOf(HOME, ID)]: USER_PROMPT };
+    expect(captureCopilotSessionId({ fs: memFs(prompted), home: HOME, cwd: CWD, mintedSessionId: ID })).toBe(ID);
+  });
+
+  it("follows Copilot's user-history rule for the journal", () => {
+    const line = (event: unknown) => JSON.stringify(event);
+    expect(copilotEventsTextIsResumable(USER_PROMPT)).toBe(true);
+    expect(copilotEventsTextIsResumable(line({ type: "user.message", data: { content: "x", source: null } }))).toBe(true);
+    // A synthetic message (it carries a source) is not user history.
+    expect(copilotEventsTextIsResumable(line({ type: "user.message", data: { content: "x", source: "system" } }))).toBe(false);
+    expect(copilotEventsTextIsResumable(`${line({ type: "session.start", data: {} })}\n${line({ type: "assistant.message", data: {} })}`)).toBe(false);
+    // A torn last line while Copilot is writing is skipped, not fatal.
+    expect(copilotEventsTextIsResumable(`${line({ type: "session.start" })}\n{"type":"user.mess`)).toBe(false);
+    expect(copilotEventsTextIsResumable("")).toBe(false);
+  });
+
+  it("a resumable session needs both its workspace record and its journal", () => {
+    expect(copilotSessionIsResumable(memFs({ [eventsFileOf(HOME, ID)]: USER_PROMPT }), HOME, ID)).toBe(false);
+    const both = memFs({ [copilotWorkspaceFile(HOME, ID)]: workspaceYaml(ID, CWD, "2026-09-29T17:14:50Z"), [eventsFileOf(HOME, ID)]: USER_PROMPT });
+    expect(copilotSessionIsResumable(both, HOME, ID)).toBe(true);
+    expect(copilotEventsFile(HOME, ID)).toBe(eventsFileOf(HOME, ID));
   });
 
   it("capture without a minted id picks the unique session for this cwd since launch, else null", () => {
     const since = new Date("2026-09-29T17:00:00Z");
     const files = {
       [copilotWorkspaceFile(HOME, ID)]: workspaceYaml(ID, CWD, "2026-09-29T17:14:50Z"),
+      [eventsFileOf(HOME, ID)]: USER_PROMPT,
       [copilotWorkspaceFile(HOME, OTHER_ID)]: workspaceYaml(OTHER_ID, "/elsewhere", "2026-09-29T17:15:00Z"),
+      [eventsFileOf(HOME, OTHER_ID)]: USER_PROMPT,
       [`${HOME}/session-state/${ID}/checkpoints/index.md`]: "x",
     };
     expect(captureCopilotSessionId({ fs: memFs(files), home: HOME, cwd: CWD, launchStartedAt: since })).toBe(ID);
     expect(captureCopilotSessionId({ fs: memFs(files), home: HOME, cwd: CWD, launchStartedAt: new Date("2026-09-29T18:00:00Z") })).toBeNull();
     const ambiguous = { ...files, [copilotWorkspaceFile(HOME, OTHER_ID)]: workspaceYaml(OTHER_ID, CWD, "2026-09-29T17:15:00Z") };
     expect(captureCopilotSessionId({ fs: memFs(ambiguous), home: HOME, cwd: CWD, launchStartedAt: since })).toBeNull();
+    // A never-prompted pod-mate session in the same cwd is not a candidate.
+    const unprompted = { ...ambiguous, [eventsFileOf(HOME, OTHER_ID)]: "" };
+    expect(captureCopilotSessionId({ fs: memFs(unprompted), home: HOME, cwd: CWD, launchStartedAt: since })).toBe(ID);
   });
 
   it("capture never throws on a broken store", () => {
@@ -221,6 +258,8 @@ runTuiCliAdapterContract({
     const file = workspaceFileUnder(homedir, launch.presetToken);
     fs.mkdirSync(nodePath.dirname(file), { recursive: true });
     fs.writeFileSync(file, workspaceYaml(launch.presetToken, cwd, new Date().toISOString()));
+    // The first real prompt: Copilot journals it, and only then is it resumable.
+    fs.writeFileSync(nodePath.join(nodePath.dirname(file), "events.jsonl"), USER_PROMPT);
     return launch.presetToken;
   },
 });
@@ -235,12 +274,18 @@ describe("Copilot adapter launch", () => {
     return { adapter, pane, files };
   }
 
-  it("mints the session id, types it, and reports it as the resume token", async () => {
-    const { adapter, pane } = launch();
+  function mintedToken(files: ReturnType<typeof harnessMemFs>): string {
+    const record = files.files[nodePath.join(HARNESS_STATE_ROOT, "copilot", HARNESS_SESSION, "launch.json")]!;
+    return (JSON.parse(record) as { presetToken: string }).presetToken;
+  }
+
+  it("mints and types the session id, but reports no token for a never-prompted session", async () => {
+    const { adapter, pane, files } = launch();
     const result = await adapter.launchHarness(harnessBinding({ model: "gpt-5.4" }), { name: "x" });
     expect(result.ok).toBe(true);
-    const token = result.ok ? result.resumeToken : undefined;
-    expect(validateCopilotSessionId(token ?? "").ok).toBe(true);
+    expect(result).not.toHaveProperty("resumeToken");
+    const token = mintedToken(files);
+    expect(validateCopilotSessionId(token).ok).toBe(true);
     expect(pane.typed[0]).toContain(`'--session-id' '${token}'`);
     expect(pane.typed[0]).toContain("'--model' 'gpt-5.4'");
     expect(pane.typed[0]).not.toContain("--yolo");
@@ -277,8 +322,8 @@ describe("Copilot adapter launch", () => {
   it("records the COPILOT_HOME the launch resolved; capture and the resume check use it", async () => {
     const files = harnessMemFs();
     const { adapter } = launch(files, { COPILOT_HOME: "/data/copilot" });
-    const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
-    const token = result.ok ? result.resumeToken! : "";
+    await adapter.launchHarness(harnessBinding(), { name: "x" });
+    const token = mintedToken(files);
     const seatStateDir = nodePath.join(HARNESS_STATE_ROOT, "copilot", HARNESS_SESSION);
     expect(JSON.parse(files.files[nodePath.join(seatStateDir, COPILOT_SEAT_FILE)]!)).toEqual({ copilotHome: "/data/copilot" });
     files.writeFile(copilotWorkspaceFile("/data/copilot", token), workspaceYaml(token, HARNESS_CWD, "2026-09-29T12:00:00Z"));

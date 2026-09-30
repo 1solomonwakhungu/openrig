@@ -190,6 +190,42 @@ export function copilotWorkspaceFile(home: string, sessionId: string): string {
   return nodePath.join(home, "session-state", sessionId, "workspace.yaml");
 }
 
+/** The session's persisted event journal (runtime.node: "a session's
+ *  persisted events.jsonl file"). Copilot writes it with the first real
+ *  exchange; a never-prompted session has only workspace.yaml and
+ *  `--resume=<id>` then fails with "No session, task, or name matched". */
+export function copilotEventsFile(home: string, sessionId: string): string {
+  return nodePath.join(home, "session-state", sessionId, "events.jsonl");
+}
+
+/** Copilot's own "has user-visible history" test (app.js): a `user.message`
+ *  event whose `data.source` is null or absent. Synthetic messages carry a
+ *  source; housekeeping-only journals have none. */
+export function copilotEventsTextIsResumable(text: string): boolean {
+  for (const line of text.split("\n")) {
+    if (!line.includes("user.message")) continue;
+    try {
+      const event = JSON.parse(line) as { type?: unknown; data?: { source?: unknown } | null };
+      if (event.type === "user.message" && (event.data?.source === undefined || event.data?.source === null)) return true;
+    } catch {
+      // A torn last line while Copilot is writing: skip it.
+    }
+  }
+  return false;
+}
+
+/** Whether `--resume=<id>` can reopen this session: its workspace record names
+ *  the id and its journal holds a real user message. */
+export function copilotSessionIsResumable(fs: ReadOnlyFs, home: string, sessionId: string): boolean {
+  if (!copilotResumeTargetExists(fs, home, sessionId)) return false;
+  const events = copilotEventsFile(home, sessionId.trim());
+  try {
+    return fs.exists(events) && copilotEventsTextIsResumable(fs.readFile(events));
+  } catch {
+    return false;
+  }
+}
+
 export interface CopilotWorkspaceRecord {
   id: string;
   cwd?: string;
@@ -232,15 +268,17 @@ export interface CopilotCaptureInput {
 }
 
 /**
- * Read-only token capture. A minted id is confirmed on disk. Without one
- * (a seat adopted from a manual launch), the unique session whose cwd matches
- * and that was created at or after launch start is returned; zero or several
- * candidates return null rather than a guess.
+ * Read-only token capture. Only a resumable session counts (see
+ * copilotSessionIsResumable), so a seat that was never prompted has no token
+ * and restores fresh. A minted id is reported once resumable. Without one (a
+ * seat adopted from a manual launch), the unique resumable session whose cwd
+ * matches and that was created at or after launch start is returned; zero or
+ * several candidates return null rather than a guess.
  */
 export function captureCopilotSessionId(input: CopilotCaptureInput): string | null {
   try {
     if (input.mintedSessionId) {
-      return copilotResumeTargetExists(input.fs, input.home, input.mintedSessionId) ? input.mintedSessionId : null;
+      return copilotSessionIsResumable(input.fs, input.home, input.mintedSessionId) ? input.mintedSessionId : null;
     }
     const stateDir = nodePath.join(input.home, "session-state");
     if (!input.fs.listFiles || !input.fs.exists(stateDir)) return null;
@@ -256,7 +294,7 @@ export function captureCopilotSessionId(input: CopilotCaptureInput): string | nu
         const created = record.createdAt ? Date.parse(record.createdAt) : NaN;
         if (!Number.isFinite(created) || created < since) continue;
       }
-      matches.push(record.id);
+      if (copilotSessionIsResumable(input.fs, input.home, record.id)) matches.push(record.id);
     }
     return matches.length === 1 ? matches[0]! : null;
   } catch {

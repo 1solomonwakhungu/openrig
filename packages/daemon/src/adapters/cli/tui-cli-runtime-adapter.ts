@@ -188,6 +188,12 @@ export interface TuiCliRuntimeSpec {
    *  passes it to buildLaunchCommand as sessionToken and reports it as the
    *  resume token once ready; late capture stays the fallback. */
   mintSessionToken?(input: { binding: NodeBinding; forkSource?: ForkSource }): string | undefined;
+  /** The minted id is not resumable until the CLI has stored a real exchange
+   *  (a never-prompted session cannot be resumed). Launch then does not report
+   *  it; the descriptor's captureResumeToken reports it once resumable, at
+   *  launch, from the refresher, or at restore, so an unused seat restores
+   *  fresh instead of stopping on a refused resume. */
+  mintedTokenAwaitsCapture?: boolean;
   /** Checked before typing a resume, so a missing session never silently
    *  starts fresh. Default recovery on refusal: retry_fresh. */
   validateResumeTarget?(ctx: TuiCliResumeTargetContext): TuiCliResumeTargetResult | Promise<TuiCliResumeTargetResult>;
@@ -458,7 +464,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     const resumeType = this.descriptor.resumeType;
     if (!resumeType) return { ok: true, ...applied };
     if (resumeToken) return { ok: true, resumeToken, resumeType, ...applied };
-    if (sessionToken) return { ok: true, resumeToken: sessionToken, resumeType, ...applied };
+    if (sessionToken && !this.spec.mintedTokenAwaitsCapture) return { ok: true, resumeToken: sessionToken, resumeType, ...applied };
 
     // Fresh or fork without a minted id: capture the NEW session. CLIs that
     // create sessions lazily return nothing here; the refresher and restore

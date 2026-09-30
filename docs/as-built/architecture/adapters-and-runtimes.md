@@ -365,6 +365,11 @@ tmux pane, driven by a `TuiCliRuntimeSpec`:
   (`--session-id <uuid>` style CLIs such as copilot, gemini, qwen). The base
   validates it, passes it as `sessionToken`, and reports it as the resume token
   once ready. Late capture stays the fallback.
+- `mintedTokenAwaitsCapture` (optional) keeps a minted id out of the launch
+  result for CLIs that cannot resume a session until it holds a real exchange
+  (GitHub Copilot). The descriptor's `captureResumeToken` then reports it once
+  resumable, right after launch, from the refresher, or at restore, so a seat
+  that was never prompted restores fresh.
 - `validateResumeTarget(ctx)` (optional) runs before typing a resume with
   `{ token, cwd, seatStateDir, homedir, fs, binding }`; a refusal returns
   `retry_fresh` by default, so a missing session never silently starts fresh.
