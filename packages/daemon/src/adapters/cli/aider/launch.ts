@@ -104,7 +104,7 @@ export function buildAiderArgv(input: AiderArgvInput): string[] {
   ];
   const model = input.model?.trim();
   if (model) argv.push("--model", model);
-  if (input.posture === "full_bypass") argv.push("--yes-always");
+  if (input.posture === "full_bypass") argv.push(`--${AIDER_FULL_BYPASS_PERMISSION_VALUE}`);
   if (input.resumeToken !== undefined) argv.push("--restore-chat-history");
   return argv;
 }
