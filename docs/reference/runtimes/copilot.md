@@ -41,8 +41,10 @@ members:
 
 | Posture | Launch flag |
 |---|---|
-| `floor` (default) | none: Copilot's own default applies (it prompts before writes and commands) |
+| `floor` (default) | no permission flag: Copilot's own default applies (it prompts before writes and commands) |
 | `full_bypass` | `--yolo` (tools, paths, and URLs all allowed) |
+
+Both postures also pass `--no-auto-update` (see Updates).
 
 Posture comes from the member or rig `permission_policy` (for example
 `builtin:yolo` selects `full_bypass`). `rig seat set-permissions` is currently
@@ -76,11 +78,20 @@ Copilot's own `trustedFolders` setting is not used: Copilot moves that list
 from `settings.json` into its self-managed `config.json` at startup, and seats
 that start at the same time lose entries in that move.
 
+## Updates
+
+Every managed launch passes `--no-auto-update`, so a seat never updates
+Copilot and always runs the installed version. Without it, a standalone
+install downloads newer packages into its per-user cache and switches to them
+on a later launch (npm installs only report that an update exists). Update
+Copilot yourself with `copilot update`, `npm install -g @github/copilot`, or
+`brew upgrade --cask copilot-cli`.
+
 ## Resume
 
 OpenRig creates each session with `--session-id <uuid>`, so the resume token is
 known at launch and is unique per seat even when seats share a directory.
-Resume launches `copilot --resume=<uuid>`. Before resuming, OpenRig checks that
+Resume launches `copilot --no-auto-update --resume=<uuid>`. Before resuming, OpenRig checks that
 `$COPILOT_HOME/session-state/<uuid>/workspace.yaml` still exists; if it does
 not, the resume is refused as `retry_fresh` and restore asks before starting a
 new session. Fork is not supported (Copilot has no fork flag).
