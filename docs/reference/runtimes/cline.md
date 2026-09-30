@@ -41,6 +41,8 @@ pods:
 | fork | refused: Cline has no fork primitive |
 | launch env | `CLINE_DISABLE_CLINE_PASS_NOTICE=1` (suppresses launch notice modals, which swallow the first keystroke and open a browser on Enter) and `CLINE_NO_AUTO_UPDATE=1`. Cline's only self-updater checks npm at launch and later runs the matching global update (`npm update -g cline`, or the pnpm, yarn, or bun equivalent) in the owner's prefix; this variable turns it off before any check. Releases up to 3.0.54 also killed live sessions when they auto-updated. Both variables are applied on fresh and resume launches. |
 
+OpenRig records the permission value it passed (`auto-approve=false` or `auto-approve=true`) as the seat's applied-launch observation (axis `permission`). When the seat has a permission policy (member or rig), permission drift compares the posture that value implies with the policy's posture and reports `aligned` or `drift`; with no policy attached it reports `unknown`. This checks the launch arguments OpenRig emitted, not the CLI's own enforcement.
+
 ## Model selection
 
 Set the model in Cline itself (`cline auth <provider> -m <model>`, or the model

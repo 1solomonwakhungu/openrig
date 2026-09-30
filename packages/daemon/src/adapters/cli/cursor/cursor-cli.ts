@@ -54,6 +54,11 @@ export interface CursorLaunchInput {
   binary?: string;
 }
 
+/** The permission value full_bypass emits (`--force`), as recorded for
+ *  permission drift. The floor passes no permission flag: Cursor keeps its
+ *  own approval prompts. */
+export const CURSOR_FULL_BYPASS_PERMISSION_VALUE = "force";
+
 /**
  * argv for an interactive Cursor launch. Throws (refusing the launch) on a
  * fork request, a malformed token, or a bare `agent` binary.
@@ -86,7 +91,7 @@ export function buildCursorArgv(input: CursorLaunchInput): string[] {
     if (model.startsWith("-")) throw new Error("cursor launch: model must not start with '-'");
     argv.push("--model", model);
   }
-  if (input.posture === "full_bypass") argv.push("--force");
+  if (input.posture === "full_bypass") argv.push(`--${CURSOR_FULL_BYPASS_PERMISSION_VALUE}`);
   return argv;
 }
 

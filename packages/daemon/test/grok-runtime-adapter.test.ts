@@ -79,7 +79,7 @@ describe("grok adapter", () => {
     const minted = uuidIn(pane.typed[0]!);
     expect(minted).toBeTruthy();
     expect(pane.typed[0]).toBe(`exec env 'GROK_DISABLE_AUTOUPDATER=1' 'BROWSER=true' 'grok' '--no-alt-screen' '--trust' '--no-auto-update' '--permission-mode' 'acceptEdits' '--session-id' '${minted}'`);
-    expect(result).toEqual({ ok: true, resumeToken: minted, resumeType: "grok_session_id" });
+    expect(result).toEqual({ ok: true, resumeToken: minted, resumeType: "grok_session_id", appliedLaunch: { runtime: "grok", axis: "permission", state: "observed", value: "acceptEdits", reason: "emitted_launch_arguments" } });
   });
 
   it("disables grok's self-update on every launch path without writing owner config", async () => {
@@ -113,7 +113,7 @@ describe("grok adapter", () => {
     const result = await adapter.launchHarness(harnessBinding(), { name: "x", resumeToken: TOKEN.toUpperCase() });
     expect(pane.typed[0]!.endsWith(`'--permission-mode' 'acceptEdits' '--resume' '${TOKEN}'`)).toBe(true);
     expect(pane.typed[0]).not.toContain("--session-id");
-    expect(result).toEqual({ ok: true, resumeToken: TOKEN, resumeType: "grok_session_id" });
+    expect(result).toEqual({ ok: true, resumeToken: TOKEN, resumeType: "grok_session_id", appliedLaunch: { runtime: "grok", axis: "permission", state: "observed", value: "acceptEdits", reason: "emitted_launch_arguments" } });
   });
 
   it("forks from a parent into a new minted child id", async () => {
@@ -123,7 +123,7 @@ describe("grok adapter", () => {
     const child = uuidIn(pane.typed[0]!);
     expect(pane.typed[0]).toContain(`'--resume' '${parent}' '--fork-session' '--session-id' '${child}'`);
     expect(child).not.toBe(parent);
-    expect(result).toEqual({ ok: true, resumeToken: child, resumeType: "grok_session_id" });
+    expect(result).toEqual({ ok: true, resumeToken: child, resumeType: "grok_session_id", appliedLaunch: { runtime: "grok", axis: "permission", state: "observed", value: "acceptEdits", reason: "emitted_launch_arguments" } });
     const refused = await launch().adapter.launchHarness(harnessBinding(), { name: "x", forkSource: { kind: "name", value: "t" } });
     expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('ref.kind="name" is not supported') });
   });

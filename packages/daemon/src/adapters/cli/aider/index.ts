@@ -6,8 +6,10 @@ import { createNodeFsOps } from "../../node-fs-ops.js";
 import { seatStateDirFor } from "../../../domain/runtime-capture.js";
 import type { CliRuntimeRegistration } from "../types.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
+import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import {
-  AIDER_BINARY, AIDER_GUIDANCE_FILE, AIDER_INSTALL_HINT, AIDER_RESUME_TYPE, AIDER_RUNTIME_ID,
+  AIDER_BINARY, AIDER_FULL_BYPASS_PERMISSION_VALUE, AIDER_GUIDANCE_FILE, AIDER_INSTALL_HINT, AIDER_RESUME_TYPE, AIDER_RUNTIME_ID,
   aiderLaunchEnv, buildAiderArgv, captureAiderChatHistory, checkAiderResumeTarget, mintAiderChatHistoryFile,
   validateAiderChatHistoryToken,
 } from "./launch.js";
@@ -34,6 +36,10 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   // The pane runs the Python interpreter (`Python` on macOS) with the aider
   // entry script, or `python -m aider`; matched on the script, never "python".
   processMatch: "aider",
+  // Permission drift: only full_bypass emits a permission flag; the floor's
+  // observation is state unknown (aider's config governs) and never compared.
+  permissionPostureFor: (observedValue): ResolvedLaunchPosture | null =>
+    observedValue === AIDER_FULL_BYPASS_PERMISSION_VALUE ? "full_bypass" : null,
 };
 
 /** The aider spec for a daemon state root. `newId` is injectable for tests. */
@@ -55,6 +61,10 @@ export function createAiderSpec(stateRoot: string, newId?: () => string): TuiCli
     readyPatterns: AIDER_READY_PATTERNS,
     gatePatterns: AIDER_GATE_PATTERNS,
     errorPatterns: AIDER_ERROR_PATTERNS,
+    observeLaunch: ({ posture }): AppliedLaunchObservation => posture === "full_bypass"
+      ? { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "observed", value: AIDER_FULL_BYPASS_PERMISSION_VALUE, reason: "emitted_launch_arguments" }
+      // The floor passes no permission flag: aider's own config governs.
+      : { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" },
   };
 }
 

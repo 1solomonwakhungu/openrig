@@ -12,12 +12,15 @@ import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime
 import { createNodeFsOps } from "../../node-fs-ops.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
+import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
 import {
   COPILOT_BINARY, COPILOT_ERROR_PATTERNS, COPILOT_GATE_PATTERNS, COPILOT_GUIDANCE_FILE, COPILOT_PROCESS_MATCH, COPILOT_READY_PATTERNS,
   COPILOT_RESUME_TYPE, COPILOT_RUNTIME_ID, COPILOT_SKILLS_SUBDIR, buildCopilotArgv, captureCopilotSessionId,
   copilotHome, copilotResumeTargetExists, validateCopilotSessionId, verifyCopilotVersionOutput,
   type ReadOnlyFs,
+  COPILOT_FULL_BYPASS_PERMISSION_VALUE,
 } from "./copilot-cli.js";
 
 /** The token minted for the seat's current launch, from its launch.json. */
@@ -87,6 +90,10 @@ export const COPILOT_DESCRIPTOR: RuntimeDescriptor = {
   processMatch: COPILOT_PROCESS_MATCH,
   // The npm launcher spawns the native binary as a child.
   reapProcessTreeOnStop: true,
+  // Permission drift: only full_bypass emits a permission flag; the floor's
+  // observation is state unknown (the CLI's own config governs) and never compared.
+  permissionPostureFor: (observedValue): ResolvedLaunchPosture | null =>
+    observedValue === COPILOT_FULL_BYPASS_PERMISSION_VALUE ? "full_bypass" : null,
 };
 
 export const COPILOT_SPEC: TuiCliRuntimeSpec = {
@@ -108,6 +115,10 @@ export const COPILOT_SPEC: TuiCliRuntimeSpec = {
   readyPatterns: COPILOT_READY_PATTERNS,
   gatePatterns: COPILOT_GATE_PATTERNS,
   errorPatterns: COPILOT_ERROR_PATTERNS,
+  observeLaunch: ({ posture }): AppliedLaunchObservation => posture === "full_bypass"
+    ? { runtime: COPILOT_DESCRIPTOR.id, axis: "permission", state: "observed", value: COPILOT_FULL_BYPASS_PERMISSION_VALUE, reason: "emitted_launch_arguments" }
+    // The floor passes no permission flag: the CLI's own config governs.
+    : { runtime: COPILOT_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" },
 };
 
 export const COPILOT_REGISTRATION: CliRuntimeRegistration = {

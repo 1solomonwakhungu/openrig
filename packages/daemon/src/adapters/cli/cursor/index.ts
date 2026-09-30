@@ -12,12 +12,15 @@ import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import { createNodeFsOps } from "../../node-fs-ops.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
+import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
 import {
   CURSOR_BINARY, CURSOR_GATE_PATTERNS, CURSOR_GUIDANCE_FILE, CURSOR_READY_PATTERNS, CURSOR_RESUME_TYPE,
   CURSOR_RUNTIME_ID, CURSOR_SKILLS_SUBDIR, buildCursorArgv, cursorChatsDirForCwd, cursorConfigDir,
   cursorResumeTargetExists, listCursorChatIds, parseCursorChatSnapshot, pickNewCursorChat,
   serializeCursorChatSnapshot, validateCursorChatId, verifyCursorVersionOutput, type CursorChatSnapshot,
+  CURSOR_FULL_BYPASS_PERMISSION_VALUE,
 } from "./cursor-cli.js";
 
 /** Pre-launch chat ids for the seat cwd, kept in the seat state dir. */
@@ -89,6 +92,10 @@ export const CURSOR_DESCRIPTOR: RuntimeDescriptor = {
   // `cursor-agent`.
   processMatch: CURSOR_BINARY,
   reapProcessTreeOnStop: true,
+  // Permission drift: only full_bypass emits a permission flag; the floor's
+  // observation is state unknown (the CLI's own config governs) and never compared.
+  permissionPostureFor: (observedValue): ResolvedLaunchPosture | null =>
+    observedValue === CURSOR_FULL_BYPASS_PERMISSION_VALUE ? "full_bypass" : null,
 };
 
 export const CURSOR_SPEC: TuiCliRuntimeSpec = {
@@ -112,6 +119,10 @@ export const CURSOR_SPEC: TuiCliRuntimeSpec = {
       : { ok: false, reason: "the Cursor chat no longer exists for this workspace" },
   readyPatterns: CURSOR_READY_PATTERNS,
   gatePatterns: CURSOR_GATE_PATTERNS,
+  observeLaunch: ({ posture }): AppliedLaunchObservation => posture === "full_bypass"
+    ? { runtime: CURSOR_DESCRIPTOR.id, axis: "permission", state: "observed", value: CURSOR_FULL_BYPASS_PERMISSION_VALUE, reason: "emitted_launch_arguments" }
+    // The floor passes no permission flag: the CLI's own config governs.
+    : { runtime: CURSOR_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" },
 };
 
 export const CURSOR_REGISTRATION: CliRuntimeRegistration = {

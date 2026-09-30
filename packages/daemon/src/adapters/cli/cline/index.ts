@@ -6,8 +6,10 @@ import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime
 import { createNodeFsOps } from "../../node-fs-ops.js";
 import type { CliRuntimeRegistration } from "../types.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
+import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
+import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import {
-  CLINE_BINARY, CLINE_GUIDANCE_FILE, CLINE_INSTALL_HINT, CLINE_LAUNCH_ENV, CLINE_RESUME_TYPE, CLINE_RUNTIME_ID,
+  CLINE_BINARY, CLINE_GUIDANCE_FILE, CLINE_INSTALL_HINT, CLINE_LAUNCH_ENV, CLINE_PERMISSION_VALUES, CLINE_RESUME_TYPE, CLINE_RUNTIME_ID,
   buildClineArgv, validateClineSessionId,
 } from "./launch.js";
 import { checkClineResumeTarget, clineLaunchEnv, clineSessionsDir, findClineSessionForLaunch } from "./sessions.js";
@@ -45,6 +47,12 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   // child, and reaping the pane's tree would kill the hub for every cline seat
   // on the host. tmux kill-session ends the TUI itself (verified).
   reapProcessTreeOnStop: false,
+  // Permission drift: both postures pass `--auto-approve` explicitly, so both
+  // observations map back to a posture.
+  permissionPostureFor: (observedValue): ResolvedLaunchPosture | null =>
+    observedValue === CLINE_PERMISSION_VALUES.full_bypass ? "full_bypass"
+      : observedValue === CLINE_PERMISSION_VALUES.floor ? "floor"
+      : null,
 };
 
 /** The cline spec for an adapter env (the env the daemon launches seats
@@ -62,6 +70,13 @@ export function createClineSpec(env: NodeJS.ProcessEnv = process.env): TuiCliRun
     readyPatterns: CLINE_READY_PATTERNS,
     gatePatterns: CLINE_GATE_PATTERNS,
     errorPatterns: CLINE_ERROR_PATTERNS,
+    observeLaunch: ({ posture }): AppliedLaunchObservation => ({
+      runtime: CLINE_DESCRIPTOR.id,
+      axis: "permission",
+      state: "observed",
+      value: CLINE_PERMISSION_VALUES[posture],
+      reason: "emitted_launch_arguments",
+    }),
   };
 }
 

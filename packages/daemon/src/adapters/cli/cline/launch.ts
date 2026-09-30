@@ -41,6 +41,13 @@ export const CLINE_MODEL_UNSUPPORTED_ERROR =
 
 export type ClineLaunchPosture = "floor" | "full_bypass";
 
+/** The permission value each posture emits (`--auto-approve <boolean>`), as
+ *  recorded for permission drift. Both postures pass the flag explicitly. */
+export const CLINE_PERMISSION_VALUES: Readonly<Record<ClineLaunchPosture, string>> = Object.freeze({
+  floor: "auto-approve=false",
+  full_bypass: "auto-approve=true",
+});
+
 export interface ClineForkRef {
   kind: string;
   value?: string;
@@ -58,7 +65,7 @@ export function buildClineArgv(input: ClineArgvInput): string[] {
     throw new Error("cline has no native fork primitive; remove session_source for cline members");
   }
   if (input.model?.trim()) throw new Error(CLINE_MODEL_UNSUPPORTED_ERROR);
-  const argv = [CLINE_BINARY, "--auto-approve", input.posture === "full_bypass" ? "true" : "false"];
+  const argv = [CLINE_BINARY, "--auto-approve", CLINE_PERMISSION_VALUES[input.posture].split("=")[1]!];
   if (input.resumeToken !== undefined) {
     const validation = validateClineSessionId(input.resumeToken);
     if (!validation.ok) throw new Error(validation.error);
