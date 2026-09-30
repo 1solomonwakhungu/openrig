@@ -29,6 +29,13 @@ function defaultTmuxFileOps(): TmuxFileOps {
   };
 }
 
+/** Capture options. joinWrapped adds -J: rows the terminal soft-wrapped
+ *  (a long line split at the pane width, possibly mid-word) come back as one
+ *  line, so text patterns see what the program printed. */
+export interface CaptureOptions {
+  joinWrapped?: boolean;
+}
+
 export type TmuxResult =
   | { ok: true }
   | { ok: false; code: string; message: string };
@@ -803,15 +810,19 @@ export class TmuxAdapter {
    *  alternate screen (a full-screen TUI) the line position does not apply,
    *  so the whole visible screen is returned; the caller decides whether that
    *  screen is the new process's (isPaneAlternateScreen before and after). */
-  async capturePaneFromLine(paneId: string, absoluteLine: number): Promise<string | null> {
+  async capturePaneFromLine(paneId: string, absoluteLine: number, opts?: CaptureOptions): Promise<string | null> {
+    const join = opts?.joinWrapped ? " -J" : "";
     try {
       const output = await this.exec(`tmux display-message -p -t ${shellQuote(paneId)} "#{history_size}\t#{alternate_on}"`);
       const [historyRaw, alternateRaw] = output.trim().split("\t");
       const history = Number.parseInt(historyRaw ?? "", 10);
       if (!Number.isFinite(history)) return null;
-      if (alternateRaw === "1") return (await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)}`)) ?? "";
+      if (alternateRaw === "1") return (await this.exec(`tmux capture-pane -p${join} -t ${shellQuote(paneId)}`)) ?? "";
       const start = Math.max(absoluteLine - history, -history);
-      const captured = await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)} -S ${start} -E -`);
+      // -S/-E address physical grid rows, the same rows history_size and
+      // cursor_y count, so -J (which only joins soft-wrapped rows in the
+      // output) leaves the start position exact.
+      const captured = await this.exec(`tmux capture-pane -p${join} -t ${shellQuote(paneId)} -S ${start} -E -`);
       return captured ?? "";
     } catch {
       return null;
@@ -819,9 +830,9 @@ export class TmuxAdapter {
   }
 
   /** Capture pane content (last N lines). Returns null if unavailable. */
-  async capturePaneContent(paneId: string, lines: number = 20): Promise<string | null> {
+  async capturePaneContent(paneId: string, lines: number = 20, opts?: CaptureOptions): Promise<string | null> {
     try {
-      const output = await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)} -S -${lines}`);
+      const output = await this.exec(`tmux capture-pane -p${opts?.joinWrapped ? " -J" : ""} -t ${shellQuote(paneId)} -S -${lines}`);
       return output || null;
     } catch {
       return null;

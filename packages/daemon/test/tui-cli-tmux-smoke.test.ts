@@ -59,10 +59,10 @@ describe.skipIf(!tmuxAvailable())("TUI CLI base on a real tmux server", () => {
     };
   }
 
-  async function freshPane(): Promise<void> {
+  async function freshPane(width = 120, height = 30): Promise<void> {
     await run(`tmux kill-session -t ${SESSION}`).catch(() => {});
     const env = `env -i PATH=${JSON.stringify(process.env.PATH ?? "/usr/bin:/bin")} HOME=${JSON.stringify(root)} SHELL=/bin/sh TERM=xterm-256color`;
-    await run(`tmux -f /dev/null new-session -d -s ${SESSION} -x 120 -y 30 -c ${JSON.stringify(root)} "${env} /bin/sh"`);
+    await run(`tmux -f /dev/null new-session -d -s ${SESSION} -x ${width} -y ${height} -c ${JSON.stringify(root)} "${env} /bin/sh"`);
     for (let i = 0; i < 50; i++) {
       if (/^(sh|bash|dash)$/.test((await run(`tmux display-message -p -t ${SESSION} "#{pane_current_command}"`)).trim())) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -126,6 +126,55 @@ describe.skipIf(!tmuxAvailable())("TUI CLI base on a real tmux server", () => {
     const adapter = new TuiCliRuntimeAdapter({ ...spec([silentCli]), launchTimeoutMs: 2_000 }, { tmux, fsOps: createNodeFsOps(), stateRoot: path.join(root, "state"), homedir: root });
     expect(await adapter.launchHarness(binding(), { name: SESSION })).toMatchObject({ ok: false, error: expect.stringMatching(/timed out/) });
   }, 30_000);
+
+  describe("soft-wrapped output on an 80x24 pane (capture -J)", () => {
+    // 75 x's then the marker: at 80 columns the terminal wraps inside
+    // "smoke-cli", so without -J the marker is split across two rows.
+    const WRAPPED = `${"x".repeat(75)}smoke-cli ready> `;
+
+    async function inlineCli(name: string, output: string): Promise<string> {
+      const file = path.join(root, name);
+      fs.writeFileSync(file, `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(output)});\nsetInterval(() => {}, 1000);\n`);
+      fs.chmodSync(file, 0o755);
+      return file;
+    }
+    const printLong = (text: string) => run(`tmux send-keys -t ${SESSION} ${JSON.stringify(`printf '%s\\n' '${text}'`)} Enter`);
+
+    it("the recorded position still marks where new output starts when history holds wrapped rows", async () => {
+      await freshPane(80, 24);
+      for (let i = 0; i < 3; i++) await printLong(`OLD-${i}-${"o".repeat(190)}`); // 3 physical rows each
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const position = await tmux.getPaneLinePosition(SESSION);
+      await run(`tmux send-keys -t ${SESSION} "printf 'AFTER-MARKER\\n'" Enter`);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const joined = (await tmux.capturePaneFromLine(SESSION, position!, { joinWrapped: true }))!;
+      expect(joined).toContain("AFTER-MARKER");
+      expect(joined).not.toMatch(/OLD-\d/);
+      // The window starts at the prompt row the command was typed on.
+      expect(joined.split("\n")[0]).toContain("printf 'AFTER-MARKER");
+    }, 30_000);
+
+    it("reads a marker the terminal wrapped mid-token as ready", async () => {
+      await freshPane(80, 24);
+      const cli = await inlineCli("smoke-wrap.mjs", `Smoke CLI\n${WRAPPED}`);
+      const adapter = new TuiCliRuntimeAdapter(spec([cli]), { tmux, fsOps: createNodeFsOps(), stateRoot: path.join(root, "state"), homedir: root });
+      expect(await adapter.launchHarness(binding(), { name: SESSION })).toEqual({ ok: true });
+      // The raw capture really is split; only the joined capture has the marker.
+      const raw = (await run(`tmux capture-pane -p -t ${SESSION}`));
+      expect(raw).not.toContain("smoke-cli ready>");
+      expect(await tmux.capturePaneContent(SESSION, 40, { joinWrapped: true })).toContain("smoke-cli ready>");
+      expect(await adapter.checkReady(binding())).toEqual({ ready: true });
+    }, 30_000);
+
+    it("never counts the same wrapped marker left in scrollback before the launch", async () => {
+      await freshPane(80, 24);
+      await printLong(WRAPPED.trimEnd());
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const silent = await inlineCli("smoke-quiet.mjs", "Smoke CLI\n");
+      const adapter = new TuiCliRuntimeAdapter({ ...spec([silent]), launchTimeoutMs: 2_000 }, { tmux, fsOps: createNodeFsOps(), stateRoot: path.join(root, "state"), homedir: root });
+      expect(await adapter.launchHarness(binding(), { name: SESSION })).toMatchObject({ ok: false, error: expect.stringMatching(/timed out/) });
+    }, 30_000);
+  });
 
   it("fails fast, well inside the timeout, when the binary is missing", async () => {
     await freshPane();

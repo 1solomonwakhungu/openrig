@@ -388,7 +388,11 @@ tmux pane, driven by a `TuiCliRuntimeSpec`:
   Copilot adapter uses it to trust the seat cwd for that session only.
 - Launch polls readiness with an injectable sleep up to `launchTimeoutMs`.
   Before typing it records the pane's absolute line position (tmux
-  `history_size + cursor_y`); every poll captures only the lines after it, so
+  `history_size + cursor_y`); every poll captures only the lines after it,
+  with `capture-pane -J` so rows the terminal soft-wrapped at the pane width
+  (possibly mid-word, on an 80-column pane) come back as the line the CLI
+  printed. `-S`/`-E` address the same physical rows the position counts, so
+  joining does not move the window's start. So
   ready, gate, and error text left in a reused pane's scrollback never counts,
   and an error the new run prints counts even if the same line is in older
   scrollback. A gate, an error pattern, or a timeout ends the wait with the
