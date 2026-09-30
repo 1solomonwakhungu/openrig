@@ -101,6 +101,8 @@ export const COPILOT_SPEC: TuiCliRuntimeSpec = {
   buildLaunchCommand: ({ binding, posture, resumeToken, forkSource, sessionToken }) =>
     buildCopilotArgv({ model: binding.model, posture, resumeToken, newSessionId: sessionToken, forkSource }),
   mintSessionToken: ({ forkSource }) => (forkSource ? undefined : randomUUID()),
+  // The minted id is only resumable once Copilot journals a real prompt.
+  mintedTokenAwaitsCapture: true,
   // Records where this launch's Copilot keeps its state; no Copilot config is written.
   prepareLaunch: ({ seatStateDir, fs: fsOps, env, homedir }) => {
     fsOps.mkdirp(seatStateDir);

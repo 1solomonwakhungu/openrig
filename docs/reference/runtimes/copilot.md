@@ -91,12 +91,23 @@ Copilot yourself with `copilot update`, `npm install -g @github/copilot`, or
 
 ## Resume
 
-OpenRig creates each session with `--session-id <uuid>`, so the resume token is
-known at launch and is unique per seat even when seats share a directory.
-Resume launches `copilot --no-auto-update --resume=<uuid>`. Before resuming, OpenRig checks that
-`$COPILOT_HOME/session-state/<uuid>/workspace.yaml` still exists; if it does
-not, the resume is refused as `retry_fresh` and restore asks before starting a
-new session. Fork is not supported (Copilot has no fork flag).
+OpenRig creates each session with `--session-id <uuid>`, so the session id is
+chosen at launch and is unique per seat even when seats share a directory.
+Copilot can only resume a session once it has stored a real exchange: a
+session that was never prompted has `workspace.yaml` but no event journal, and
+`copilot --resume=<uuid>` then fails with `No session, task, or name matched`.
+So OpenRig records the id as the seat's resume token only once
+`$COPILOT_HOME/session-state/<uuid>/events.jsonl` holds a user message (the
+same test Copilot uses for sessions with user-visible history). It checks
+right after launch, from the periodic resume refresher, and at restore. A seat
+that was started but never prompted has no token and restores fresh instead of
+stopping to ask.
+
+Resume launches `copilot --no-auto-update --resume=<uuid>`. Before resuming,
+OpenRig checks that `$COPILOT_HOME/session-state/<uuid>/workspace.yaml` still
+exists; if it does not, the resume is refused as `retry_fresh` and restore
+asks before starting a new session. Fork is not supported (Copilot has no fork
+flag).
 
 ## Guidance and skills
 
