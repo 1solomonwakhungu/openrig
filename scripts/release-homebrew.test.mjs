@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nextForkTag, rewriteFormula } from "./release-homebrew.mjs";
+import { githubRepoFromRemoteUrl, nextForkTag, rewriteFormula } from "./release-homebrew.mjs";
 
 test("nextForkTag starts at fork.1 and continues past the highest existing tag", () => {
   assert.equal(nextForkTag("0.6.1", []), "v0.6.1-fork.1");
@@ -46,4 +46,13 @@ test("rewriteFormula refuses a formula missing one of the fields", () => {
 test("rewriteFormula inserts values literally, even when they contain $ patterns", () => {
   const out = rewriteFormula(FORMULA, { url: "https://x/$1$&.tgz", version: "0.6.1-fork.2", sha256: "c".repeat(64) });
   assert.match(out, /^  url "https:\/\/x\/\$1\$&\.tgz"$/m);
+});
+
+test("githubRepoFromRemoteUrl reads owner/name from https and ssh remotes", () => {
+  assert.equal(githubRepoFromRemoteUrl("https://github.com/owner/openrig.git"), "owner/openrig");
+  assert.equal(githubRepoFromRemoteUrl("https://github.com/owner/openrig"), "owner/openrig");
+  assert.equal(githubRepoFromRemoteUrl("git@github.com:owner/openrig.git"), "owner/openrig");
+  assert.equal(githubRepoFromRemoteUrl("ssh://git@github.com/owner/openrig.git\n"), "owner/openrig");
+  assert.equal(githubRepoFromRemoteUrl("https://gitlab.com/owner/openrig.git"), null);
+  assert.equal(githubRepoFromRemoteUrl("/local/path/openrig"), null);
 });

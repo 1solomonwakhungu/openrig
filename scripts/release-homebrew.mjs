@@ -14,7 +14,9 @@
 // with `npm ci` and rewrites the staged package under packages/cli (daemon/, ui/, tui/).
 //
 // Environment overrides:
-//   OPENRIG_RELEASE_REPO  owner/name of the repository that hosts the release (default: origin)
+//   OPENRIG_RELEASE_REPO  owner/name of the repository that hosts the release (default: the
+//                         GitHub repository of the origin remote; never gh's default repository,
+//                         which in a fork checkout can be the upstream)
 //   OPENRIG_TAP_REPO      owner/name of the Homebrew tap (default: <owner>/homebrew-tap)
 //   OPENRIG_TAP_FORMULA   formula path inside the tap (default: Formula/openrig.rb)
 
@@ -37,6 +39,12 @@ export function nextForkTag(version, existingTags) {
     if (Number.isInteger(n) && n > highest) highest = n;
   }
   return `${prefix}${highest + 1}`;
+}
+
+/** owner/name from a GitHub remote URL (https or ssh), or null if it is not a GitHub URL. */
+export function githubRepoFromRemoteUrl(url) {
+  const match = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
+  return match ? `${match[1]}/${match[2]}` : null;
 }
 
 /** Rewrite the url, version, and sha256 lines of a Homebrew formula. */
@@ -79,8 +87,9 @@ function main() {
   const head = run("git", ["rev-parse", "HEAD"]);
   if (head !== run("git", ["rev-parse", "origin/main"])) throw new Error("HEAD does not match origin/main");
 
-  const releaseRepo = process.env.OPENRIG_RELEASE_REPO
-    || run("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
+  const originUrl = run("git", ["remote", "get-url", "origin"]);
+  const releaseRepo = process.env.OPENRIG_RELEASE_REPO || githubRepoFromRemoteUrl(originUrl);
+  if (!releaseRepo) throw new Error(`origin is not a GitHub repository (${originUrl}); set OPENRIG_RELEASE_REPO`);
   const tapRepo = process.env.OPENRIG_TAP_REPO || `${releaseRepo.split("/")[0]}/homebrew-tap`;
   const formulaPath = process.env.OPENRIG_TAP_FORMULA || "Formula/openrig.rb";
 
