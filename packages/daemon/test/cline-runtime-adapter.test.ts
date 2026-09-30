@@ -20,9 +20,14 @@ import { CLINE_READY_PATTERNS, CLINE_GATE_PATTERNS, CLINE_ERROR_PATTERNS } from 
 import { ATTENTION_REQUIRED_READINESS_CODES } from "../src/domain/runtime-adapter.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
-import { CLINE_DESCRIPTOR, CLINE_REGISTRATION } from "../src/adapters/cli/cline/index.js";
+import { CLINE_DESCRIPTOR, CLINE_REGISTRATION, createClineSpec } from "../src/adapters/cli/cline/index.js";
+import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
-import { HARNESS_HOME, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux } from "./helpers/tui-cli-adapter-harness.js";
+import {
+  HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux,
+} from "./helpers/tui-cli-adapter-harness.js";
+import { clineSeatHubPaths } from "../src/adapters/cli/cline/hub.js";
+import { seatStateDirFor } from "../src/domain/runtime-capture.js";
 
 const FIXTURES = nodePath.join(nodePath.dirname(fileURLToPath(import.meta.url)), "fixtures", "cli-panes", "cline");
 const pane = (name: string) => readFileSync(nodePath.join(FIXTURES, name), "utf8");
@@ -286,19 +291,23 @@ runTuiCliAdapterContract({
 describe("cline adapter", () => {
   function launchRig(frames = [{ command: "node", content: pane("home-ready.txt") }], env: NodeJS.ProcessEnv = {}, files: Record<string, string> = {}) {
     const tmuxPane = mockTmux([atShell(), ...frames]);
-    const adapter = CLINE_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: harnessMemFs(files), env }));
-    return { adapter, pane: tmuxPane };
+    const seatFs = harnessMemFs(files);
+    const adapter = CLINE_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: seatFs, env }));
+    return { adapter, pane: tmuxPane, fs: seatFs };
   }
+  const seatHub = clineSeatHubPaths(seatStateDirFor(HARNESS_STATE_ROOT, "cline", HARNESS_SESSION));
 
   it("is registered under runtime: cline", () => {
     expect(getRuntimeDescriptor("cline")).toBe(CLINE_DESCRIPTOR);
   });
 
-  it("types the exact floor launch with the additive launch env", async () => {
-    const { adapter, pane: p } = launchRig();
+  it("types the exact floor launch with the additive launch env and the seat's own hub", async () => {
+    const { adapter, pane: p, fs: seatFs } = launchRig();
     expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+    const seatPort = Number(seatFs.readFile(seatHub.portFile).trim());
+    expect(seatPort).toBeGreaterThanOrEqual(1024);
     expect(p.typed).toEqual([
-      "exec env 'CLINE_DISABLE_CLINE_PASS_NOTICE=1' 'CLINE_NO_AUTO_UPDATE=1' 'cline' '--auto-approve' 'false'",
+      `exec env 'CLINE_DISABLE_CLINE_PASS_NOTICE=1' 'CLINE_NO_AUTO_UPDATE=1' 'CLINE_HUB_DISCOVERY_PATH=${seatHub.discoveryFile}' 'CLINE_HUB_PORT=${seatPort}' 'cline' '--auto-approve' 'false'`,
     ]);
   });
 
@@ -352,8 +361,32 @@ describe("cline adapter", () => {
     expect(CLINE_DESCRIPTOR.captureIsSessionScoped ?? false).toBe(false);
   });
 
-  it("does not reap the pane process tree (the shared hub daemon lives there)", () => {
-    expect(CLINE_DESCRIPTOR.reapProcessTreeOnStop).toBe(false);
+  it("verify enforces the version floor with the install hint", async () => {
+    const verify = CLINE_DESCRIPTOR.verify!;
+    const exec = async () => "";
+    expect(await verify({ exec, version: "3.0.65" })).toBeNull();
+    expect(await verify({ exec, version: "3.0.54" })).toMatch(/older than 3\.0\.65.*npm install -g cline/);
+    expect(await verify({ exec, version: null })).toMatch(/could not read the cline version/);
+  });
+
+  it("refuses to launch a cline older than the floor, before typing anything", async () => {
+    const tmuxPane = mockTmux([atShell(), { command: "node", content: pane("home-ready.txt") }]);
+    const seatFs = harnessMemFs();
+    const deps = harnessDeps({ tmux: tmuxPane.tmux, fsOps: seatFs });
+    const spec = createClineSpec({}, seatFs, { readVersion: async () => "3.0.54\n", allocatePort: async (p) => p });
+    const result = await new TuiCliRuntimeAdapter(spec, deps).launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/older than 3\.0\.65/) });
+    expect(tmuxPane.typed).toEqual([]);
+    const freshPane = mockTmux([atShell(), { command: "node", content: pane("home-ready.txt") }]);
+    const okDeps = harnessDeps({ tmux: freshPane.tmux, fsOps: seatFs });
+    const ok = await new TuiCliRuntimeAdapter(createClineSpec({}, seatFs, { readVersion: async () => "3.0.65\n", allocatePort: async (p) => p }), okDeps)
+      .launchHarness(harnessBinding(), { name: "x" });
+    expect(ok.ok).toBe(true);
+    expect(freshPane.typed).toHaveLength(1);
+  });
+
+  it("reaps the pane process tree on stop (the seat's own hub lives there)", () => {
+    expect(CLINE_DESCRIPTOR.reapProcessTreeOnStop).toBe(true);
     expect(CLINE_DESCRIPTOR.paneCommands).toBeUndefined();
   });
 

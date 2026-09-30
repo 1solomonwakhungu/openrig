@@ -10,7 +10,7 @@ import type { AppliedLaunchObservation } from "../../../domain/permission-drift.
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import {
   AIDER_BINARY, AIDER_FULL_BYPASS_PERMISSION_VALUE, AIDER_GUIDANCE_FILE, AIDER_INSTALL_HINT, AIDER_RESUME_TYPE, AIDER_RUNTIME_ID,
-  aiderLaunchEnv, buildAiderArgv, captureAiderChatHistory, checkAiderResumeTarget, mintAiderChatHistoryFile,
+  aiderBypassDecision, aiderLaunchEnv, buildAiderArgv, captureAiderChatHistory, checkAiderResumeTarget, mintAiderChatHistoryFile,
   validateAiderChatHistoryToken,
 } from "./launch.js";
 import { AIDER_ERROR_PATTERNS, AIDER_GATE_PATTERNS, AIDER_READY_PATTERNS } from "./patterns.js";
@@ -61,10 +61,20 @@ export function createAiderSpec(stateRoot: string, newId?: () => string): TuiCli
     readyPatterns: AIDER_READY_PATTERNS,
     gatePatterns: AIDER_GATE_PATTERNS,
     errorPatterns: AIDER_ERROR_PATTERNS,
-    observeLaunch: ({ posture }): AppliedLaunchObservation => posture === "full_bypass"
-      ? { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "observed", value: AIDER_FULL_BYPASS_PERMISSION_VALUE, reason: "emitted_launch_arguments" }
+    observeLaunch: ({ posture, binding }): AppliedLaunchObservation => {
+      const unknown = (reason: string): AppliedLaunchObservation =>
+        ({ runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason });
       // The floor passes no permission flag: aider's own config governs.
-      : { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" },
+      if (posture !== "full_bypass") return unknown("cli_config_governs");
+      switch (aiderBypassDecision(binding.model)) {
+        case "always":
+          return { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "observed", value: AIDER_FULL_BYPASS_PERMISSION_VALUE, reason: "emitted_launch_arguments" };
+        // --yes-always withheld so it cannot accept aider's OpenRouter sign-in.
+        case "never": return unknown("yes_always_withheld_onboarding");
+        // The pane's shell decides from OPENROUTER_API_KEY; OpenRig cannot see which.
+        case "in_pane": return unknown("yes_always_decided_in_pane");
+      }
+    },
   };
 }
 

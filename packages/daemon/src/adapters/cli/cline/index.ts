@@ -10,10 +10,11 @@ import type { AppliedLaunchObservation } from "../../../domain/permission-drift.
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import {
   CLINE_BINARY, CLINE_GUIDANCE_FILE, CLINE_INSTALL_HINT, CLINE_LAUNCH_ENV, CLINE_PERMISSION_VALUES, CLINE_RESUME_TYPE, CLINE_RUNTIME_ID,
-  buildClineArgv, validateClineSessionId,
+  buildClineArgv, clineVersionFloorError, validateClineSessionId,
 } from "./launch.js";
 import { checkClineResumeTarget, clineLaunchEnv, clineSessionsDir, findClineSessionForLaunch } from "./sessions.js";
 import { CLINE_ERROR_PATTERNS, CLINE_GATE_PATTERNS, CLINE_READY_PATTERNS } from "./patterns.js";
+import { clineSeatHubEnv, prepareClineSeatHub, recordClineVersion, type ClineHubFs, type ClineSeatHubDeps } from "./hub.js";
 
 export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   id: CLINE_RUNTIME_ID,
@@ -21,12 +22,16 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   kind: "agent",
   binary: CLINE_BINARY,
   installHint: CLINE_INSTALL_HINT,
+  // The per-seat hub and the stop reap need cline >= CLINE_MIN_VERSION.
+  verify: async ({ version }) => (version
+    ? clineVersionFloorError(version)
+    : `could not read the cline version; OpenRig needs cline >= the verified floor (install: ${CLINE_INSTALL_HINT})`),
   resumeType: CLINE_RESUME_TYPE,
   validateResumeToken: validateClineSessionId,
   // Sessions appear only after the first prompt, so this usually finds nothing
   // at launch and the refresher or restore captures the token later. Without a
-  // launch time there is no safe attribution (sessions carry the shared hub's
-  // pid), so capture waits for launch.json.
+  // launch time there is no safe attribution (sessions carry the hub's pid, not
+  // the TUI's), so capture waits for launch.json.
   captureResumeToken: ({ cwd, launchStartedAt, homedir }) => {
     if (!cwd || !launchStartedAt) return null;
     const found = findClineSessionForLaunch({
@@ -43,10 +48,11 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   // The pane runs `node .../cline/bin/cline` (script path), which spawns the
   // native `.../bin/.cline` (program path); "node" alone is not identity.
   processMatch: /(?:^|\/)\.?cline$/,
-  // Not reaped on stop: while the TUI runs, cline's shared hub daemon is its
-  // child, and reaping the pane's tree would kill the hub for every cline seat
-  // on the host. tmux kill-session ends the TUI itself (verified).
-  reapProcessTreeOnStop: false,
+  // Reaped on stop: each seat runs its own hub (hub.ts), a child of the seat's
+  // TUI, which cline detaches so it would otherwise outlive `rig down`. The
+  // reaper is PID-scoped and start-time checked, so it stops exactly this
+  // seat's TUI and hub, never the owner's shared hub or another seat's.
+  reapProcessTreeOnStop: true,
   // Permission drift: both postures pass `--auto-approve` explicitly, so both
   // observations map back to a posture.
   permissionPostureFor: (observedValue): ResolvedLaunchPosture | null =>
@@ -56,13 +62,22 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
 };
 
 /** The cline spec for an adapter env (the env the daemon launches seats
- *  from; process.env in production). */
-export function createClineSpec(env: NodeJS.ProcessEnv = process.env): TuiCliRuntimeSpec {
+ *  from; process.env in production) and the adapter's file ops. */
+export function createClineSpec(
+  env: NodeJS.ProcessEnv = process.env,
+  fsOps: ClineHubFs = createNodeFsOps(),
+  hubDeps: ClineSeatHubDeps = {},
+): TuiCliRuntimeSpec {
   return {
     descriptor: CLINE_DESCRIPTOR,
     buildLaunchCommand: ({ binding, posture, resumeToken, forkSource }) =>
       buildClineArgv({ model: binding.model, posture, resumeToken, forkSource }),
-    env: { set: () => ({ ...CLINE_LAUNCH_ENV }) },
+    // Every launch (fresh and resume) gets the seat's own hub.
+    prepareLaunch: async ({ seatStateDir, fs }) => {
+      await recordClineVersion(fs, seatStateDir, hubDeps);
+      await prepareClineSeatHub(fs, seatStateDir, hubDeps);
+    },
+    env: { set: ({ seatStateDir }) => ({ ...CLINE_LAUNCH_ENV, ...clineSeatHubEnv(fsOps, seatStateDir) }) },
     validateResumeTarget: ({ token, homedir, fs }) => {
       const checked = checkClineResumeTarget(token, { fs, env, homedir });
       return checked.ok ? { ok: true } : { ok: false, reason: checked.error, recovery: checked.recovery };
@@ -82,5 +97,5 @@ export function createClineSpec(env: NodeJS.ProcessEnv = process.env): TuiCliRun
 
 export const CLINE_REGISTRATION: CliRuntimeRegistration = {
   descriptor: CLINE_DESCRIPTOR,
-  createAdapter: (deps) => new TuiCliRuntimeAdapter(createClineSpec(deps.env), deps),
+  createAdapter: (deps) => new TuiCliRuntimeAdapter(createClineSpec(deps.env, deps.fsOps), deps),
 };

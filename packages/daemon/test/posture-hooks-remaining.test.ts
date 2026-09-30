@@ -33,8 +33,8 @@ const binding: NodeBinding = {
   cmuxWorkspace: null, cmuxSurface: null, updatedAt: "2026-09-30T00:00:00.000Z", cwd,
 };
 
-function input(posture: "floor" | "full_bypass"): TuiCliLaunchInput {
-  return { binding, posture, seatStateDir: "/openrig-home/state/x/dev-impl@rig" };
+function input(posture: "floor" | "full_bypass", model?: string): TuiCliLaunchInput {
+  return { binding: model ? { ...binding, model } : binding, posture, seatStateDir: "/openrig-home/state/x/dev-impl@rig" };
 }
 
 function diagnose(runtime: string, applied: AppliedLaunchObservation | null, expectedPosture: "floor" | "full_bypass" | null) {
@@ -50,6 +50,8 @@ interface Case {
   /** The argv tokens a recorded value stands for: ties the observation to what
    *  the launch really typed, so a renamed constant or flag cannot pass unseen. */
   tokensFor: (value: string) => string[];
+  /** A model the seat declares (aider only passes --yes-always with one). */
+  model?: string;
 }
 
 const flagOnly = (value: string) => [`--${value}`];
@@ -60,7 +62,7 @@ const CASES: Case[] = [
     emits: { floor: ["--auto-approve", "false"], full_bypass: ["--auto-approve", "true"] },
     tokensFor: (value) => { const [flag, arg] = value.split("="); return [`--${flag}`, arg!]; },
   },
-  { runtime: "aider", spec: createAiderSpec("/openrig-home/state", () => "id"), emits: { floor: null, full_bypass: ["--yes-always"] }, tokensFor: flagOnly },
+  { runtime: "aider", spec: createAiderSpec("/openrig-home/state", () => "id"), emits: { floor: null, full_bypass: ["--yes-always"] }, tokensFor: flagOnly, model: "sonnet" },
   {
     runtime: "grok", spec: GROK_SPEC,
     emits: { floor: ["--permission-mode", "acceptEdits"], full_bypass: ["--always-approve"] },
@@ -79,9 +81,9 @@ function containsRun(argv: string[], run: string[]): boolean {
   return argv.some((_, i) => run.every((token, j) => argv[i + j] === token));
 }
 
-describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits, tokensFor }) => {
+describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits, tokensFor, model }) => {
   const descriptor = getRuntimeDescriptor(runtime)!;
-  const observe = (posture: "floor" | "full_bypass") => spec.observeLaunch!(input(posture))!;
+  const observe = (posture: "floor" | "full_bypass") => spec.observeLaunch!(input(posture, model))!;
 
   it("is registered with observeLaunch and permissionPostureFor", () => {
     expect(descriptor.permissionPostureFor).toBeTypeOf("function");
@@ -91,7 +93,7 @@ describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits, t
   it("records the permission value the launch actually emits", () => {
     const bypass = observe("full_bypass");
     expect(bypass).toMatchObject({ runtime, axis: "permission", state: "observed", reason: "emitted_launch_arguments" });
-    const bypassArgv = spec.buildLaunchCommand(input("full_bypass"));
+    const bypassArgv = spec.buildLaunchCommand(input("full_bypass", model));
     expect(containsRun(bypassArgv, emits.full_bypass)).toBe(true);
     expect(tokensFor(bypass.value!)).toEqual(emits.full_bypass);
     expect(containsRun(bypassArgv, tokensFor(bypass.value!))).toBe(true);
@@ -100,7 +102,7 @@ describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits, t
     const floor = observe("floor");
     if (emits.floor) {
       expect(floor).toMatchObject({ runtime, axis: "permission", state: "observed", reason: "emitted_launch_arguments" });
-      const floorArgv = spec.buildLaunchCommand(input("floor"));
+      const floorArgv = spec.buildLaunchCommand(input("floor", model));
       expect(containsRun(floorArgv, emits.floor)).toBe(true);
       expect(tokensFor(floor.value!)).toEqual(emits.floor);
       expect(containsRun(floorArgv, tokensFor(floor.value!))).toBe(true);
@@ -108,7 +110,7 @@ describe.each(CASES)("posture drift hooks: $runtime", ({ runtime, spec, emits, t
     } else {
       // No permission flag on the floor: the CLI's own config governs.
       expect(floor).toEqual({ runtime, axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" });
-      expect(spec.buildLaunchCommand(input("floor"))).not.toContain(emits.full_bypass[0]);
+      expect(spec.buildLaunchCommand(input("floor", model))).not.toContain(emits.full_bypass[0]);
     }
   });
 

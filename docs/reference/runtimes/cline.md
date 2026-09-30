@@ -43,6 +43,46 @@ pods:
 
 OpenRig records the permission value it passed (`auto-approve=false` or `auto-approve=true`) as the seat's applied-launch observation (axis `permission`). When the seat has a permission policy (member or rig), permission drift compares the posture that value implies with the policy's posture and reports `aligned` or `drift`; with no policy attached it reports `unknown`. This checks the launch arguments OpenRig emitted, not the CLI's own enforcement.
 
+## Hub
+
+Cline runs sessions through a background hub daemon (`cline --cline-hub-daemon`)
+that it starts on demand and detaches, so it outlives the TUI and the tmux
+session. By default every Cline process on the host shares one hub (discovery
+file `~/.cline/data/locks/hub/production.json`, a fixed port), including the
+operator's own Cline, so a seat must never stop that hub. Cline has no flag to
+run without a hub.
+
+Each seat therefore runs its own hub. Every launch (fresh and resume) sets:
+
+| Variable | Value |
+|---|---|
+| `CLINE_HUB_DISCOVERY_PATH` | `<seat state>/cline-hub/discovery.json` (Cline records the hub's pid, url, and auth token there) |
+| `CLINE_HUB_PORT` | a free 127.0.0.1 port chosen before launch: the seat's stable preferred port when free, else any free port, and the running seat hub's port on a relaunch |
+
+The discovery path alone is not enough: without the port Cline attaches to the
+shared hub on its default port (verified). If no port could be recorded, the
+launch is refused rather than falling back to the shared hub. The port is
+checked free just before launch, so another process can still take it in the
+moment before Cline binds it; the seat's hub then cannot start and the launch
+fails visibly (no ready screen) instead of attaching elsewhere.
+
+The per-seat hub needs Cline 3.0.65 or newer, the version it was verified on
+(the variable names already appear in the 3.0.0, 3.0.30, and 3.0.54 binaries,
+but only 3.0.65 was tested). An older Cline would ignore the variables, attach
+to the shared hub, and make the seat the parent of the operator's hub, which a
+stop would then reap. So runtime verification reports an older Cline with the
+install hint, and a launch refuses one before typing anything. The launch reads
+`cline --version` from the daemon's PATH; when it cannot be read, the launch
+proceeds and verification reports it.
+
+While the TUI runs, the seat's hub is its child process, so stop reaps the
+pane's process tree (`reapProcessTreeOnStop`). The reaper is PID-scoped and
+checks each process's start time, so it ends exactly this seat's TUI and hub,
+never the operator's shared hub or another seat's. SIGTERM makes the hub exit
+cleanly and remove its discovery file. A real-tmux test proves both: no process
+with the seat's hub port or discovery path survives a stop, and a real shared
+hub started by a second, non-isolated Cline stays up.
+
 ## Model selection
 
 Set the model in Cline itself (`cline auth <provider> -m <model>`, or the model
@@ -80,10 +120,9 @@ from `~/.cline/data/sessions/<id>/<id>.json` (honoring `CLINE_SESSION_DATA_DIR`,
 CLI session whose `cwd` is the seat cwd and which started at or after the seat's
 launch.
 
-Cline's shared background hub daemon writes these files, not the TUI process,
-and the metadata carries nothing seat-specific (its `pid` is the hub's), so a
-session cannot be tied to one seat by pid or by a per-seat data dir. The match
-is therefore guarded:
+Cline's background hub daemon writes these files, not the TUI process, and the
+metadata carries nothing tied to the TUI (its `pid` is the hub's), so a session
+cannot be tied to one seat by the TUI's pid. The match is therefore guarded:
 
 - When two matching sessions exist (two Cline seats in the same cwd, or one
   seat that started a second task before capture ran), capture records nothing
@@ -114,10 +153,9 @@ is therefore guarded:
 - The pane's foreground process is `node` (the npm launcher). Discovery
   identifies Cline by the pane process tree's argv (`.../cline/bin/cline` or
   `.../bin/.cline`) instead of the pane command.
-- Stop does not reap the pane's process tree. While a TUI runs, Cline's shared
-  hub daemon is its child process, so reaping would kill the hub every Cline
-  seat on the host uses. Killing the tmux session ends the TUI; the hub keeps
-  running, as it does after an operator quits Cline (verified).
+- If a seat's TUI dies on its own (not through a stop), its hub loses its
+  parent and keeps running until the seat is relaunched (the new TUI finds it
+  through the seat's discovery file and reuses it) or the process is ended.
 - A launch where `cline` is not on the pane's PATH fails fast with
   `attention_required`.
 - Cline draws its TUI on the terminal alternate screen (verified), which leaves
@@ -134,7 +172,7 @@ scratch `HOME`, with a dummy provider key (no real account): `--help`, TUI
 screens (sign-in, notice modals, home, chat), `--auto-approve true|false`
 footer, `-m` persisting into `providers.json`, `CLINE_MODEL` having no effect on the TUI, `CLINE_DISABLE_CLINE_PASS_NOTICE`,
 lazy session creation, the session metadata layout, `--id` resume with history,
-the unknown-session error, and the alternate screen under `exec` launch. The skills and rules search paths were read from
+the unknown-session error, the alternate screen under `exec` launch, and the per-seat hub (its own hub process, discovery file, and port with `CLINE_HUB_DISCOVERY_PATH` plus `CLINE_HUB_PORT`, `--id` resume through it, SIGTERM and `/shutdown` exits, and the shared hub left untouched). The skills and rules search paths were read from
 the bundled source. The pane fixtures used in tests are these live captures, including 80x24
 captures (OpenRig's pane size) with a long cwd: home, resumed chat, sign-in,
 a notice modal, and the unknown-session error. Cline lays its TUI out to the

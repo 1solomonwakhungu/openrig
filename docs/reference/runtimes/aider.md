@@ -54,7 +54,7 @@ where `<seat state>` is `$OPENRIG_HOME/state/aider/<session name>`.
 |---|---|
 | `model` | `--model <model>` (aliases such as `sonnet` work) |
 | floor posture | no auto-approve flag: every aider confirmation waits for an answer |
-| full_bypass posture (`OPENRIG_YOLO=1` or a full-bypass permission policy) | `--yes-always`, plus `BROWSER=true` in the launch env. `--yes-always` also accepts aider's "Open documentation url?" offers, and `BROWSER=true` makes those a no-op so a seat never opens a browser. |
+| full_bypass posture (`OPENRIG_YOLO=1` or a full-bypass permission policy) | `--yes-always`, plus `BROWSER=true` in the launch env. `--yes-always` also accepts aider's "Open documentation url?" offers, and `BROWSER=true` makes those a no-op so a seat never opens a browser. Never passed when the seat declares no `model:`; for an `openrouter/` model the pane's own shell adds it only when `OPENROUTER_API_KEY` is set in the pane env. Otherwise aider offers an OpenRouter sign-in that `--yes-always` would accept unattended (see "OpenRouter onboarding"). |
 | resume | `--restore-chat-history` with the persisted history file |
 | fork | refused: Aider has no fork primitive |
 
@@ -93,6 +93,7 @@ refused too; install into a virtualenv, or run it outside the seat.
   `ask> `, `multi> `) is the last text in the pane and the pane is not at a
   shell. Quoted chat output (`> ...`) is not mistaken for the prompt.
 - `login_required`: `<model> expects these environment variables ... - <KEY>: Not set`.
+- `login_required`: aider's OpenRouter onboarding (`No LLM model was specified and no API keys were provided.`, `Login to OpenRouter or create a free account?`, or an `openrouter/` model that `requires an OpenRouter API key`).
 - `trust_gate`: `No git repo found, create one to track aider's changes?`, or any
   other `(Y)es/(N)o` confirmation left pending at the bottom of the pane.
   Under full_bypass, `--yes-always` answers these itself (including creating the
@@ -110,8 +111,36 @@ stays fresh: a later restore replays only the conversation since that launch,
 never one from before it. A resume keeps writing to the file it restored.
 Earlier files stay in the seat state dir until the seat is removed.
 
-If the file is gone at resume time, the resume reports `retry_fresh` (stop and
-ask), because restoring from a missing file would silently start an empty chat.
+The file counts as resumable only once it holds a real exchange (a user
+message, written as a `#### ` line), as for Gemini and Qwen. Late capture waits
+for one, and the resume precheck refuses a file without one. A seat that never
+got a prompt is therefore never resumed: restore stops at awaiting-decision and
+asks for an explicit `--fresh`; it does not start fresh on its own.
+
+If the file is gone at resume time, or has no exchange, the resume reports
+`retry_fresh` (stop and ask), because restoring it would silently start an empty
+chat.
+
+## OpenRouter onboarding
+
+With no `--model` and no provider key, aider offers `Login to OpenRouter or
+create a free account?`; accepting runs an OAuth sign-in (a local callback
+server, then a key saved to `~/.aider/oauth-keys.env`). It makes the same offer
+for an `openrouter/` model when `OPENROUTER_API_KEY` is missing. Aider has no
+flag or setting that disables this, so under full_bypass:
+
+- With no `model:`, OpenRig never passes `--yes-always` (the permission
+  observation is `unknown`, reason `yes_always_withheld_onboarding`).
+- With an `openrouter/` model, the key can come from the pane's shell (for
+  example its rc files), which the daemon cannot see. The launch runs through
+  `sh -c`, and the pane's shell adds `--yes-always` only when its own
+  `OPENROUTER_API_KEY` is non-empty (the observation is `unknown`, reason
+  `yes_always_decided_in_pane`).
+- With any other model, `--yes-always` is passed as usual.
+
+When the offer does appear, it waits in the pane as a `login_required` gate for
+the operator. Declare `model:` and the provider key in the seat env to get
+`--yes-always`.
 
 ## Guidance and skills
 

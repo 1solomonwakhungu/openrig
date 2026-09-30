@@ -50,6 +50,33 @@ export type AiderLaunchPosture = "floor" | "full_bypass";
  *  negation, so aider's own config (.aider.conf.yml, AIDER_YES_ALWAYS) governs. */
 export const AIDER_FULL_BYPASS_PERMISSION_VALUE = "yes-always";
 
+/**
+ * How full_bypass passes `--yes-always` for this launch. aider has no knob that
+ * disables its OpenRouter onboarding, which offers "Login to OpenRouter or
+ * create a free account?" and runs an OAuth sign-in (a local callback server,
+ * then a key saved to ~/.aider/oauth-keys.env) when accepted. It is offered when
+ * no --model is given and no provider key is found, and for an openrouter/
+ * model when OPENROUTER_API_KEY is missing (aider onboarding.py
+ * select_default_model, main.py). `--yes-always` would accept it unattended.
+ * - "never": no model declared; the offer can appear, so the flag is withheld.
+ * - "in_pane": an openrouter/ model; the pane's own shell adds the flag only
+ *   when OPENROUTER_API_KEY is set in the seat's launch env (the pane env, which
+ *   the daemon cannot see: keys often come from the pane shell's rc files).
+ * - "always": any other declared model; the offer never appears.
+ * Withheld, the offer waits in the pane as a login_required gate.
+ */
+export type AiderBypassDecision = "never" | "in_pane" | "always";
+
+export function aiderBypassDecision(model?: string | null): AiderBypassDecision {
+  const declared = model?.trim();
+  if (!declared) return "never";
+  return declared.startsWith("openrouter/") ? "in_pane" : "always";
+}
+
+/** The pane shell adds --yes-always only when OPENROUTER_API_KEY is set there. */
+export const AIDER_IN_PANE_BYPASS_SCRIPT =
+  `if [ -n "\${OPENROUTER_API_KEY:-}" ]; then exec "$@" --${AIDER_FULL_BYPASS_PERMISSION_VALUE}; fi; exec "$@"`;
+
 export interface AiderForkRef {
   kind: string;
   value?: string;
@@ -64,6 +91,7 @@ export interface AiderArgvInput {
   resumeToken?: string;
   /** The per-launch history file minted for a fresh launch. */
   sessionToken?: string;
+
   forkSource?: AiderForkRef;
 }
 
@@ -104,7 +132,12 @@ export function buildAiderArgv(input: AiderArgvInput): string[] {
   ];
   const model = input.model?.trim();
   if (model) argv.push("--model", model);
-  if (input.posture === "full_bypass") argv.push(`--${AIDER_FULL_BYPASS_PERMISSION_VALUE}`);
+  if (input.posture === "full_bypass") {
+    const decision = aiderBypassDecision(input.model);
+    if (decision === "always") argv.push(`--${AIDER_FULL_BYPASS_PERMISSION_VALUE}`);
+    // Decided by the pane's shell from the seat's own env (see aiderBypassDecision).
+    if (decision === "in_pane") return ["sh", "-c", AIDER_IN_PANE_BYPASS_SCRIPT, "sh", ...argv];
+  }
   if (input.resumeToken !== undefined) argv.push("--restore-chat-history");
   return argv;
 }
@@ -156,31 +189,51 @@ export function validateAiderChatHistoryToken(raw: string): AiderTokenResult {
 
 export interface AiderFsOps {
   exists(path: string): boolean;
+  readFile(path: string): string;
+}
+
+/** aider writes each user message to the chat history as a "#### <text>" line
+ *  (the startup header and tool output are "#" and "> " lines). */
+const USER_MESSAGE_RE = /^#### \S/m;
+
+/** Whether a chat history file holds a real exchange (at least one user
+ *  message). A seat that never got a prompt has only the startup header, and
+ *  restoring it would bring nothing back. Never throws. */
+export function hasAiderExchange(fs: AiderFsOps, file: string): boolean {
+  try {
+    return fs.exists(file) && USER_MESSAGE_RE.test(fs.readFile(file));
+  } catch {
+    return false;
+  }
 }
 
 export type AiderResumeTargetResult =
   | { ok: true }
   | { ok: false; error: string; recovery: "retry_fresh" };
 
-/** Pre-launch resume check. `--restore-chat-history` on a missing file starts
- *  an empty chat, which would be a silent fresh start; report retry_fresh. */
+/** Pre-launch resume check. `--restore-chat-history` on a missing file, or on
+ *  one with no exchange, restores nothing, which would be a silent fresh start;
+ *  report retry_fresh (the same test capture uses, as for gemini and qwen). */
 export function checkAiderResumeTarget(token: string, ctx: { fs: AiderFsOps }): AiderResumeTargetResult {
   const validation = validateAiderChatHistoryToken(token);
   if (!validation.ok) return { ok: false, error: validation.error, recovery: "retry_fresh" };
   if (!ctx.fs.exists(validation.token)) {
     return { ok: false, error: "the persisted aider chat history file no longer exists", recovery: "retry_fresh" };
   }
+  if (!hasAiderExchange(ctx.fs, validation.token)) {
+    return { ok: false, error: "the persisted aider chat history has no exchange to restore", recovery: "retry_fresh" };
+  }
   return { ok: true };
 }
 
-export interface AiderCaptureFsOps extends AiderFsOps {
-  readFile(path: string): string;
-}
+export type AiderCaptureFsOps = AiderFsOps;
 
 /** Token capture: the history file minted for the seat's latest fresh launch
- *  (the base records it as launch.json presetToken), once aider has written
- *  it (aider writes the "# aider chat started at" header at startup). Only a
- *  file inside the seat's own state dir is accepted. Read-only; never throws. */
+ *  (the base records it as launch.json presetToken), once it holds a real
+ *  exchange (the resume precheck's test), so a seat that never got a prompt is
+ *  never resumed; restore stops at awaiting-decision instead.
+ *  Only a file inside the seat's own state dir is accepted. Read-only; never
+ *  throws. */
 export function captureAiderChatHistory(ctx: { fs: AiderCaptureFsOps; seatStateDir: string }): string | undefined {
   let preset: unknown;
   try {
@@ -191,5 +244,5 @@ export function captureAiderChatHistory(ctx: { fs: AiderCaptureFsOps; seatStateD
   if (typeof preset !== "string") return undefined;
   const validation = validateAiderChatHistoryToken(preset);
   if (!validation.ok || nodePath.dirname(validation.token) !== nodePath.resolve(ctx.seatStateDir)) return undefined;
-  return ctx.fs.exists(validation.token) ? validation.token : undefined;
+  return hasAiderExchange(ctx.fs, validation.token) ? validation.token : undefined;
 }
