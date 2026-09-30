@@ -46,7 +46,8 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   resumeType: "gemini_session_id",
   validateResumeToken: validateSessionToken,
   // Reported only once the session is resumable (the same test as the resume
-  // precheck), so a seat that never got a prompt has no token and restores fresh.
+  // precheck), so a seat that never got a prompt has no token; restore then stops
+  // for an explicit --fresh (the no-token policy) and never resumes a wrong conversation.
   captureResumeToken: createGeminiFamilyCapture({ sessionExists: geminiSessionIsResumable }),
   // Maps the recorded approval mode back to a posture for permission drift.
   permissionPostureFor: geminiFamilyPermissionPosture(GEMINI_DIALECT),

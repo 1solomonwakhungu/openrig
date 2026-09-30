@@ -270,7 +270,8 @@ export interface CopilotCaptureInput {
 /**
  * Read-only token capture. Only a resumable session counts (see
  * copilotSessionIsResumable), so a seat that was never prompted has no token
- * and restores fresh. A minted id is reported once resumable. Without one (a
+ * and restore stops for an explicit --fresh (the no-token policy), never
+ * resuming a wrong conversation. A minted id is reported once resumable. Without one (a
  * seat adopted from a manual launch), the unique resumable session whose cwd
  * matches and that was created at or after launch start is returned; zero or
  * several candidates return null rather than a guess.
