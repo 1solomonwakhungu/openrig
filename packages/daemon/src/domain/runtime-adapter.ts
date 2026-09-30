@@ -74,6 +74,9 @@ export const ATTENTION_REQUIRED_READINESS_CODES = new Set([
   "codex_client_incompatible",
   // A CLI's first-run or startup dialog (gemini/qwen) that needs an operator.
   "startup_dialog",
+  // A CLI began updating the operator's install through a package manager
+  // OpenRig does not contain (gemini/qwen): the operator should check it.
+  "self_update",
 ]);
 
 export function isAttentionRequiredReadinessCode(code: string | undefined): boolean {

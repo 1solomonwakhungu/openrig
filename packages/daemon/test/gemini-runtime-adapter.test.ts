@@ -123,7 +123,7 @@ describe("gemini runtime adapter", () => {
     const { adapter, pane, files } = launchRig();
     await adapter.launchHarness(harnessBinding(), { name: "x" });
     expect(pane.typed[0]).toMatch(
-      /^exec env 'CURSOR_TRACE_ID=' 'TERMINAL_EMULATOR=' 'TERM_PROGRAM=tmux' 'VSCODE_GIT_ASKPASS_MAIN=' 'VSCODE_GIT_IPC_HANDLE=' 'XCODE_VERSION_ACTUAL=' 'ZED_SESSION_ID=' 'gemini' /,
+      /^exec env 'CURSOR_TRACE_ID=' 'TERMINAL_EMULATOR=' 'TERM_PROGRAM=tmux' 'VSCODE_GIT_ASKPASS_MAIN=' 'VSCODE_GIT_IPC_HANDLE=' 'XCODE_VERSION_ACTUAL=' 'ZED_SESSION_ID=' 'NPM_CONFIG_PREFIX=\/openrig-home\/state\/gemini\/dev-impl@harness-rig\/npm-global' 'npm_config_prefix=\/openrig-home\/state\/gemini\/dev-impl@harness-rig\/npm-global' 'NPM_CONFIG_CACHE=\/openrig-home\/state\/gemini\/dev-impl@harness-rig\/npm-cache' 'npm_config_cache=\/openrig-home\/state\/gemini\/dev-impl@harness-rig\/npm-cache' 'gemini' /,
     );
     expect(Object.keys(files.files).filter((f) => f.includes(".gemini"))).toEqual([]);
   });
