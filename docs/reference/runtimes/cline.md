@@ -61,7 +61,19 @@ Each seat therefore runs its own hub. Every launch (fresh and resume) sets:
 
 The discovery path alone is not enough: without the port Cline attaches to the
 shared hub on its default port (verified). If no port could be recorded, the
-launch is refused rather than falling back to the shared hub.
+launch is refused rather than falling back to the shared hub. The port is
+checked free just before launch, so another process can still take it in the
+moment before Cline binds it; the seat's hub then cannot start and the launch
+fails visibly (no ready screen) instead of attaching elsewhere.
+
+The per-seat hub needs Cline 3.0.65 or newer, the version it was verified on
+(the variable names already appear in the 3.0.0, 3.0.30, and 3.0.54 binaries,
+but only 3.0.65 was tested). An older Cline would ignore the variables, attach
+to the shared hub, and make the seat the parent of the operator's hub, which a
+stop would then reap. So runtime verification reports an older Cline with the
+install hint, and a launch refuses one before typing anything. The launch reads
+`cline --version` from the daemon's PATH; when it cannot be read, the launch
+proceeds and verification reports it.
 
 While the TUI runs, the seat's hub is its child process, so stop reaps the
 pane's process tree (`reapProcessTreeOnStop`). The reaper is PID-scoped and

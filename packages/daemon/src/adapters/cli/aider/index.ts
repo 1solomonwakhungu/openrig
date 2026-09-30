@@ -10,7 +10,7 @@ import type { AppliedLaunchObservation } from "../../../domain/permission-drift.
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import {
   AIDER_BINARY, AIDER_FULL_BYPASS_PERMISSION_VALUE, AIDER_GUIDANCE_FILE, AIDER_INSTALL_HINT, AIDER_RESUME_TYPE, AIDER_RUNTIME_ID,
-  aiderBypassAllowed, aiderLaunchEnv, buildAiderArgv, captureAiderChatHistory, checkAiderResumeTarget, mintAiderChatHistoryFile,
+  aiderBypassDecision, aiderLaunchEnv, buildAiderArgv, captureAiderChatHistory, checkAiderResumeTarget, mintAiderChatHistoryFile,
   validateAiderChatHistoryToken,
 } from "./launch.js";
 import { AIDER_ERROR_PATTERNS, AIDER_GATE_PATTERNS, AIDER_READY_PATTERNS } from "./patterns.js";
@@ -42,17 +42,12 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
     observedValue === AIDER_FULL_BYPASS_PERMISSION_VALUE ? "full_bypass" : null,
 };
 
-/** The aider spec for a daemon state root and launch env (the env the pane
- *  inherits; process.env in production). `newId` is injectable for tests. */
-export function createAiderSpec(stateRoot: string, newId?: () => string, env: NodeJS.ProcessEnv = process.env): TuiCliRuntimeSpec {
-  const bypassAllowed = (model?: string | null) => aiderBypassAllowed({ model, env });
+/** The aider spec for a daemon state root. `newId` is injectable for tests. */
+export function createAiderSpec(stateRoot: string, newId?: () => string): TuiCliRuntimeSpec {
   return {
     descriptor: AIDER_DESCRIPTOR,
     buildLaunchCommand: ({ binding, posture, resumeToken, sessionToken, forkSource, seatStateDir }) =>
-      buildAiderArgv({
-        model: binding.model, posture, seatStateDir, resumeToken, sessionToken, forkSource,
-        bypassAllowed: bypassAllowed(binding.model),
-      }),
+      buildAiderArgv({ model: binding.model, posture, seatStateDir, resumeToken, sessionToken, forkSource }),
     // Every fresh launch writes a new history file, so "fresh" stays fresh on
     // a later restore; the minted path is the launch's resume token.
     mintSessionToken: ({ binding }) => binding.tmuxSession
@@ -67,19 +62,23 @@ export function createAiderSpec(stateRoot: string, newId?: () => string, env: No
     gatePatterns: AIDER_GATE_PATTERNS,
     errorPatterns: AIDER_ERROR_PATTERNS,
     observeLaunch: ({ posture, binding }): AppliedLaunchObservation => {
-      if (posture === "full_bypass" && bypassAllowed(binding.model)) {
-        return { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "observed", value: AIDER_FULL_BYPASS_PERMISSION_VALUE, reason: "emitted_launch_arguments" };
-      }
-      return posture === "full_bypass"
+      const unknown = (reason: string): AppliedLaunchObservation =>
+        ({ runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason });
+      // The floor passes no permission flag: aider's own config governs.
+      if (posture !== "full_bypass") return unknown("cli_config_governs");
+      switch (aiderBypassDecision(binding.model)) {
+        case "always":
+          return { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "observed", value: AIDER_FULL_BYPASS_PERMISSION_VALUE, reason: "emitted_launch_arguments" };
         // --yes-always withheld so it cannot accept aider's OpenRouter sign-in.
-        ? { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason: "yes_always_withheld_onboarding" }
-        // The floor passes no permission flag: aider's own config governs.
-        : { runtime: AIDER_DESCRIPTOR.id, axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" };
+        case "never": return unknown("yes_always_withheld_onboarding");
+        // The pane's shell decides from OPENROUTER_API_KEY; OpenRig cannot see which.
+        case "in_pane": return unknown("yes_always_decided_in_pane");
+      }
     },
   };
 }
 
 export const AIDER_REGISTRATION: CliRuntimeRegistration = {
   descriptor: AIDER_DESCRIPTOR,
-  createAdapter: (deps) => new TuiCliRuntimeAdapter(createAiderSpec(deps.stateRoot, undefined, deps.env ?? process.env), deps),
+  createAdapter: (deps) => new TuiCliRuntimeAdapter(createAiderSpec(deps.stateRoot), deps),
 };

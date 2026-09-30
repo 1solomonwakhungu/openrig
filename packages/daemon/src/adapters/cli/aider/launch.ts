@@ -51,22 +51,31 @@ export type AiderLaunchPosture = "floor" | "full_bypass";
 export const AIDER_FULL_BYPASS_PERMISSION_VALUE = "yes-always";
 
 /**
- * Whether full_bypass may pass `--yes-always` for this launch. aider has no
- * knob that disables its OpenRouter onboarding, which offers "Login to
- * OpenRouter or create a free account?" and runs an OAuth sign-in (a local
- * callback server, then a key saved to ~/.aider/oauth-keys.env) when accepted.
- * It is offered when no --model is given and no provider key is found, and for
- * an openrouter/ model when OPENROUTER_API_KEY is missing (aider onboarding.py
- * select_default_model, main.py). `--yes-always` would accept it unattended, so
- * it is withheld in those cases; the offer then waits in the pane as a
- * login_required gate.
+ * How full_bypass passes `--yes-always` for this launch. aider has no knob that
+ * disables its OpenRouter onboarding, which offers "Login to OpenRouter or
+ * create a free account?" and runs an OAuth sign-in (a local callback server,
+ * then a key saved to ~/.aider/oauth-keys.env) when accepted. It is offered when
+ * no --model is given and no provider key is found, and for an openrouter/
+ * model when OPENROUTER_API_KEY is missing (aider onboarding.py
+ * select_default_model, main.py). `--yes-always` would accept it unattended.
+ * - "never": no model declared; the offer can appear, so the flag is withheld.
+ * - "in_pane": an openrouter/ model; the pane's own shell adds the flag only
+ *   when OPENROUTER_API_KEY is set in the seat's launch env (the pane env, which
+ *   the daemon cannot see: keys often come from the pane shell's rc files).
+ * - "always": any other declared model; the offer never appears.
+ * Withheld, the offer waits in the pane as a login_required gate.
  */
-export function aiderBypassAllowed(input: { model?: string | null; env: NodeJS.ProcessEnv }): boolean {
-  const model = input.model?.trim();
-  if (!model) return false;
-  if (model.startsWith("openrouter/")) return !!input.env.OPENROUTER_API_KEY?.trim();
-  return true;
+export type AiderBypassDecision = "never" | "in_pane" | "always";
+
+export function aiderBypassDecision(model?: string | null): AiderBypassDecision {
+  const declared = model?.trim();
+  if (!declared) return "never";
+  return declared.startsWith("openrouter/") ? "in_pane" : "always";
 }
+
+/** The pane shell adds --yes-always only when OPENROUTER_API_KEY is set there. */
+export const AIDER_IN_PANE_BYPASS_SCRIPT =
+  `if [ -n "\${OPENROUTER_API_KEY:-}" ]; then exec "$@" --${AIDER_FULL_BYPASS_PERMISSION_VALUE}; fi; exec "$@"`;
 
 export interface AiderForkRef {
   kind: string;
@@ -82,8 +91,7 @@ export interface AiderArgvInput {
   resumeToken?: string;
   /** The per-launch history file minted for a fresh launch. */
   sessionToken?: string;
-  /** full_bypass only: false withholds `--yes-always` (see aiderBypassAllowed). */
-  bypassAllowed?: boolean;
+
   forkSource?: AiderForkRef;
 }
 
@@ -124,7 +132,12 @@ export function buildAiderArgv(input: AiderArgvInput): string[] {
   ];
   const model = input.model?.trim();
   if (model) argv.push("--model", model);
-  if (input.posture === "full_bypass" && input.bypassAllowed !== false) argv.push(`--${AIDER_FULL_BYPASS_PERMISSION_VALUE}`);
+  if (input.posture === "full_bypass") {
+    const decision = aiderBypassDecision(input.model);
+    if (decision === "always") argv.push(`--${AIDER_FULL_BYPASS_PERMISSION_VALUE}`);
+    // Decided by the pane's shell from the seat's own env (see aiderBypassDecision).
+    if (decision === "in_pane") return ["sh", "-c", AIDER_IN_PANE_BYPASS_SCRIPT, "sh", ...argv];
+  }
   if (input.resumeToken !== undefined) argv.push("--restore-chat-history");
   return argv;
 }

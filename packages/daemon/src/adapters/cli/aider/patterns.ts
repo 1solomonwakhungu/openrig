@@ -85,7 +85,8 @@ export const AIDER_GATE_PATTERNS: readonly AiderGatePattern[] = [
 
 export const AIDER_ERROR_PATTERNS: readonly AiderErrorPattern[] = [
   {
-    // zsh, bash, and env (the full_bypass launch is prefixed with `env`).
+    // zsh, bash, and env (every launch is prefixed with `env`). sh's
+    // `exec: aider: not found` is detected by the TUI CLI base.
     pattern: /command not found: aider|aider: command not found|env: [\u2018']?aider[\u2019']?: No such file or directory/,
     reason: "aider is not installed or not on the pane's PATH (python -m pip install aider-install && aider-install)",
   },

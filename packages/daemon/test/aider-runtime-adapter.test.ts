@@ -6,11 +6,12 @@
 import nodePath from "node:path";
 import os from "node:os";
 import fs, { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   buildAiderArgv, aiderLaunchEnv, aiderSeatPaths, validateAiderChatHistoryToken,
-  checkAiderResumeTarget, captureAiderChatHistory, mintAiderChatHistoryFile, aiderBypassAllowed, hasAiderExchange,
+  checkAiderResumeTarget, captureAiderChatHistory, mintAiderChatHistoryFile, aiderBypassDecision, hasAiderExchange, AIDER_IN_PANE_BYPASS_SCRIPT,
 } from "../src/adapters/cli/aider/launch.js";
 import { AIDER_READY_PATTERNS, AIDER_GATE_PATTERNS, AIDER_ERROR_PATTERNS } from "../src/adapters/cli/aider/patterns.js";
 import { ATTENTION_REQUIRED_READINESS_CODES } from "../src/domain/runtime-adapter.js";
@@ -48,8 +49,9 @@ describe("aider launch argv", () => {
     expect(argv).not.toContain("--restore-chat-history");
   });
 
-  it("full_bypass adds --yes-always", () => {
-    expect(buildAiderArgv({ posture: "full_bypass", seatStateDir: SEAT })).toEqual([...BASE, "--yes-always"]);
+  it("full_bypass adds --yes-always when a model is declared, and never without one", () => {
+    expect(buildAiderArgv({ posture: "full_bypass", seatStateDir: SEAT, model: "sonnet" })).toEqual([...BASE, "--model", "sonnet", "--yes-always"]);
+    expect(buildAiderArgv({ posture: "full_bypass", seatStateDir: SEAT })).toEqual(BASE);
   });
 
   it("never persists analytics settings globally", () => {
@@ -423,12 +425,11 @@ describe("aider adapter", () => {
 });
 
 describe("aider OpenRouter onboarding is never auto-accepted", () => {
-  it("allows --yes-always only with a declared model, and for openrouter/ models only with OPENROUTER_API_KEY", () => {
-    expect(aiderBypassAllowed({ model: undefined, env: {} })).toBe(false);
-    expect(aiderBypassAllowed({ model: "  ", env: { ANTHROPIC_API_KEY: "k" } })).toBe(false);
-    expect(aiderBypassAllowed({ model: "sonnet", env: {} })).toBe(true);
-    expect(aiderBypassAllowed({ model: "openrouter/anthropic/claude-sonnet-4.5", env: {} })).toBe(false);
-    expect(aiderBypassAllowed({ model: "openrouter/anthropic/claude-sonnet-4.5", env: { OPENROUTER_API_KEY: "k" } })).toBe(true);
+  it("decides --yes-always from the declared model: never without one, in the pane for openrouter/", () => {
+    expect(aiderBypassDecision(undefined)).toBe("never");
+    expect(aiderBypassDecision("  ")).toBe("never");
+    expect(aiderBypassDecision("sonnet")).toBe("always");
+    expect(aiderBypassDecision("openrouter/anthropic/claude-sonnet-4.5")).toBe("in_pane");
   });
 
   it("full_bypass without a model withholds --yes-always and records the posture as unknown", async () => {
@@ -442,13 +443,28 @@ describe("aider OpenRouter onboarding is never auto-accepted", () => {
     });
   });
 
-  it("full_bypass with an openrouter/ model withholds --yes-always unless OPENROUTER_API_KEY is in the launch env", async () => {
-    for (const [env, expectYes] of [[{}, false], [{ OPENROUTER_API_KEY: "k" }, true]] as const) {
-      const tmuxPane = mockTmux([atShell(), { command: PYTHON, content: pane("ready.txt") }]);
-      const adapter = AIDER_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: memFs(), env }));
-      await adapter.launchHarness(harnessBinding({ model: "openrouter/anthropic/claude-sonnet-4.5", launchPosture: "full_bypass" }), { name: "x" });
-      expect(tmuxPane.typed[0]!.includes("'--yes-always'")).toBe(expectYes);
-    }
+  it("full_bypass with an openrouter/ model lets the pane shell decide from its own OPENROUTER_API_KEY", async () => {
+    const tmuxPane = mockTmux([atShell(), { command: PYTHON, content: pane("ready.txt") }]);
+    const adapter = AIDER_REGISTRATION.createAdapter(harnessDeps({ tmux: tmuxPane.tmux, fsOps: memFs(), env: { OPENROUTER_API_KEY: "daemon-side-ignored" } }));
+    const model = "openrouter/anthropic/claude-sonnet-4.5";
+    const result = await adapter.launchHarness(harnessBinding({ model, launchPosture: "full_bypass" }), { name: "x" });
+    const typed = tmuxPane.typed[0]!;
+    // The flag is never typed literally: only the pane's shell can add it.
+    expect(typed).toContain(`'sh' '-c' '`);
+    expect(typed).not.toContain("'--yes-always'");
+    expect(typed).toContain(`'--model' '${model}'`);
+    expect(result.ok && result.appliedLaunch).toMatchObject({ state: "unknown", reason: "yes_always_decided_in_pane" });
+  });
+
+  it("the in-pane script adds --yes-always only when the pane env has OPENROUTER_API_KEY (real sh)", () => {
+    const argv = buildAiderArgv({ posture: "full_bypass", seatStateDir: SEAT, model: "openrouter/x/y" });
+    expect(argv.slice(0, 4)).toEqual(["sh", "-c", AIDER_IN_PANE_BYPASS_SCRIPT, "sh"]);
+    // Replace the aider binary with printf so the real shell shows the final argv.
+    const probe = ["printf", "%s\\n", ...argv.slice(5)];
+    const run = (env: NodeJS.ProcessEnv) => execFileSync("sh", ["-c", AIDER_IN_PANE_BYPASS_SCRIPT, "sh", ...probe], { env: { PATH: process.env.PATH, ...env }, encoding: "utf8" }).trim().split("\n");
+    expect(run({})).not.toContain("--yes-always");
+    expect(run({ OPENROUTER_API_KEY: "" })).not.toContain("--yes-always");
+    expect(run({ OPENROUTER_API_KEY: "k" }).at(-1)).toBe("--yes-always");
   });
 
   it("the OpenRouter sign-in offer (live 80x24 capture) is login_required, not a generic confirmation", () => {

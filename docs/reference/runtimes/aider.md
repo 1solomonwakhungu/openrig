@@ -54,7 +54,7 @@ where `<seat state>` is `$OPENRIG_HOME/state/aider/<session name>`.
 |---|---|
 | `model` | `--model <model>` (aliases such as `sonnet` work) |
 | floor posture | no auto-approve flag: every aider confirmation waits for an answer |
-| full_bypass posture (`OPENRIG_YOLO=1` or a full-bypass permission policy) | `--yes-always`, plus `BROWSER=true` in the launch env. `--yes-always` also accepts aider's "Open documentation url?" offers, and `BROWSER=true` makes those a no-op so a seat never opens a browser. Withheld when the seat declares no `model:`, or an `openrouter/` model while `OPENROUTER_API_KEY` is not in the launch env: then aider offers an OpenRouter sign-in that `--yes-always` would accept unattended (see "OpenRouter onboarding"). |
+| full_bypass posture (`OPENRIG_YOLO=1` or a full-bypass permission policy) | `--yes-always`, plus `BROWSER=true` in the launch env. `--yes-always` also accepts aider's "Open documentation url?" offers, and `BROWSER=true` makes those a no-op so a seat never opens a browser. Never passed when the seat declares no `model:`; for an `openrouter/` model the pane's own shell adds it only when `OPENROUTER_API_KEY` is set in the pane env. Otherwise aider offers an OpenRouter sign-in that `--yes-always` would accept unattended (see "OpenRouter onboarding"). |
 | resume | `--restore-chat-history` with the persisted history file |
 | fork | refused: Aider has no fork primitive |
 
@@ -127,11 +127,20 @@ With no `--model` and no provider key, aider offers `Login to OpenRouter or
 create a free account?`; accepting runs an OAuth sign-in (a local callback
 server, then a key saved to `~/.aider/oauth-keys.env`). It makes the same offer
 for an `openrouter/` model when `OPENROUTER_API_KEY` is missing. Aider has no
-flag or setting that disables this. So under full_bypass OpenRig withholds
-`--yes-always` in exactly those cases (the permission observation is then
-`unknown`, reason `yes_always_withheld_onboarding`), and the offer waits in the
-pane as a `login_required` gate for the operator. Declare `model:` and the
-provider key in the seat env to get `--yes-always`.
+flag or setting that disables this, so under full_bypass:
+
+- With no `model:`, OpenRig never passes `--yes-always` (the permission
+  observation is `unknown`, reason `yes_always_withheld_onboarding`).
+- With an `openrouter/` model, the key can come from the pane's shell (for
+  example its rc files), which the daemon cannot see. The launch runs through
+  `sh -c`, and the pane's shell adds `--yes-always` only when its own
+  `OPENROUTER_API_KEY` is non-empty (the observation is `unknown`, reason
+  `yes_always_decided_in_pane`).
+- With any other model, `--yes-always` is passed as usual.
+
+When the offer does appear, it waits in the pane as a `login_required` gate for
+the operator. Declare `model:` and the provider key in the seat env to get
+`--yes-always`.
 
 ## Guidance and skills
 

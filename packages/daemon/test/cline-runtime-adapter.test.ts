@@ -20,7 +20,8 @@ import { CLINE_READY_PATTERNS, CLINE_GATE_PATTERNS, CLINE_ERROR_PATTERNS } from 
 import { ATTENTION_REQUIRED_READINESS_CODES } from "../src/domain/runtime-adapter.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
-import { CLINE_DESCRIPTOR, CLINE_REGISTRATION } from "../src/adapters/cli/cline/index.js";
+import { CLINE_DESCRIPTOR, CLINE_REGISTRATION, createClineSpec } from "../src/adapters/cli/cline/index.js";
+import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import {
   HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs as harnessMemFs, mockTmux,
@@ -358,6 +359,30 @@ describe("cline adapter", () => {
 
   it("capture is not session-scoped, so the sibling-seat guard applies", () => {
     expect(CLINE_DESCRIPTOR.captureIsSessionScoped ?? false).toBe(false);
+  });
+
+  it("verify enforces the version floor with the install hint", async () => {
+    const verify = CLINE_DESCRIPTOR.verify!;
+    const exec = async () => "";
+    expect(await verify({ exec, version: "3.0.65" })).toBeNull();
+    expect(await verify({ exec, version: "3.0.54" })).toMatch(/older than 3\.0\.65.*npm install -g cline/);
+    expect(await verify({ exec, version: null })).toMatch(/could not read the cline version/);
+  });
+
+  it("refuses to launch a cline older than the floor, before typing anything", async () => {
+    const tmuxPane = mockTmux([atShell(), { command: "node", content: pane("home-ready.txt") }]);
+    const seatFs = harnessMemFs();
+    const deps = harnessDeps({ tmux: tmuxPane.tmux, fsOps: seatFs });
+    const spec = createClineSpec({}, seatFs, { readVersion: async () => "3.0.54\n", allocatePort: async (p) => p });
+    const result = await new TuiCliRuntimeAdapter(spec, deps).launchHarness(harnessBinding(), { name: "x" });
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/older than 3\.0\.65/) });
+    expect(tmuxPane.typed).toEqual([]);
+    const freshPane = mockTmux([atShell(), { command: "node", content: pane("home-ready.txt") }]);
+    const okDeps = harnessDeps({ tmux: freshPane.tmux, fsOps: seatFs });
+    const ok = await new TuiCliRuntimeAdapter(createClineSpec({}, seatFs, { readVersion: async () => "3.0.65\n", allocatePort: async (p) => p }), okDeps)
+      .launchHarness(harnessBinding(), { name: "x" });
+    expect(ok.ok).toBe(true);
+    expect(freshPane.typed).toHaveLength(1);
   });
 
   it("reaps the pane process tree on stop (the seat's own hub lives there)", () => {

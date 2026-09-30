@@ -5,9 +5,12 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  clineSeatHubPaths, clineSeatHubEnv, preferredClineHubPort, prepareClineSeatHub, readClineSeatHub,
-  type ClineHubFs,
+  clineSeatHubPaths, clineSeatHubEnv, clineSeatVersionFile, preferredClineHubPort, prepareClineSeatHub, readClineSeatHub,
+  recordClineVersion, type ClineHubFs,
 } from "../src/adapters/cli/cline/hub.js";
+import {
+  CLINE_MIN_VERSION, clineVersionFloorError, compareClineVersions, parseClineVersion,
+} from "../src/adapters/cli/cline/launch.js";
 
 const SEAT = "/openrig-home/state/cline/dev-impl@my-rig";
 const PATHS = clineSeatHubPaths(SEAT);
@@ -71,6 +74,13 @@ describe("prepareClineSeatHub", () => {
     }
   });
 
+  it("clears a previous launch's port first, so a failed allocation cannot reuse it", async () => {
+    const fs = memFs({ [PATHS.portFile]: "47811\n" });
+    await expect(prepareClineSeatHub(fs, SEAT, { allocatePort: async () => { throw new Error("no port"); } })).rejects.toThrow(/no port/);
+    expect(fs.files[PATHS.portFile]).toBe("");
+    expect(() => clineSeatHubEnv(fs, SEAT)).toThrow(/own cline hub/);
+  });
+
   it("rejects an invalid allocated port", async () => {
     await expect(prepareClineSeatHub(memFs(), SEAT, { allocatePort: async () => 0 })).rejects.toThrow(/invalid cline hub port/);
   });
@@ -93,5 +103,41 @@ describe("clineSeatHubEnv", () => {
   it("refuses (never falls back to the shared hub) when no valid port is recorded", () => {
     expect(() => clineSeatHubEnv(memFs(), SEAT)).toThrow(/own cline hub/);
     expect(() => clineSeatHubEnv(memFs({ [PATHS.portFile]: "not-a-port" }), SEAT)).toThrow(/own cline hub/);
+  });
+});
+
+describe("cline version floor", () => {
+  it("parses and compares cline versions", () => {
+    expect(parseClineVersion("3.0.65\n")).toBe("3.0.65");
+    expect(parseClineVersion("cline 3.1.0-nightly.1790684617")).toBe("3.1.0-nightly.1790684617");
+    expect(parseClineVersion("no version")).toBeNull();
+    expect(compareClineVersions("3.0.65", "3.0.65")).toBe(0);
+    expect(compareClineVersions("3.0.66", "3.0.65")).toBeGreaterThan(0);
+    expect(compareClineVersions("3.1.0", "3.0.65")).toBeGreaterThan(0);
+    expect(compareClineVersions("3.0.54", "3.0.65")).toBeLessThan(0);
+    expect(compareClineVersions("3.0.65-nightly.1", "3.0.65")).toBeLessThan(0);
+  });
+
+  it("the floor is the version the per-seat hub was verified on", () => {
+    expect(CLINE_MIN_VERSION).toBe("3.0.65");
+    expect(clineVersionFloorError("3.0.65")).toBeNull();
+    expect(clineVersionFloorError("3.0.66")).toBeNull();
+    expect(clineVersionFloorError("3.0.54")).toMatch(/older than 3\.0\.65.*npm install -g cline/);
+  });
+
+  it("records the installed version for the launch check (unknown when it cannot be read)", async () => {
+    const fs = memFs();
+    expect(await recordClineVersion(fs, SEAT, { readVersion: async () => "3.0.66\n" })).toBe("3.0.66");
+    expect(fs.files[clineSeatVersionFile(SEAT)]).toBe("3.0.66\n");
+    expect(await recordClineVersion(fs, SEAT, { readVersion: async () => null })).toBeNull();
+    expect(fs.files[clineSeatVersionFile(SEAT)]).toBe("unknown\n");
+    expect(await recordClineVersion(fs, SEAT, { readVersion: async () => { throw new Error("boom"); } })).toBeNull();
+  });
+
+  it("the launch env refuses a cline known to be below the floor, and allows an unknown version", () => {
+    const withPort = (version: string) => memFs({ [PATHS.portFile]: "47811\n", [clineSeatVersionFile(SEAT)]: `${version}\n` });
+    expect(() => clineSeatHubEnv(withPort("3.0.54"), SEAT)).toThrow(/older than 3\.0\.65/);
+    expect(clineSeatHubEnv(withPort("3.0.65"), SEAT)).toMatchObject({ CLINE_HUB_PORT: "47811" });
+    expect(clineSeatHubEnv(withPort("unknown"), SEAT)).toMatchObject({ CLINE_HUB_PORT: "47811" });
   });
 });

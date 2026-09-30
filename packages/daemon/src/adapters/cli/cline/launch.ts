@@ -24,6 +24,38 @@ export const CLINE_RESUME_TYPE = "cline_session_id";
 export const CLINE_GUIDANCE_FILE = "AGENTS.md";
 export const CLINE_INSTALL_HINT = "npm install -g cline (then `cline auth` to configure a provider)";
 
+/** The oldest cline OpenRig launches. Each seat runs its own hub via
+ *  CLINE_HUB_DISCOVERY_PATH and CLINE_HUB_PORT, and stop reaps the seat's
+ *  process tree; on a cline that ignored those variables the seat's TUI would
+ *  parent the owner's shared hub and a stop would reap it. The variable names
+ *  are present in the cline 3.0.0, 3.0.30, and 3.0.54 binaries, but the per-seat
+ *  hub behavior was verified live on 3.0.65, so that is the floor. */
+export const CLINE_MIN_VERSION = "3.0.65";
+
+/** Compare dotted numeric versions ("3.0.65"); pre-release suffixes count as
+ *  the release they precede. Returns <0, 0, or >0. */
+export function compareClineVersions(a: string, b: string): number {
+  const parts = (v: string) => v.replace(/^v/, "").split("-")[0]!.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  const pre = (v: string) => (v.includes("-") ? -1 : 0);
+  return pre(a) - pre(b);
+}
+
+/** The first dotted version in `cline --version` output ("3.0.65"). */
+export function parseClineVersion(output: string): string | null {
+  return output.match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\b/)?.[1] ?? null;
+}
+
+/** An error when `version` is below the floor, else null. */
+export function clineVersionFloorError(version: string): string | null {
+  if (compareClineVersions(version, CLINE_MIN_VERSION) >= 0) return null;
+  return `cline ${version} is older than ${CLINE_MIN_VERSION}, the oldest version whose per-seat hub OpenRig has verified; upgrade: ${CLINE_INSTALL_HINT}`;
+}
+
 /** Additive env for every managed launch (fresh and resume).
  *  - CLINE_DISABLE_CLINE_PASS_NOTICE=1 suppresses the one-shot launch notices
  *    ("Try ClinePass", "Introducing Cline Desktop"). They open as a modal that

@@ -17,8 +17,10 @@
 // There is no flag or env to run cline without a hub.
 
 import net from "node:net";
+import { execFile } from "node:child_process";
 import nodePath from "node:path";
 import { createHash } from "node:crypto";
+import { clineVersionFloorError, parseClineVersion } from "./launch.js";
 
 export const CLINE_SEAT_HUB_DIR = "cline-hub";
 
@@ -33,6 +35,20 @@ export interface ClineSeatHubPaths {
 export function clineSeatHubPaths(seatStateDir: string): ClineSeatHubPaths {
   const dir = nodePath.join(seatStateDir, CLINE_SEAT_HUB_DIR);
   return { dir, discoveryFile: nodePath.join(dir, "discovery.json"), portFile: nodePath.join(dir, "port") };
+}
+
+/** Where prepareLaunch records the `cline --version` it read (or "unknown"). */
+export function clineSeatVersionFile(seatStateDir: string): string {
+  return nodePath.join(clineSeatHubPaths(seatStateDir).dir, "cline-version");
+}
+
+/** `cline --version` from the daemon's PATH; null when it cannot be read. */
+export function readInstalledClineVersion(): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile("cline", ["--version"], { timeout: 10_000 }, (err, stdout) => {
+      resolve(err ? null : stdout.toString());
+    });
+  });
 }
 
 export interface ClineHubFs {
@@ -112,6 +128,8 @@ export async function allocateLoopbackPort(preferred?: number): Promise<number> 
 }
 
 export interface ClineSeatHubDeps {
+  /** Raw `cline --version` output, or null when it cannot be read. */
+  readVersion?: () => Promise<string | null>;
   isAlive?: (pid: number) => boolean;
   /** Allocate a free port, preferring `preferred` when it is free. */
   allocatePort?: (preferred: number) => Promise<number>;
@@ -125,14 +143,31 @@ export interface ClineSeatHubDeps {
  */
 export async function prepareClineSeatHub(fs: ClineHubFs, seatStateDir: string, deps: ClineSeatHubDeps = {}): Promise<number> {
   const paths = clineSeatHubPaths(seatStateDir);
+  // Clear a previous launch's port first: if choosing a port fails below, the
+  // launch must not reuse a stale one (clineSeatHubEnv then refuses).
+  fs.mkdirp(paths.dir);
+  fs.writeFile(paths.portFile, "");
   const running = readClineSeatHub(fs, seatStateDir);
   const port = running && (deps.isAlive ?? processAlive)(running.pid)
     ? running.port
     : await (deps.allocatePort ?? allocateLoopbackPort)(preferredClineHubPort(seatStateDir));
   if (!validPort(port)) throw new Error(`invalid cline hub port ${String(port)}`);
-  fs.mkdirp(paths.dir);
   fs.writeFile(paths.portFile, `${port}\n`);
   return port;
+}
+
+/** Record the installed cline version for the launch-time floor check. */
+export async function recordClineVersion(fs: ClineHubFs, seatStateDir: string, deps: ClineSeatHubDeps = {}): Promise<string | null> {
+  let raw: string | null = null;
+  try {
+    raw = await (deps.readVersion ?? readInstalledClineVersion)();
+  } catch {
+    raw = null;
+  }
+  const version = raw ? parseClineVersion(raw) : null;
+  fs.mkdirp(clineSeatHubPaths(seatStateDir).dir);
+  fs.writeFile(clineSeatVersionFile(seatStateDir), `${version ?? "unknown"}\n`);
+  return version;
 }
 
 /**
@@ -142,6 +177,18 @@ export async function prepareClineSeatHub(fs: ClineHubFs, seatStateDir: string, 
  */
 export function clineSeatHubEnv(fs: ClineHubFs, seatStateDir: string): Record<string, string> {
   const paths = clineSeatHubPaths(seatStateDir);
+  // Refuse a cline known to be older than the floor: it would ignore the seat
+  // hub variables and attach to (and, through the stop reap, parent) the
+  // owner's shared hub. An unknown version is left to preflight verification.
+  let version: string | null = null;
+  try {
+    const recorded = fs.exists(clineSeatVersionFile(seatStateDir)) ? fs.readFile(clineSeatVersionFile(seatStateDir)).trim() : "";
+    version = recorded && recorded !== "unknown" ? recorded : null;
+  } catch {
+    version = null;
+  }
+  const tooOld = version ? clineVersionFloorError(version) : null;
+  if (tooOld) throw new Error(tooOld);
   let port: number | null = null;
   try {
     port = fs.exists(paths.portFile) ? validPort(fs.readFile(paths.portFile)) : null;

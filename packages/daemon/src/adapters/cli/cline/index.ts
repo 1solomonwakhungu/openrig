@@ -10,11 +10,11 @@ import type { AppliedLaunchObservation } from "../../../domain/permission-drift.
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import {
   CLINE_BINARY, CLINE_GUIDANCE_FILE, CLINE_INSTALL_HINT, CLINE_LAUNCH_ENV, CLINE_PERMISSION_VALUES, CLINE_RESUME_TYPE, CLINE_RUNTIME_ID,
-  buildClineArgv, validateClineSessionId,
+  buildClineArgv, clineVersionFloorError, validateClineSessionId,
 } from "./launch.js";
 import { checkClineResumeTarget, clineLaunchEnv, clineSessionsDir, findClineSessionForLaunch } from "./sessions.js";
 import { CLINE_ERROR_PATTERNS, CLINE_GATE_PATTERNS, CLINE_READY_PATTERNS } from "./patterns.js";
-import { clineSeatHubEnv, prepareClineSeatHub, type ClineHubFs, type ClineSeatHubDeps } from "./hub.js";
+import { clineSeatHubEnv, prepareClineSeatHub, recordClineVersion, type ClineHubFs, type ClineSeatHubDeps } from "./hub.js";
 
 export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   id: CLINE_RUNTIME_ID,
@@ -22,6 +22,10 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   kind: "agent",
   binary: CLINE_BINARY,
   installHint: CLINE_INSTALL_HINT,
+  // The per-seat hub and the stop reap need cline >= CLINE_MIN_VERSION.
+  verify: async ({ version }) => (version
+    ? clineVersionFloorError(version)
+    : `could not read the cline version; OpenRig needs cline >= the verified floor (install: ${CLINE_INSTALL_HINT})`),
   resumeType: CLINE_RESUME_TYPE,
   validateResumeToken: validateClineSessionId,
   // Sessions appear only after the first prompt, so this usually finds nothing
@@ -70,6 +74,7 @@ export function createClineSpec(
       buildClineArgv({ model: binding.model, posture, resumeToken, forkSource }),
     // Every launch (fresh and resume) gets the seat's own hub.
     prepareLaunch: async ({ seatStateDir, fs }) => {
+      await recordClineVersion(fs, seatStateDir, hubDeps);
       await prepareClineSeatHub(fs, seatStateDir, hubDeps);
     },
     env: { set: ({ seatStateDir }) => ({ ...CLINE_LAUNCH_ENV, ...clineSeatHubEnv(fsOps, seatStateDir) }) },

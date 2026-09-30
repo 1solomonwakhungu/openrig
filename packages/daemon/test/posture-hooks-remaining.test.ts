@@ -62,7 +62,7 @@ const CASES: Case[] = [
     emits: { floor: ["--auto-approve", "false"], full_bypass: ["--auto-approve", "true"] },
     tokensFor: (value) => { const [flag, arg] = value.split("="); return [`--${flag}`, arg!]; },
   },
-  { runtime: "aider", spec: createAiderSpec("/openrig-home/state", () => "id", {}), emits: { floor: null, full_bypass: ["--yes-always"] }, tokensFor: flagOnly, model: "sonnet" },
+  { runtime: "aider", spec: createAiderSpec("/openrig-home/state", () => "id"), emits: { floor: null, full_bypass: ["--yes-always"] }, tokensFor: flagOnly, model: "sonnet" },
   {
     runtime: "grok", spec: GROK_SPEC,
     emits: { floor: ["--permission-mode", "acceptEdits"], full_bypass: ["--always-approve"] },
