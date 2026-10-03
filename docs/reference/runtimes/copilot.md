@@ -127,6 +127,10 @@ flag).
 
 Usage: not reported. Copilot CLI ships as a native binary and its on-disk usage format is not verified, so the runtime declares no `readUsage` (CTX and COST stay unknown).
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. No usage is read, so seats never alert.
+
 ## Known limits
 
 - The npm install runs under `node`, so the pane command alone does not

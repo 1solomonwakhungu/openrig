@@ -88,6 +88,10 @@ The seat is stopped by killing its tmux session, never by keystrokes. OpenRig th
 
 Usage (`rig ps`): token, cache, reasoning, and cost totals from the seat database's `session` row, and the context in use from the latest assistant message; no context window is recorded, so CTX shows no percentage.
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. opencode records no context window, so seats never alert. opencode compacts a session itself when it nears the model's limit, unless `compaction.auto` is false (`session/overflow.ts`).
+
 ## Known limits
 
 - OpenCode console accounts (the hidden `opencode console login` command, used for organization-managed config) are stored in the session database, so a seat with its own database does not see them. OpenCode has no separate setting for the account store. Provider sign-in (`opencode auth login`, env keys) is unaffected.

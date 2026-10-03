@@ -128,6 +128,10 @@ The `gemini` launcher is a small parent process that ignores SIGHUP and SIGTERM 
 
 Usage (`rig ps`): per-reply `tokens` from the session file (input, output, cached, thoughts) and the latest reply's context; gemini records no cost and no context window.
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. gemini records no context window, so gemini seats show the context in use but no percentage and never alert. gemini compresses its own chat history at a configurable share of the window (`contextPercentageThreshold`).
+
 ## Known limits
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../gemini`), never from the process name alone.

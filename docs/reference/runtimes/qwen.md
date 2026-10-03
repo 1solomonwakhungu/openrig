@@ -107,6 +107,10 @@ Qwen Code checks npm on launch and, unless `general.enableAutoUpdate` is `false`
 
 Usage (`rig ps`): `usageMetadata` from the conversation file, plus `contextWindowSize`, so CTX shows a percentage; qwen records no cost.
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. qwen reports its context window (`contextWindowSize`), so qwen seats get context-pressure alerts. qwen also compacts on its own (`chatCompression` settings).
+
 ## Known limits
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../qwen`), never from the process name alone.

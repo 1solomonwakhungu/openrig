@@ -161,6 +161,10 @@ the operator. Declare `model:` and the provider key in the seat env to get
 
 Usage (`rig ps`): the `Tokens: ... Cost: ...` lines aider writes to the chat history. Token counts are rounded by aider (`2.1k`) and marked approximate; the cost is what aider printed (`cli_reported`), so COST shows it unmarked; the session cost restarts per aider process and is summed per segment.
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. aider prints no context window, so seats never alert. aider summarizes older chat history on its own (`ChatSummary`).
+
 ## Known limits
 
 - The pane's foreground process is the Python interpreter (`Python` on macOS).

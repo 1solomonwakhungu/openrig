@@ -480,6 +480,15 @@ it in the `COST` column. Every cost carries its provenance, `costSource`
 (`cli_reported` when the CLI computed it, `estimated` otherwise); the F1 runner
 drops a cost without one, and `~` in the column marks an estimated cost.
 
+Context alerts (feature 4). No new detector: the registry pass writes
+`context_usage` and `usage_samples` exactly as the claude/codex pass does, so
+the existing `context.pressure` health detector (`LiveContextHealthSource`,
+thresholds from `health.context_pressure.*`, default 95/99) covers registry
+seats too. It needs a percentage, so only a CLI that reports its context window
+can alert (qwen today). There is no auto-compaction for CLI seats: the claude
+compaction enforcer stays claude-only, and OpenRig never types into a live CLI;
+each runtime page names the CLI's own compaction where it has one.
+
 ## 7. Adding a runtime adapter
 
 1. Create `packages/daemon/src/adapters/cli/<id>/index.ts` exporting a
