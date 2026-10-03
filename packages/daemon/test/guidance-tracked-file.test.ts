@@ -1,5 +1,5 @@
 // guidance.tracked_file: what managed guidance does when a runtime's guidance
-// file is tracked by git in the seat cwd (upstream roadmap #64 is the Codex
+// file is tracked by git in the seat cwd (an upstream roadmap item is the Codex
 // form of this). managed_block (default) merges as before; skip leaves a
 // tracked file alone; redirect writes to an untracked alternate the CLI also
 // loads (Claude Code: CLAUDE.local.md), and skips when there is none.

@@ -595,7 +595,7 @@ function validateMember(member: Record<string, unknown>, index: number, podPrefi
     }
   }
 
-  // readiness_timeout_ms: bounded integer (upstream roadmap #182).
+  // readiness_timeout_ms: bounded integer (an upstream roadmap item).
   if (member["readiness_timeout_ms"] !== undefined) {
     const value = member["readiness_timeout_ms"];
     if (typeof value !== "number" || !Number.isInteger(value)

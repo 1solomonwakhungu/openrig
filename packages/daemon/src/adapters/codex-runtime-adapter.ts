@@ -765,7 +765,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     const quickSleepMs = 200;
     const extendedSleepMs = 500;
     // The extended boot-in-progress window is ~12s by default; the seat's
-    // readiness window (rig spec readiness_timeout_ms, upstream #182: "Codex
+    // readiness window (rig spec readiness_timeout_ms, an upstream roadmap item: "Codex
     // seats time out under load") sizes it when set. Real gates still classify
     // within the quick window either way.
     const extendedAttempts = opts?.readinessTimeoutMs

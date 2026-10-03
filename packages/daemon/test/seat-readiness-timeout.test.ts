@@ -1,5 +1,5 @@
 // Per-seat launch readiness window (rig spec member `readiness_timeout_ms`,
-// upstream roadmap #182: "Codex seats time out under load"). The value is
+// an upstream roadmap item: "Codex seats time out under load"). The value is
 // validated and bounded, persisted on the node, and replaces each launch
 // wait's built-in window: the startup readiness poll, the successor launcher,
 // the TUI CLI base, and the built-in adapters' own launch/resume checks.

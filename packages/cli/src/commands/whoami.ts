@@ -40,6 +40,8 @@ interface WhoamiIdentity {
   memberId: string;
   sessionName: string | null;
   runtime: string;
+  /** Set when the seat runs on a fallback runtime (`runtime`) instead of this one. */
+  declaredRuntime?: string;
 }
 
 interface WhoamiPeer {
@@ -92,6 +94,9 @@ function projectCompactWhoami(data: Record<string, unknown>): Record<string, unk
       memberId: id["memberId"],
       sessionName: id["sessionName"],
       runtime: id["runtime"],
+      // Runtime fallback: kept only when the seat runs on a fallback runtime.
+      ...(typeof id["declaredRuntime"] === "string" && id["declaredRuntime"] !== id["runtime"]
+        ? { declaredRuntime: id["declaredRuntime"] } : {}),
     },
     peers: peers.map((p) => {
       const peer = (p ?? {}) as Record<string, unknown>;
@@ -327,7 +332,7 @@ workspace block). The compact form omits the Context line; use 'rig context' or
       console.log(`Logical ID: ${id.logicalId}`);
       console.log(`Pod:        ${(id.podNamespace ?? id.podId) ?? "—"} / ${id.memberId}`);
       console.log(`Session:    ${id.sessionName ?? "—"}`);
-      console.log(`Runtime:    ${id.runtime}`);
+      console.log(`Runtime:    ${id.runtime}${id.declaredRuntime && id.declaredRuntime !== id.runtime ? ` (fallback; declared ${id.declaredRuntime})` : ""}`);
       console.log(`Transport:  ${id.attachmentType === "external_cli" ? "external_cli (outbound only)" : id.attachmentType}`);
       console.log(`Resolved:   via ${data.resolvedBy.replace(/_/g, " ")}`);
       for (const answer of data.trustAnswers ?? []) {

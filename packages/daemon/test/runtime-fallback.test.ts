@@ -407,10 +407,10 @@ describe("fallback attempt residue", () => {
   const block = (id: string) => `<!-- BEGIN OpenRig MANAGED BLOCK: ${id} -->\n${id} body\n<!-- END OpenRig MANAGED BLOCK: ${id} -->`;
 
   it("targets the runtime's guidance file and skills dir inside the cwd", () => {
-    expect(attemptResidueTargets({ runtime: "claude-code", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "CLAUDE.md")], skillsDir: nodePath.join(cwd, ".claude", "skills") });
+    expect(attemptResidueTargets({ runtime: "claude-code", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "CLAUDE.md")], skillsDir: nodePath.join(cwd, ".claude", "skills"), workspace: cwd });
     expect(attemptResidueTargets({ runtime: "claude-code", cwd, claudeManagedBlockFile: "CLAUDE.local.md" }).guidanceFiles).toEqual([nodePath.join(cwd, "CLAUDE.local.md")]);
-    expect(attemptResidueTargets({ runtime: "codex", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "AGENTS.md")], skillsDir: nodePath.join(cwd, ".agents", "skills") });
-    expect(attemptResidueTargets({ runtime: "pi", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "AGENTS.md")], skillsDir: null });
+    expect(attemptResidueTargets({ runtime: "codex", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "AGENTS.md")], skillsDir: nodePath.join(cwd, ".agents", "skills"), workspace: cwd });
+    expect(attemptResidueTargets({ runtime: "pi", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "AGENTS.md")], skillsDir: null, workspace: cwd });
   });
 
   it("deletes a guidance file and skills dir the attempt created", () => {
@@ -420,6 +420,33 @@ describe("fallback attempt residue", () => {
     expect(removeAttemptResidue(snapshot)).toEqual({ blocks: ["role"], skills: ["s1"] });
     expect(fs.existsSync(nodePath.join(cwd, "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(nodePath.join(cwd, ".agents", "skills"))).toBe(false);
+  });
+
+  it("removes directories the attempt created once empty (kiro: .kiro/ around .kiro/skills)", () => {
+    const snapshot = snapshotAttemptResidue(attemptResidueTargets({ runtime: "kiro", cwd }));
+    fs.mkdirSync(nodePath.join(cwd, ".kiro", "skills", "s1"), { recursive: true });
+    fs.writeFileSync(nodePath.join(cwd, ".kiro", "skills", "s1", "SKILL.md"), "skill");
+    expect(removeAttemptResidue(snapshot).skills).toEqual(["s1"]);
+    expect(fs.existsSync(nodePath.join(cwd, ".kiro"))).toBe(false);
+    expect(fs.existsSync(cwd)).toBe(true);
+  });
+
+  it("never removes a directory that existed before the attempt, or one that is not empty", () => {
+    // Pre-existing (and empty) .kiro/ stays.
+    fs.mkdirSync(nodePath.join(cwd, ".kiro"));
+    const before = snapshotAttemptResidue(attemptResidueTargets({ runtime: "kiro", cwd }));
+    fs.mkdirSync(nodePath.join(cwd, ".kiro", "skills", "s1"), { recursive: true });
+    removeAttemptResidue(before);
+    expect(fs.existsSync(nodePath.join(cwd, ".kiro"))).toBe(true);
+    expect(fs.existsSync(nodePath.join(cwd, ".kiro", "skills"))).toBe(false);
+    fs.rmSync(nodePath.join(cwd, ".kiro"), { recursive: true });
+    // A created directory that still holds something else stays, with that content.
+    const created = snapshotAttemptResidue(attemptResidueTargets({ runtime: "kiro", cwd }));
+    fs.mkdirSync(nodePath.join(cwd, ".kiro", "skills", "s1"), { recursive: true });
+    fs.writeFileSync(nodePath.join(cwd, ".kiro", "settings.json"), "{}");
+    removeAttemptResidue(created);
+    expect(fs.existsSync(nodePath.join(cwd, ".kiro", "settings.json"))).toBe(true);
+    expect(fs.existsSync(nodePath.join(cwd, ".kiro", "skills"))).toBe(false);
   });
 
   it("keeps a pre-existing file even when only new blocks are removed, and touches nothing when nothing is new", () => {
