@@ -1225,7 +1225,7 @@ export class RestoreOrchestrator {
         await this.rollbackToZeroSession(node.id, sessionName, launchResult?.session.id, priorState);
         return { nodeId: node.id, logicalId: node.logicalId, status: "awaiting-decision", error: `Original session unresumable: resume requested but no token available. No session is running. Re-run with --fresh ${node.logicalId} for a deliberate fresh-primed seat, or restore the original session manually.` };
       } else {
-        const resumeOutcome = await this.attemptResume(node.id, sessionName, resumeType, resumeToken, node.cwd ?? "/", node.codexConfigProfile, node.model, this.resolveRestorePosture(node.id, rigId));
+        const resumeOutcome = await this.attemptResume(node.id, sessionName, resumeType, resumeToken, node.cwd ?? "/", node.codexConfigProfile, node.model, this.resolveRestorePosture(node.id, rigId), node.readinessTimeoutMs);
         if (resumeOutcome.kind === "resumed") {
           baseStatus = "resumed";
         } else if (resumeOutcome.kind === "attention_required") {
@@ -1380,6 +1380,7 @@ export class RestoreOrchestrator {
             ...launchResult.binding,
             cwd: node.cwd ?? ".",
             codexConfigProfile: node.codexConfigProfile ?? undefined,
+            ...(node.readinessTimeoutMs ? { readinessTimeoutMs: node.readinessTimeoutMs } : {}),
             // OPR.0.4.8.3 Seam B: the pod-aware restore path binds the restored posture too
             // (both restore paths consume persisted provenance — preflight surface 3).
             launchPosture: this.resolveRestorePosture(node.id, rigId),
@@ -1687,6 +1688,8 @@ export class RestoreOrchestrator {
     // OPR.0.4.8.3 Seam B: the seat's restored launch posture (persisted provenance,
     // custom policies re-validated when readable). Absent = env decision.
     resolvedPosture?: "floor" | "full_bypass",
+    // The seat's readiness window (rig spec readiness_timeout_ms); absent = defaults.
+    readinessTimeoutMs?: number | null,
   ): Promise<
     | { kind: "resumed" }
     | { kind: "retry_fresh" }
@@ -1713,6 +1716,7 @@ export class RestoreOrchestrator {
     if (adapter) {
       const result = await adapter.resume({
         nodeId, sessionName, resumeType, resumeToken, cwd, codexConfigProfile, model, resolvedPosture, permissionMode,
+        ...(readinessTimeoutMs ? { readinessTimeoutMs } : {}),
       });
       if (result.ok) {
         if (result.appliedLaunch && launchGeneration) this.appliedLaunchStore.recordGeneration(launchGeneration, result.appliedLaunch);
@@ -1933,19 +1937,19 @@ function builtinResumeAdapters(
     {
       runtime: "claude-code",
       canResume: (type, token) => claude.canResume(type, token),
-      resume: (r) => claude.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.resolvedPosture, r.model, r.permissionMode, r.nodeId),
+      resume: (r) => claude.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.resolvedPosture, r.model, r.permissionMode, r.nodeId, r.readinessTimeoutMs),
     },
     {
       runtime: "codex",
       canResume: (type, token) => codex.canResume(type, token),
-      resume: (r) => codex.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.codexConfigProfile, r.resolvedPosture, r.model),
+      resume: (r) => codex.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.codexConfigProfile, r.resolvedPosture, r.model, r.readinessTimeoutMs),
     },
   ];
   if (pi) {
     adapters.push({
       runtime: "pi",
       canResume: (type, token) => pi.canResume(type, token),
-      resume: (r) => pi.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.model, r.resolvedPosture),
+      resume: (r) => pi.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.model, r.resolvedPosture, r.readinessTimeoutMs),
     });
   }
   return adapters;

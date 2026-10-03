@@ -277,6 +277,7 @@ directory's `CLAUDE.md`, including blocks written by other rigs.
 | `label` | string | no | — | Human-readable member name. Shown in UI when present. |
 | `model` | string | no | — | Model override. Runtime-specific (e.g., `claude-opus-4-6` for Claude Code). |
 | `restore_policy` | string | no | `resume_if_possible` | Restore behavior. One of: `resume_if_possible`, `relaunch_fresh`, `checkpoint_only`. |
+| `readiness_timeout_ms` | integer | no | built-in defaults | How long, in milliseconds, each launch wait for this seat may take before it gives up: the startup readiness check (30000 by default) and the runtime's own launch or resume check. Applies to fresh launches, restores, relaunches, and handover successors. Integer from 5000 to 600000. Raise it for seats that start slowly under load (for example Codex seats loading plugins and MCP servers). A timeout reports the configured value and leaves the seat at `failed` with the last reason. |
 | `startup` | StartupBlock | no | — | Member-level startup files and actions. Applied only to this member. |
 
 ### Terminal Nodes

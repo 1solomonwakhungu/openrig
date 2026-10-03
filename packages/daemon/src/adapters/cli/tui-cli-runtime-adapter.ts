@@ -548,6 +548,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       cwd: request.cwd,
       ...(request.model ? { model: request.model } : {}),
       ...(request.resolvedPosture ? { launchPosture: request.resolvedPosture } : {}),
+      ...(request.readinessTimeoutMs ? { readinessTimeoutMs: request.readinessTimeoutMs } : {}),
     };
     const result = await this.launchHarness(binding, { name: request.sessionName, resumeToken: request.resumeToken! });
     if (result.ok) return { ok: true, ...(result.appliedLaunch ? { appliedLaunch: result.appliedLaunch } : {}) };
@@ -650,7 +651,9 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     window: LaunchWindow,
     launch: { binding: NodeBinding; seatStateDir: string; record: LaunchRecord },
   ): Promise<{ ok: true } | LaunchFailure> {
-    const timeoutMs = this.spec.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT_MS;
+    // The seat's readiness window (rig spec readiness_timeout_ms) wins over the
+    // runtime's own launch timeout.
+    const timeoutMs = launch.binding.readinessTimeoutMs ?? this.spec.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT_MS;
     const pollMs = this.spec.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     const attempts = Math.max(1, Math.ceil(timeoutMs / pollMs));
     let sawRuntime = false;

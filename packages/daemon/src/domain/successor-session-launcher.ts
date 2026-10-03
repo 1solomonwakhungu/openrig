@@ -54,6 +54,8 @@ export interface SuccessorNode {
    *  Same continuity rationale as model — populated by the caller from node provenance; absent → the
    *  adapter emits no -p flag (unchanged for legacy/unpinned seats). */
   codexConfigProfile?: string | null;
+  /** The seat's launch readiness window (rig spec readiness_timeout_ms). */
+  readinessTimeoutMs?: number | null;
 }
 
 export type SuccessorLaunchResult =
@@ -323,6 +325,8 @@ export class SuccessorSessionLauncher {
       model: node.model ?? undefined,
       // 0.5.2-07 A4-profile: the successor reads the seat's SPEC-pinned codex config profile (adapter emits -p).
       codexConfigProfile: node.codexConfigProfile ?? undefined,
+      // The successor launches under the seat's readiness window too.
+      ...(node.readinessTimeoutMs ? { readinessTimeoutMs: node.readinessTimeoutMs } : {}),
     };
 
     let launch: Awaited<ReturnType<RuntimeAdapter["launchHarness"]>>;
@@ -388,7 +392,7 @@ export class SuccessorSessionLauncher {
       if (isAttentionRequiredReadinessCode(result.code)) return result;
 
       const elapsed = Date.now() - startTime;
-      if (elapsed + delay > this.readinessTimeoutMs) {
+      if (elapsed + delay > (binding.readinessTimeoutMs ?? this.readinessTimeoutMs)) {
         const finalResult = await adapter.checkReady(binding);
         if (finalResult.ready) return finalResult;
         return { ready: false, reason: result.reason ?? "readiness timeout" };

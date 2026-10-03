@@ -421,7 +421,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     if (updatePrompt.failure) return updatePrompt.failure;
 
     if (opts.resumeToken) {
-      const verification = await this.verifyResumeLaunch(binding.tmuxSession, updatePrompt, { resumeToken: opts.resumeToken });
+      const verification = await this.verifyResumeLaunch(binding.tmuxSession, updatePrompt, { resumeToken: opts.resumeToken, readinessTimeoutMs: binding.readinessTimeoutMs });
       if (!verification.ok) return verification;
       return { ok: true, resumeToken: opts.resumeToken, resumeType: "codex_id", appliedLaunch };
     }
@@ -752,11 +752,17 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     return undefined;
   }
 
-  private async verifyResumeLaunch(tmuxSession: string, updatePrompt: UpdatePromptAttempt, opts?: { resumeToken?: string }): Promise<HarnessLaunchResult> {
+  private async verifyResumeLaunch(tmuxSession: string, updatePrompt: UpdatePromptAttempt, opts?: { resumeToken?: string; readinessTimeoutMs?: number }): Promise<HarnessLaunchResult> {
     const quickAttempts = 6;
-    const extendedAttempts = 24;
     const quickSleepMs = 200;
     const extendedSleepMs = 500;
+    // The extended boot-in-progress window is ~12s by default; the seat's
+    // readiness window (rig spec readiness_timeout_ms, upstream #182: "Codex
+    // seats time out under load") sizes it when set. Real gates still classify
+    // within the quick window either way.
+    const extendedAttempts = opts?.readinessTimeoutMs
+      ? Math.max(1, Math.ceil((opts.readinessTimeoutMs - quickAttempts * quickSleepMs) / extendedSleepMs))
+      : 24;
 
     // OPR.0.3.3.21 (FR-2): process-alive is NOT proof of a restored
     // conversation. verifyResumeLaunch must NOT return ok:true unless the probe

@@ -122,6 +122,8 @@ interface NodeOptions {
   runtime?: string;
   model?: string;
   codexConfigProfile?: string;
+  /** Per-seat launch readiness window in ms (rig spec readiness_timeout_ms). */
+  readinessTimeoutMs?: number;
   /** OPR.0.4.8.3 Seam B: per-seat permission_policy REF (builtin:<name> or spec-relative path). */
   permissionPolicy?: string;
   cwd?: string;
@@ -431,6 +433,12 @@ export class RigRepository {
         .run(JSON.stringify(opts.sessionSource), id);
     }
 
+    // Pre-090 fixture DBs have no column: the seat then uses the defaults.
+    if (opts?.readinessTimeoutMs !== undefined && this.hasNodeColumn("readiness_timeout_ms")) {
+      this.db.prepare("UPDATE nodes SET readiness_timeout_ms = ? WHERE id = ?")
+        .run(opts.readinessTimeoutMs, id);
+    }
+
     return this.rowToNode(
       this.db.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as NodeRow
     );
@@ -659,6 +667,7 @@ export class RigRepository {
       runtime: row.runtime,
       model: row.model,
       codexConfigProfile: row.codex_config_profile ?? null,
+      readinessTimeoutMs: row.readiness_timeout_ms ?? null,
       permissionPolicy: row.permission_policy ?? null,
       cwd: row.cwd,
       surfaceHint: row.surface_hint ?? null,
@@ -747,6 +756,7 @@ interface NodeRow {
   runtime: string | null;
   model: string | null;
   codex_config_profile?: string | null;
+  readiness_timeout_ms?: number | null;
   permission_policy?: string | null;
   cwd: string | null;
   surface_hint: string | null;

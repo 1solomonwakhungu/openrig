@@ -60,8 +60,16 @@ export interface StartupInput {
   continueFreshStartup?: boolean;
   /** Deliberate fresh replacement retains the seat’s durable destination obligations. */
   includeDurableObligations?: boolean;
-  /** Readiness timeout in ms (default 30000). */
+  /** Readiness timeout in ms (default 30000). A seat's binding.readinessTimeoutMs wins. */
   readinessTimeoutMs?: number;
+}
+
+/** The startup readiness window when neither the seat nor the caller sets one. */
+export const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
+
+function formatSeconds(ms: number): string {
+  const seconds = ms / 1000;
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
 }
 
 export type StartupResult =
@@ -321,15 +329,18 @@ export class StartupOrchestrator {
       });
     }
 
-    // 6. Wait for harness readiness (retry with exponential backoff, 30s timeout)
+    // 6. Wait for harness readiness (retry with exponential backoff). The seat's
+    // readiness window (rig spec readiness_timeout_ms) wins over the caller's
+    // default; 30s when neither is set.
+    const readinessTimeoutMs = input.binding.readinessTimeoutMs ?? input.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
     try {
-      const readiness = await this.waitForReady(input.adapter, input.binding, input.readinessTimeoutMs ?? 30_000);
+      const readiness = await this.waitForReady(input.adapter, input.binding, readinessTimeoutMs);
       if (!readiness.ready) {
         if (isAttentionRequiredReadinessCode(readiness.code)) {
           errors.push(`Startup requires attention: ${readiness.reason ?? "unknown"}`);
           return this.fail(input, "attention_required", errors, undefined, isFreshLaunch);
         }
-        errors.push(`Readiness timeout after 30s — harness did not become interactive: ${readiness.reason ?? "unknown"}`);
+        errors.push(`Readiness timeout after ${formatSeconds(readinessTimeoutMs)}: harness did not become interactive (raise readiness_timeout_ms on the member if it is slow to start): ${readiness.reason ?? "unknown"}`);
         return this.fail(input, "failed", errors);
       }
     } catch (err) {
@@ -476,7 +487,7 @@ export class StartupOrchestrator {
   private async waitForReady(
     adapter: RuntimeAdapter,
     binding: NodeBinding,
-    timeoutMs: number = 30_000,
+    timeoutMs: number = DEFAULT_READINESS_TIMEOUT_MS,
   ): Promise<import("./runtime-adapter.js").ReadinessResult> {
     const startTime = Date.now();
     let delay = 1000; // Start at 1s

@@ -9,6 +9,10 @@ export interface NodeBinding extends Binding {
   cwd: string;
   model?: string;
   codexConfigProfile?: string;
+  /** The seat's launch readiness window in ms (rig spec readiness_timeout_ms). When
+   *  set it replaces each launch wait's built-in window (the startup readiness poll
+   *  and the adapter's own launch/resume checks); absent = today's defaults. */
+  readinessTimeoutMs?: number;
   /** OPR.0.4.8.3 Seam B: the seat's RESOLVED launch posture from its permission_policy
    * attachment (member > rig precedence, resolved by the core resolver at materialize /
    * restore). Absent = no policy attached → the env-driven floor/YOLO decision stands.
@@ -183,6 +187,8 @@ export interface RuntimeResumeRequest {
   model?: string | null;
   resolvedPosture?: "floor" | "full_bypass";
   permissionMode?: string;
+  /** The seat's launch readiness window in ms (see NodeBinding.readinessTimeoutMs). */
+  readinessTimeoutMs?: number;
 }
 
 export type RuntimeResumeResult =

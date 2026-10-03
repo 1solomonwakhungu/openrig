@@ -56,6 +56,8 @@ export class PiResumeAdapter {
     model?: string | null,
     // OPR.0.4.8.3 Seam B: persisted resolved posture (resource-trust wording for Pi).
     resolvedPosture?: "floor" | "full_bypass",
+    /** The seat's readiness window (rig spec readiness_timeout_ms); replaces maxWaitMs. */
+    readinessTimeoutMs?: number,
   ): Promise<ResumeResult> {
     if (!this.canResume(resumeType, resumeToken)) {
       return { ok: false, code: "no_resume", message: "Pi resume not available" };
@@ -112,7 +114,7 @@ export class PiResumeAdapter {
       return { ok: false, code: "resume_failed", message: keyResult.message };
     }
 
-    const result = await this.verifyResume(tmuxSessionName, sessionFile, launchId);
+    const result = await this.verifyResume(tmuxSessionName, sessionFile, launchId, readinessTimeoutMs);
     return result.ok ? { ...result, appliedLaunch } : result;
   }
 
@@ -121,9 +123,9 @@ export class PiResumeAdapter {
   // and a prior resume of the SAME file would even match; guard fold,
   // code-review qitem-20260707011908). Resumed = THIS attempt's sidecar is
   // ready AND names exactly the requested session file.
-  private async verifyResume(tmuxSessionName: string, sessionFile: string, launchId: string): Promise<ResumeResult> {
+  private async verifyResume(tmuxSessionName: string, sessionFile: string, launchId: string, readinessTimeoutMs?: number): Promise<ResumeResult> {
     const pollMs = this.options.pollMs ?? 250;
-    const maxWaitMs = this.options.maxWaitMs ?? 15_000;
+    const maxWaitMs = readinessTimeoutMs ?? this.options.maxWaitMs ?? 15_000;
     const sleepFn = this.options.sleep ?? sleep;
     const attempts = Math.max(1, Math.floor(maxWaitMs / Math.max(pollMs, 1)) + 1);
 

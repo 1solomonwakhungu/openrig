@@ -51,6 +51,8 @@ export class ClaudeResumeAdapter {
     model?: string | null,
     selectedPermissionMode?: string,
     nodeId?: string,
+    /** The seat's readiness window (rig spec readiness_timeout_ms); replaces maxWaitMs. */
+    readinessTimeoutMs?: number,
   ): Promise<ResumeResult> {
     if (!this.canResume(resumeType, resumeToken)) {
       return { ok: false, code: "no_resume", message: "Claude resume not available" };
@@ -87,13 +89,13 @@ export class ClaudeResumeAdapter {
       return { ok: false, code: "resume_failed", message: keyResult.message };
     }
 
-    const result = await this.verifyResume(tmuxSessionName);
+    const result = await this.verifyResume(tmuxSessionName, readinessTimeoutMs);
     return result.ok ? { ...result, appliedLaunch } : result;
   }
 
-  private async verifyResume(tmuxSessionName: string): Promise<ResumeResult> {
+  private async verifyResume(tmuxSessionName: string, readinessTimeoutMs?: number): Promise<ResumeResult> {
     const pollMs = this.options.pollMs ?? 200;
-    const maxWaitMs = this.options.maxWaitMs ?? 5_000;
+    const maxWaitMs = readinessTimeoutMs ?? this.options.maxWaitMs ?? 5_000;
     const sleepFn = this.options.sleep ?? sleep;
     const attempts = Math.max(1, Math.floor(maxWaitMs / Math.max(pollMs, 1)) + 1);
 
