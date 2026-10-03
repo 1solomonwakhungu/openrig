@@ -135,8 +135,9 @@ function isResumableMessage(message: Record<string, unknown>): boolean {
 
 /** Replays the JSONL records the way gemini's loader does: message records
  *  (string `id`) upsert by id, `$set.messages` checkpoints rebuild the set,
- *  and `$rewindTo` drops that message and everything after it. */
-export function geminiSessionTextIsResumable(text: string): boolean {
+ *  and `$rewindTo` drops that message and everything after it. Returns the
+ *  session's current messages in order. */
+export function geminiSessionMessages(text: string): Record<string, unknown>[] {
   const messages = new Map<string, Record<string, unknown>>();
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
@@ -161,7 +162,11 @@ export function geminiSessionTextIsResumable(text: string): boolean {
       }
     }
   }
-  return [...messages.values()].some(isResumableMessage);
+  return [...messages.values()];
+}
+
+export function geminiSessionTextIsResumable(text: string): boolean {
+  return geminiSessionMessages(text).some(isResumableMessage);
 }
 
 /** Whether gemini can resume `sessionId` from this cwd (gemini's own rule). */

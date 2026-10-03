@@ -1,0 +1,6 @@
+{"sessionId":"0198a2f0-1111-7222-8333-444455556666","projectHash":"abc","startTime":"2026-09-29T12:00:00.000Z","lastUpdated":"2026-09-29T12:05:00.000Z","kind":"main"}
+{"$set":{"messages":[{"id":"m1","timestamp":"2026-09-29T12:00:10.000Z","type":"user","content":[{"text":"Summarize the repo."}]},{"id":"m2","timestamp":"2026-09-29T12:00:20.000Z","type":"gemini","content":"It has packages and docs.","model":"gemini-3.5-pro","tokens":{"input":5200,"output":300,"cached":4000,"thoughts":120,"tool":0,"total":5620}}]}}
+{"id":"m3","timestamp":"2026-09-29T12:01:00.000Z","type":"user","content":[{"text":"List the tests."}]}
+{"id":"m4","timestamp":"2026-09-29T12:01:30.000Z","type":"gemini","content":"There are 3.","model":"gemini-3.5-pro","tokens":{"input":5900,"output":90,"cached":5000,"thoughts":40,"tool":0,"total":6030}}
+{"id":"m5","timestamp":"2026-09-29T12:02:00.000Z","type":"gemini","content":"(rewound)","model":"gemini-3.5-pro","tokens":{"input":99999,"output":99999,"cached":0,"total":199998}}
+{"$rewindTo":"m5"}
