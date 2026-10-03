@@ -396,6 +396,7 @@ export async function preflightValidatedSpec(rigSpec: PodRigSpec, preflightCtx: 
     // launch-time surprise.
     const piErrors = await verifyPiRuntimeAvailable(rigSpec, preflightCtx.exec);
     errors.push(...piErrors);
+    errors.push(...await verifyOmpRuntimeAvailable(rigSpec, preflightCtx.exec));
     errors.push(...await verifyCliRuntimesAvailable(rigSpec, preflightCtx.exec));
   }
 
@@ -434,6 +435,17 @@ export async function verifyPiRuntimeAvailable(
     return [
       `Runtime "pi" not available ('pi --version' failed). The spec declares a pi member, so the launch would fail. Fix: install the Pi coding agent (npm install -g @earendil-works/pi-coding-agent, or the pi.dev install script) and ensure 'pi' is on PATH.`,
     ];
+  }
+}
+
+/** Probe only OMP seats. An OMP spec must never depend on the Pi binary. */
+export async function verifyOmpRuntimeAvailable(rigSpec: PodRigSpec, exec: ExecFn): Promise<string[]> {
+  if (!rigSpec.pods.some((pod) => pod.members.some((member) => member.runtime === "omp"))) return [];
+  try {
+    await exec(runtimeProbeCommand(getRuntimeDescriptor("omp"))!);
+    return [];
+  } catch {
+    return ['Runtime "omp" not available (\'omp --version\' failed). Fix: install Oh My Pi and ensure \'omp\' is on PATH.'];
   }
 }
 

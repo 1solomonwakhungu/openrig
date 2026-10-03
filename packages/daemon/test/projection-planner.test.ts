@@ -388,11 +388,14 @@ describe("P17 — conflicts surface LOUDLY (never a silent overwrite)", () => {
   it("WIRING PIN (the P16 class): the production planProjection call injects the resolver and threads conflict warnings", () => {
     const fsMod = require("node:fs") as typeof import("node:fs");
     const src = fsMod.readFileSync(new URL("../src/domain/rigspec-instantiator.ts", import.meta.url), "utf8");
-    const callBlock = /planProjection\(\{[\s\S]{0,1000}?\}\);/.exec(src)?.[0] ?? "";
-    // #25: the resolver may be wrapped to pass the rig's managed-block file.
+    const callBlock = /planProjection\(\{[\s\S]*?\n\s*\}\);/.exec(src)?.[0] ?? "";
+    // #25: the resolver may be wrapped to pass the rig's managed-block file;
+    // OMP (ported from upstream) branches skills to the adapter's own target. Either
+    // way the Claude conflict resolver stays the default.
     expect(callBlock, "planProjection call must inject resolveTargetPath").toMatch(
-      /resolveTargetPath: (claudeConflictTargetPath\b|\([^)]*\) => claudeConflictTargetPath\()/,
+      /(?:^|\n)\s*resolveTargetPath:\s*(claudeConflictTargetPath\b|\([^)]*\)\s*=>)/,
     );
+    expect(callBlock, "the Claude conflict resolver stays the default target").toContain("claudeConflictTargetPath(");
     expect(src, "conflict warnings must be threaded to the warnings surface").toContain("projectionConflictWarnings(planResult.plan)");
   });
 });

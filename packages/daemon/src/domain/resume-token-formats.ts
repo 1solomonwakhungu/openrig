@@ -47,24 +47,36 @@ const PI_SESSION_FILE_CHARSET_RE = /^[A-Za-z0-9._/@-]+$/;
 const MAX_PI_SESSION_FILE_LEN = 1024;
 const PI_SESSION_FILE_SUFFIX = ".jsonl";
 
-export function validatePiSessionFileToken(token: string): ResumeTokenFormatResult {
+/** The Pi-family session-file floor: absolute path, no ".." segment, the
+ *  shell-inert charset, the length cap, and a .jsonl suffix. `label` names
+ *  the runtime in errors (Pi and OMP share the floor). */
+function validateSessionFileToken(label: string, token: string): ResumeTokenFormatResult {
   if (token.length > MAX_PI_SESSION_FILE_LEN) {
-    return { ok: false, error: `Pi session-file token is too long (max ${MAX_PI_SESSION_FILE_LEN} characters).` };
+    return { ok: false, error: `${label} session-file token is too long (max ${MAX_PI_SESSION_FILE_LEN} characters).` };
   }
   if (!token.startsWith("/")) {
-    return { ok: false, error: "Pi session-file token must be an absolute path (starting with '/')." };
+    return { ok: false, error: `${label} session-file token must be an absolute path (starting with '/').` };
   }
   if (token.split("/").includes("..")) {
-    return { ok: false, error: "Pi session-file token must not contain a '..' path segment." };
+    return { ok: false, error: `${label} session-file token must not contain a '..' path segment.` };
   }
   if (!PI_SESSION_FILE_CHARSET_RE.test(token)) {
     return {
       ok: false,
-      error: "Pi session-file token contains disallowed characters (allowed: letters, digits, '.', '_', '/', '@', '-').",
+      error: `${label} session-file token contains disallowed characters (allowed: letters, digits, '.', '_', '/', '@', '-').`,
     };
   }
   if (!token.endsWith(PI_SESSION_FILE_SUFFIX)) {
-    return { ok: false, error: `Pi session-file token must end with '${PI_SESSION_FILE_SUFFIX}'.` };
+    return { ok: false, error: `${label} session-file token must end with '${PI_SESSION_FILE_SUFFIX}'.` };
   }
   return { ok: true, token };
+}
+
+export function validatePiSessionFileToken(token: string): ResumeTokenFormatResult {
+  return validateSessionFileToken("Pi", token);
+}
+
+/** OMP session files share Pi's floor (as in the upstream Oh My Pi runtime). */
+export function validateOmpSessionFileToken(token: string): ResumeTokenFormatResult {
+  return validateSessionFileToken("OMP", token);
 }

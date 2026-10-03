@@ -37,6 +37,10 @@ export interface ResumeTokenCaptureDeps {
   piRunnerStateStore?: {
     readSessionFile(sessionName: string): { ok: true; sessionFile: string } | { ok: false; reason: string };
   } | null;
+  /** Reads the separately rooted OMP runner sidecar; never reads Pi seat state. */
+  ompRunnerStateStore?: {
+    readSessionFile(sessionName: string): { ok: true; sessionFile: string } | { ok: false; reason: string };
+  } | null;
 }
 
 export type ResumeTokenDeriveResult =
@@ -55,6 +59,7 @@ export type ResumeTokenDeriveResult =
  *   claude-code → the status-line sidecar's session_id (a file read)
  *   codex       → the thread id derived from live pid-keyed logs
  *   pi          → the pi-runner state sidecar's sessionFile (a file read)
+ *   omp         → the OMP runner state sidecar's sessionFile (separate root)
  * Returns a structured outcome; never throws for a missing/invalid token
  * (those are honest skips). ANY unexpected throw from a dependency is the
  * caller's to swallow (capture must never fail or block its lifecycle op).

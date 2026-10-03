@@ -50,7 +50,7 @@ afterEach(() => { unregister?.(); unregister = null; });
 
 describe("runtime registry: built-in descriptors (behavior-preserving)", () => {
   it("keeps every pre-registry runtime (built-ins are a subset of the registry)", () => {
-    expect([...BUILTIN_RUNTIME_IDS].sort()).toEqual(["claude-code", "codex", "pi", "stub", "terminal"]);
+    expect([...BUILTIN_RUNTIME_IDS].sort()).toEqual(["claude-code", "codex", "omp", "pi", "stub", "terminal"]);
     const ids = listRuntimeDescriptors().map((d) => d.id);
     for (const id of BUILTIN_RUNTIME_IDS) expect(ids).toContain(id);
   });
@@ -73,13 +73,14 @@ describe("runtime registry: built-in descriptors (behavior-preserving)", () => {
   it("reproduces the old preflight probe table (RUNTIME_COMMANDS) for built-ins", () => {
     const table = Object.fromEntries(BUILTIN_RUNTIME_IDS.map((id) => [id, runtimeProbeCommand(getRuntimeDescriptor(id))]));
     expect(table).toEqual({
-      "claude-code": "claude --version", codex: "codex --version", pi: "pi --version", stub: null, terminal: null,
+      "claude-code": "claude --version", codex: "codex --version", pi: "pi --version", omp: "omp --version", stub: null, terminal: null,
     });
   });
 
   it("reproduces resume types and the set-resume-token refusal text", () => {
     expect(["claude-code", "codex", "pi", "terminal", "stub", "nope", null].map((r) => resumeTypeForRuntime(r)))
       .toEqual(["claude_id", "codex_id", "pi_session_file", null, null, null, null]);
+    expect(resumeTypeForRuntime("omp")).toBe("omp_session_file");
     const resumable = listRuntimeDescriptors().filter((d) => d.resumeType).map((d) => d.id);
     expect(resumable).toEqual(expect.arrayContaining(["claude-code", "codex", "pi"]));
     const refusal = validateResumeToken("terminal", "x");
@@ -307,13 +308,13 @@ describe("runtime registry: a registered runtime reaches every generic site", ()
 describe("runtime adapter map", () => {
   const builtins = () => {
     const make = (runtime: string) => ({ runtime } as RuntimeAdapter);
-    return { claudeCode: make("claude-code"), codex: make("codex"), pi: make("pi"), stub: make("stub"), terminal: make("terminal") };
+    return { claudeCode: make("claude-code"), codex: make("codex"), pi: make("pi"), omp: make("omp"), stub: make("stub"), terminal: make("terminal") };
   };
 
   it("builds one map with built-ins and registered CLI adapters", () => {
     const cli = createCliRuntimeAdapters(harnessDeps({ tmux: mockTmux().tmux, fsOps: memFs() }), [EXAMPLE_CLI_REGISTRATION]);
     const map = buildRuntimeAdapters(builtins(), cli);
-    expect(Object.keys(map).sort()).toEqual(["claude-code", "codex", "example-cli", "pi", "stub", "terminal"]);
+    expect(Object.keys(map).sort()).toEqual(["claude-code", "codex", "example-cli", "omp", "pi", "stub", "terminal"]);
     expect(map["example-cli"]).toBe(cli[0]);
     expect(createCliRuntimeAdapters(harnessDeps({ tmux: mockTmux().tmux, fsOps: memFs() }), [])).toEqual([]);
     expect(createCliRuntimeAdapters(harnessDeps({ tmux: mockTmux().tmux, fsOps: memFs() })).map((a) => a.runtime))

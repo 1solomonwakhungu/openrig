@@ -21,6 +21,7 @@ import { CLI_RUNTIME_REGISTRATIONS } from "../adapters/cli/index.js";
 import {
   validateIdShapedToken,
   validatePiSessionFileToken,
+  validateOmpSessionFileToken,
   type ResumeTokenFormatResult,
 } from "./resume-token-formats.js";
 import type { ResumeTokenCaptureDeps } from "./resume-token-capture.js";
@@ -275,6 +276,34 @@ const TERMINAL: RuntimeDescriptor = {
   supportsFork: false,
 };
 
+// Oh My Pi (ported from upstream): the Pi RPC runner with OMP's own CLI, a per-seat
+// isolated state root and HOME, and approval-mode posture. No Node engine
+// floor: omp is its own executable.
+const OMP: RuntimeDescriptor = {
+  id: "omp",
+  displayName: "Oh My Pi",
+  kind: "agent",
+  binary: "omp",
+  installHint: "install Oh My Pi and ensure 'omp' is on PATH",
+  resumeType: "omp_session_file",
+  validateResumeToken: validateOmpSessionFileToken,
+  // The OMP runner state sidecar's sessionFile (a separately rooted file read;
+  // never Pi seat state).
+  captureIsSessionScoped: true,
+  captureResumeToken: async ({ sessionName }, deps) => {
+    if (!deps.ompRunnerStateStore) return { outcome: "noop" };
+    const state = deps.ompRunnerStateStore.readSessionFile(sessionName);
+    if (!state.ok) return sidecarOutcome(state.reason);
+    if (state.sessionFile.trim().length > 0) return { outcome: "token", token: state.sessionFile.trim() };
+    return { outcome: "skipped", reason: "missing_sidecar" };
+  },
+  supportsFork: true,
+  guidanceFile: "AGENTS.md",
+  // Same as Pi: teardown leaves AGENTS.md alone.
+  cleanupGuidanceOnTeardown: false,
+  // No paneCommands: tmux reports the runner as `node`.
+};
+
 const STUB: RuntimeDescriptor = {
   id: "stub",
   displayName: "Stub",
@@ -283,7 +312,7 @@ const STUB: RuntimeDescriptor = {
   internal: true,
 };
 
-export const BUILTIN_RUNTIME_IDS = ["claude-code", "codex", "pi", "terminal", "stub"] as const;
+export const BUILTIN_RUNTIME_IDS = ["claude-code", "codex", "pi", "omp", "terminal", "stub"] as const;
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -314,7 +343,7 @@ function add(descriptor: RuntimeDescriptor): void {
   registry.set(descriptor.id, descriptor);
 }
 
-for (const d of [CLAUDE_CODE, CODEX, PI, TERMINAL, STUB]) add(d);
+for (const d of [CLAUDE_CODE, CODEX, PI, OMP, TERMINAL, STUB]) add(d);
 for (const registration of CLI_RUNTIME_REGISTRATIONS) add(registration.descriptor);
 
 /**
