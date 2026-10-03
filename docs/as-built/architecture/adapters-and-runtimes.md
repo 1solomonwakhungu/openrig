@@ -405,7 +405,7 @@ tmux pane, driven by a `TuiCliRuntimeSpec`:
   must name the seat's session) for seat status (`trust_answers`), whoami
   (`trustAnswers`, only when present), and node detail (`trustAnswers`; not the
   list route), which the UI seat Overview renders.
-- Launch polls readiness with an injectable sleep up to `launchTimeoutMs`.
+- Launch polls readiness with an injectable sleep up to `launchTimeoutMs`, or up to the seat's `readiness_timeout_ms` (`NodeBinding.readinessTimeoutMs`) when the rig spec sets one. The same per-seat value replaces the startup orchestrator's 30 s readiness poll, the successor launcher's poll, Pi's runner-ready wait, the Claude/Codex/Pi resume checks, and Codex's extended boot-in-progress window.
   Before typing it records the pane's absolute line position (tmux
   `history_size + cursor_y`); every poll captures only the lines after it,
   with `capture-pane -J` so rows the terminal soft-wrapped at the pane width

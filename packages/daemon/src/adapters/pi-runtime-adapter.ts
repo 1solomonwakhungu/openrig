@@ -269,7 +269,7 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
 
     // The runner writes the sidecar after its first successful get_state;
     // that sidecar (not pane content) is the token source of truth (FR-5).
-    const state = await this.waitForRunnerReady(sessionName, launchId);
+    const state = await this.waitForRunnerReady(sessionName, launchId, binding.readinessTimeoutMs);
     if (!state.ok) return state.failure;
 
     const sessionFile = state.value.sessionFile;
@@ -357,9 +357,12 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
   private async waitForRunnerReady(
     sessionName: string,
     launchId: string,
+    readinessTimeoutMs?: number,
   ): Promise<{ ok: true; value: PiRunnerState } | { ok: false; failure: HarnessLaunchResult }> {
     const pollMs = 250;
-    const attempts = 60; // ~15s: runner boot + pi spawn + first get_state
+    // ~15s by default (runner boot + pi spawn + first get_state); the seat's
+    // readiness window (rig spec readiness_timeout_ms) replaces it when set.
+    const attempts = readinessTimeoutMs ? Math.max(1, Math.ceil(readinessTimeoutMs / pollMs)) : 60;
     for (let attempt = 0; attempt < attempts; attempt++) {
       const state = this.readRunnerState(sessionName);
       // Launch-attempt scoping: only THIS attempt's sidecar states count.

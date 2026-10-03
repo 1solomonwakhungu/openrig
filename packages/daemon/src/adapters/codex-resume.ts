@@ -50,6 +50,8 @@ export class CodexResumeAdapter {
     // resolvedPosture as the 6th arg stay correct; threaded so the legacy (non-pod-aware) restore boots
     // the resumed seat on its spec model, not the runtime default; absent → command byte-identical.
     model?: string | null,
+    /** The seat's readiness window (rig spec readiness_timeout_ms); replaces maxWaitMs. */
+    readinessTimeoutMs?: number,
   ): Promise<ResumeResult> {
     if (!this.canResume(resumeType, resumeToken)) {
       return { ok: false, code: "no_resume", message: "Codex resume not available" };
@@ -99,7 +101,7 @@ export class CodexResumeAdapter {
       return { ok: false, code: "resume_failed", message: textResult.message };
     }
 
-    const result = await this.verifyResume(tmuxSessionName);
+    const result = await this.verifyResume(tmuxSessionName, readinessTimeoutMs);
     return result.ok ? { ...result, appliedLaunch } : result;
   }
 
@@ -108,9 +110,9 @@ export class CodexResumeAdapter {
   // based on observable runtime state. The `attention_required` outcome
   // (Codex auth refusal — stored OAuth token can no longer be refreshed)
   // closes the deferral recorded by the lifecycle scenario matrix slice.
-  private async verifyResume(tmuxSessionName: string): Promise<ResumeResult> {
+  private async verifyResume(tmuxSessionName: string, readinessTimeoutMs?: number): Promise<ResumeResult> {
     const pollMs = this.options.pollMs ?? 200;
-    const maxWaitMs = this.options.maxWaitMs ?? 5_000;
+    const maxWaitMs = readinessTimeoutMs ?? this.options.maxWaitMs ?? 5_000;
     const sleepFn = this.options.sleep ?? sleep;
     const attempts = Math.max(1, Math.floor(maxWaitMs / Math.max(pollMs, 1)) + 1);
 

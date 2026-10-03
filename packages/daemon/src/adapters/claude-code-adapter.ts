@@ -315,7 +315,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     }
 
     if (opts.resumeToken) {
-      const verification = await this.verifyResumeLaunch(binding.tmuxSession);
+      const verification = await this.verifyResumeLaunch(binding.tmuxSession, binding.readinessTimeoutMs);
       if (!verification.ok) return verification;
       return { ok: true, resumeToken: opts.resumeToken, resumeType: "claude_id", appliedLaunch };
     }
@@ -359,8 +359,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   // -- Private helpers --
 
-  private async verifyResumeLaunch(tmuxSession: string): Promise<HarnessLaunchResult> {
-    const attempts = 16;
+  private async verifyResumeLaunch(tmuxSession: string, readinessTimeoutMs?: number): Promise<HarnessLaunchResult> {
+    // 16 polls about 200 ms apart by default; the seat's readiness window (rig
+    // spec readiness_timeout_ms) replaces that window when set.
+    const attempts = readinessTimeoutMs ? Math.max(1, Math.ceil(readinessTimeoutMs / 200)) : 16;
 
     for (let attempt = 0; attempt < attempts; attempt++) {
       const paneCommand = await this.tmux.getPaneCommand(tmuxSession);

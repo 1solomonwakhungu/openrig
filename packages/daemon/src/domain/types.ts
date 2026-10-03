@@ -32,6 +32,9 @@ export interface Node {
   runtime: string | null;
   model: string | null;
   codexConfigProfile?: string | null;
+  /** Per-seat launch readiness window in ms (rig spec readiness_timeout_ms);
+   *  null/absent = the built-in defaults. */
+  readinessTimeoutMs?: number | null;
   /** OPR.0.4.8.3 Seam B: attached permission_policy REF (builtin:<name> or spec-relative custom
    *  path), or null when none is attached (= the floor). */
   permissionPolicy?: string | null;
@@ -1074,6 +1077,9 @@ export interface RigSpecPodMember {
   runtime: string;
   codexConfigProfile?: string;
   model?: string;
+  /** Launch readiness window in ms for this seat (`readiness_timeout_ms`,
+   *  bounded by READINESS_TIMEOUT_MIN_MS/MAX_MS). Absent = built-in defaults. */
+  readinessTimeoutMs?: number;
   /**
    * OPR.0.4.6.FAC1: optional seat-side role declaration (writes the
    * existing `nodes.role` column via createMemberNode → addNode). The
@@ -1346,6 +1352,8 @@ export interface ExpansionPodFragment {
     cwd?: string;
     model?: string;
     codexConfigProfile?: string;
+    /** Per-seat launch readiness window in ms (readiness_timeout_ms). */
+    readinessTimeoutMs?: number;
     /** OPR.0.4.8.3 Seam B: per-seat permission_policy REF — threaded through the
      *  expansion ingress exactly like role (never silently dropped). Typed UNKNOWN
      *  (R2 at 4ac243c3): the ingress preserves RAW presence — including null and other

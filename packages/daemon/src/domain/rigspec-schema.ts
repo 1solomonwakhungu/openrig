@@ -54,8 +54,14 @@ const MEMBER_KEYS = new Set([
   "id", "label", "agent_ref", "profile", "runtime", "codex_config_profile",
   "model", "role", "permission_policy", "cwd", "restore_policy",
   "compaction_strategy", "mechanic", "startup", "session_source", "starter_ref",
+  "readiness_timeout_ms",
 ]);
 const EDGE_KEYS = new Set(["kind", "from", "to"]);
+
+/** Bounds for a member's readiness_timeout_ms: long enough for a CLI to boot,
+ *  short enough that a wedged launch still surfaces within ten minutes. */
+export const READINESS_TIMEOUT_MIN_MS = 5_000;
+export const READINESS_TIMEOUT_MAX_MS = 600_000;
 
 /** OPR.0.5.8.7 — the topology normalizer is an explicit literal. Reject an
  * unknown structural key before that literal can make accepted input vanish.
@@ -528,6 +534,15 @@ function validateMember(member: Record<string, unknown>, index: number, podPrefi
     }
     if (isNoneProfile && typeof member["profile"] === "string") {
       errors.push(`${prefix}: profile "none" is only valid with runtime "terminal" (got runtime "${member["runtime"]}")`);
+    }
+  }
+
+  // readiness_timeout_ms: bounded integer (upstream roadmap #182).
+  if (member["readiness_timeout_ms"] !== undefined) {
+    const value = member["readiness_timeout_ms"];
+    if (typeof value !== "number" || !Number.isInteger(value)
+      || value < READINESS_TIMEOUT_MIN_MS || value > READINESS_TIMEOUT_MAX_MS) {
+      errors.push(`${prefix}.readiness_timeout_ms: must be an integer number of milliseconds from ${READINESS_TIMEOUT_MIN_MS} to ${READINESS_TIMEOUT_MAX_MS}`);
     }
   }
 
@@ -1125,6 +1140,7 @@ function normalizePod(raw: Record<string, unknown>): RigSpecPod {
     runtime: m["runtime"] as string,
     codexConfigProfile: m["codex_config_profile"] as string | undefined,
     model: m["model"] as string | undefined,
+    readinessTimeoutMs: m["readiness_timeout_ms"] as number | undefined,
     role: m["role"] as string | undefined,
     permissionPolicy: m["permission_policy"] as string | undefined,
     cwd: m["cwd"] as string,

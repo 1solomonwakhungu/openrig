@@ -423,7 +423,7 @@ export class SeatLifecycleService {
       || !this.startupOrchestrator.canContinueFresh(node.id, session.id)) return { ok: false as const, code: "continuation_unavailable", message: "Startup changed during the readiness check. Refresh." };
     const result = await this.startupOrchestrator.startNode({
       rigId: seat.rigId, nodeId: node.id, sessionId: session.id,
-      binding: { ...binding, cwd: node.cwd ?? ".", model: node.model ?? undefined, codexConfigProfile: node.codexConfigProfile ?? undefined },
+      binding: { ...binding, cwd: node.cwd ?? ".", model: node.model ?? undefined, codexConfigProfile: node.codexConfigProfile ?? undefined, ...(node.readinessTimeoutMs ? { readinessTimeoutMs: node.readinessTimeoutMs } : {}) },
       adapter, plan: startup.context.plan, resolvedStartupFiles: startup.context.resolvedStartupFiles,
       startupActions: startup.context.startupActions, isRestore: false,
       sessionName: session.session_name, skipHarnessLaunch: true, continueFreshStartup: true, includeDurableObligations: true, allowFreshFallback: false,
@@ -630,6 +630,7 @@ export class SeatLifecycleService {
         cwd: node.cwd ?? ".",
         model: node.model ?? undefined,
         codexConfigProfile: node.codexConfigProfile ?? undefined,
+        ...(node.readinessTimeoutMs ? { readinessTimeoutMs: node.readinessTimeoutMs } : {}),
         launchPosture,
       },
       adapter,
