@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@openrig/cli)](https://www.npmjs.com/package/@openrig/cli) [![npm downloads](https://img.shields.io/npm/dw/@openrig/cli)](https://www.npmjs.com/package/@openrig/cli) [![License: Apache 2.0](https://img.shields.io/github/license/mvschwarz/openrig)](LICENSE) [![GitHub stars](https://img.shields.io/github/stars/mvschwarz/openrig?style=social)](https://github.com/mvschwarz/openrig/stargazers)
 
-A harness wraps a model. A rig wraps your harnesses. Define your agent team in YAML, boot it with one command. Claude Code and Codex in the same rig, managed as one system.
+A harness wraps a model. A rig wraps your harnesses. Define your agent team in YAML, boot it with one command. Claude Code, Codex and other coding CLIs in the same rig, managed as one system.
 
 OpenRig turns AI coding agents from a pile of terminal sessions into a persistent, organized team. Talk to a lead agent about the outcome you want; it can coordinate specialists across teams and bring you results and decisions that need your attention. Start with a repository and one useful change, then keep the team's work and context at the same addresses.
 
@@ -221,7 +221,15 @@ Hono HTTP daemon
 - **CLI**: Commands for both humans and agents to launch teams, inspect state, send messages, track owned work, and manage context.
 - **TUI**: Topology explorer, table and graph views, seat details, Specs, Projects, Terminals, Feed, and System. Navigate with the keyboard, mouse, or command bar.
 - **MCP**: Tools so agents can manage their own topology (`rig_up`, `rig_ps`, `rig_send`, `rig_chatroom_send`, etc.)
-- **Runtimes**: Native Claude Code and Codex sessions, terminal nodes, and Pi and Oh My Pi via RPC runners.
+- **Runtimes**: Native Claude Code and Codex sessions, terminal nodes, Pi and Oh My Pi via RPC runners, and other coding CLIs such as OpenCode, Gemini and Copilot. See [Supported runtimes](#supported-runtimes).
+
+## Supported runtimes
+
+OpenRig is not limited to Claude Code and Codex. A seat can run Claude Code, Codex, Pi, Oh My Pi, a plain terminal, or one of the registry CLIs: Aider, Antigravity, Cline, Copilot, Cursor, Gemini, Grok, Kilo, OpenCode and Qwen. Mix them in one rig by setting `runtime:` per member.
+
+- `rig runtimes` shows which are installed and signed in, and whether each can resume and fork.
+- `rig specs` lists the mixed-runtime templates (`polyglot-dev`, `review-pair`, `budget-team`); read a template's README before `rig up`.
+- The [runtimes guide](docs/reference/runtimes/README.md) has one page per runtime, including what was verified on a live CLI and what was derived.
 
 ## Terminal UI and Workspaces
 

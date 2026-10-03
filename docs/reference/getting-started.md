@@ -93,6 +93,14 @@ completes it. `rig setup --dry-run` previews the broader setup; applying
 `rig setup` installs/checks **both** harnesses and cmux, so it is optional for
 this selected-provider path, not a requirement to fix an unused provider.
 
+#### Other runtimes
+
+The first-project starters use Claude Code and Codex, but a seat can run other
+coding CLIs too, such as OpenCode, Gemini, Copilot or Aider. Run `rig runtimes` to
+see which are installed and signed in, and `rig specs` for the mixed-runtime
+templates. Each runtime has a page in the [runtimes guide](runtimes/README.md);
+read it before choosing one for real work.
+
 ### Kernel startup stays automatic
 
 On a fresh instance, ordinary daemon startup chooses the kernel variant from
