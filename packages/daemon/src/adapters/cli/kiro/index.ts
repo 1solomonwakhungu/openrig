@@ -22,6 +22,7 @@ import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeRegistration } from "../types.js";
 import { anyPanePhrase, panePhraseSource } from "../pane-phrase.js";
+import { activityMarkers } from "../activity-markers.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
@@ -125,6 +126,7 @@ export const KIRO_SPEC: TuiCliRuntimeSpec = {
     set: () => ({ BROWSER: "true", KIRO_DISABLE_TELEMETRY: "1", KIRO_NO_AUTO_UPDATE: "1" }),
   },
   readyPatterns: [KIRO_READY_RE],
+  ...activityMarkers(KIRO_RUNTIME_ID),
   gatePatterns: [
     {
       pattern: anyPanePhrase([...KIRO_SIGN_IN, "Opening browser"], "i"),

@@ -1,0 +1,11 @@
+
+> Add a health route to the API
+
+I'll create src/health.ts with a GET /health route.
+
+🛠️  Using tool: fs_write
+  ⋮
+  ● Path: src/health.ts
+
+Allow this action? Use 't' to trust (always allow) this tool for the session. [y
+/n/t]:
