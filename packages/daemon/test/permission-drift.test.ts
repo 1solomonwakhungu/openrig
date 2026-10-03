@@ -236,6 +236,13 @@ describe("registry CLI runtimes: launch posture drift", () => {
     expect(diagnose("kilo", permission("kilo", "auto"), "floor")).toMatchObject({ state: "drift", expected: "floor", effective: "full_bypass" });
   });
 
+  it("goose: both emitted modes compare against the policy posture", () => {
+    expect(diagnose("goose", permission("goose", "GOOSE_MODE=auto"), "full_bypass")).toMatchObject({ state: "aligned", effective: "full_bypass" });
+    expect(diagnose("goose", permission("goose", "GOOSE_MODE=smart_approve"), "floor")).toMatchObject({ state: "aligned", effective: "floor" });
+    expect(diagnose("goose", permission("goose", "GOOSE_MODE=auto"), "floor")).toMatchObject({ state: "drift", expected: "floor", effective: "full_bypass" });
+    expect(diagnose("goose", permission("goose", "GOOSE_MODE=smart_approve"), "full_bypass")).toMatchObject({ state: "drift", effective: "floor" });
+  });
+
   it("stays unknown without a policy posture, and never guesses from an unrecognized value", () => {
     expect(diagnose("gemini", permission("gemini", "auto_edit"), null)).toMatchObject({ state: "unknown", reason: "expected_posture_unknown" });
     expect(diagnose("gemini", permission("gemini", "plan"), "floor")).toMatchObject({ state: "unknown", reason: "unrecognized_launch_value" });

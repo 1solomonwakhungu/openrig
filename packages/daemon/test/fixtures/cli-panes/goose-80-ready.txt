@@ -1,0 +1,22 @@
+$ GOOSE_TELEMETRY_OFF=1 GOOSE_PROVIDER=ollama OLLAMA_HOST=http://127.0.0.1:9 GOOSE_MODEL=qwen3 goose session --name 'dev@rig'
+
+    __( O)>  ● new session · ollama qwen3
+   \____)    20261003_7 · /home/user/workspaces/example-org/team-repositories/sandbox-home-dirs/projects/a-fairly-long-workspace-directory-name/service-api
+     L L     goose is ready
+  ⏳ loading extensions in background...
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 0% 0/128k
+> Enter to send · Ctrl+J newline
+
+
+
+
+
+
+
+
+
+
+
+
+
+

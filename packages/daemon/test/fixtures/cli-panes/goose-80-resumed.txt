@@ -1,0 +1,19 @@
+$ GOOSE_TELEMETRY_OFF=1 GOOSE_PROVIDER=ollama OLLAMA_HOST=http://127.0.0.1:9 GOOSE_MODEL=qwen3 goose session --resume --session-id 20261003_3
+◆  WARNING: The original working directory of this session was set to /home/user/workspaces/example-org/team-repositories/sandbox-home-dirs. Your current directory is /home/user/workspaces/example-org/team-repositories/sandbox-home-dirs/projects/a-fairly-long-workspace-directory-name/service-api. Do you want to switch back to the original working directory?
+│  ● Yes  / ○ No 
+└  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

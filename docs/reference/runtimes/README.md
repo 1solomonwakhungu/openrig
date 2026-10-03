@@ -17,6 +17,7 @@ One line per runtime, alphabetical by id:
 - `copilot`: GitHub Copilot CLI (`copilot`). Resume by minted session id, managed `AGENTS.md` blocks, `.agents/skills`. No fork. See [copilot.md](copilot.md).
 - `cursor`: Cursor CLI (`cursor-agent`). Resume by captured chat id, managed `AGENTS.md` blocks, `.agents/skills`. No fork. See [cursor.md](cursor.md).
 - `gemini`: Gemini CLI (`gemini`). Resume by minted session id, managed `GEMINI.md` blocks, `.gemini/skills`. No fork. See [gemini.md](gemini.md).
+- `goose`: [Goose](goose.md) (`goose`). Resume by session id read from goose's sessions database, fork via `--fork`, managed `AGENTS.md` blocks, `.agents/skills`.
 - `grok`: Grok Build (`grok`). Resume and fork by minted session id, managed `AGENTS.md` blocks. [grok.md](grok.md)
 - `kilo`: Kilo CLI (`kilo`), an OpenCode fork. Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.kilo/skills`. No fork. See [kilo.md](kilo.md).
 - `omp`: Oh My Pi (`omp`, the Pi RPC runner in the pane, ported from upstream #35). Isolated per-seat state and HOME under `<OPENRIG_HOME>/state/omp/<seat>`, resume by session file once the file exists, fork, approval mode `always-ask` (floor) or `yolo` (full_bypass). See the `omp` notes in [rig-spec.md](../rig-spec.md).
