@@ -41,6 +41,13 @@ export const QWEN_MODEL_SHAPE: RuntimeModelShape = {
   note: "a model id of the configured provider, without spaces",
 };
 
+/** goose: a model the configured provider (GOOSE_PROVIDER) serves. */
+export const GOOSE_MODEL_SHAPE: RuntimeModelShape = {
+  pattern: PLAIN_ID,
+  example: "claude-sonnet-4-5",
+  note: "a model id of the configured goose provider, without spaces",
+};
+
 /** copilot: a Copilot model id; no provider prefix (Copilot routes it). */
 export const COPILOT_MODEL_SHAPE: RuntimeModelShape = {
   pattern: /^[A-Za-z0-9][A-Za-z0-9._-]*$/,

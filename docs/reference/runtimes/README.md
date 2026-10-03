@@ -50,13 +50,14 @@ The checks are local only: the version probe is `<binary> --version` (as preflig
 
 ## Model names
 
-A member's `model:` is passed to its CLI as is. Preflight checks its form against the runtime's expected shape and, when it does not fit, prints one warning with an example; `rig up` continues. The shapes check the form of a name, not a list of current models. Built-in runtimes (`claude-code`, `codex`, `pi`) are not checked.
+A member's `model:` is passed to its CLI as is. Preflight checks its form against the runtime's expected shape and, when it does not fit, prints one warning with an example; `rig up` continues. The shapes check the form of a name, not a list of current models. Built-in runtimes (`claude-code`, `codex`, `pi`, `omp`) are not checked.
 
 | Runtime | Expected `model:` | Example |
 |---|---|---|
 | `opencode`, `kilo` | `provider/model` | `anthropic/claude-sonnet-5` |
 | `gemini` | a `gemini-*` id, or an alias: `auto`, `pro`, `flash`, `flash-lite` | `pro` |
 | `qwen` | a model id of the configured provider, without spaces | `qwen3-coder-plus` |
+| `goose` | a model id of the configured goose provider (`GOOSE_PROVIDER`), without spaces | `claude-sonnet-4-5` |
 | `copilot` | a Copilot model id without a provider prefix | `gpt-5.4` |
 | `cursor` | a Cursor model id without a provider prefix (bracket overrides allowed) | `gpt-5` |
 | `aider` | an aider alias or a provider model name | `sonnet` |

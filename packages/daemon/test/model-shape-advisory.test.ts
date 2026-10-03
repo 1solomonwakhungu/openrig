@@ -32,6 +32,7 @@ describe("model shapes per runtime", () => {
     ["kilo", "anthropic/claude-sonnet-5", true], ["kilo", "sonnet", false],
     ["gemini", "pro", true], ["gemini", "flash-lite", true], ["gemini", "auto", true], ["gemini", "gemini-2.5-pro", true], ["gemini", "gpt-5", false],
     ["qwen", "qwen3-coder-plus", true], ["qwen", "qwen 3", false],
+    ["goose", "claude-sonnet-4-5", true], ["goose", "gpt-5.4", true], ["goose", "claude sonnet", false],
     ["copilot", "gpt-5.4", true], ["copilot", "claude-sonnet-4.5", true], ["copilot", "openai/gpt-5", false],
     ["cursor", "gpt-5", true], ["cursor", "gpt-5[reasoning=high]", true], ["cursor", "anthropic/sonnet", false],
     ["aider", "sonnet", true], ["aider", "anthropic/claude-sonnet-5", true], ["aider", "son net", false],
