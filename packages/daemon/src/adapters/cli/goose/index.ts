@@ -16,7 +16,7 @@ import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
 import {
   GOOSE_BINARY, GOOSE_BUSY_PATTERNS, GOOSE_ERROR_PATTERNS, GOOSE_FLOOR_MODE, GOOSE_FULL_BYPASS_MODE, GOOSE_GATE_PATTERNS, GOOSE_GUIDANCE_FILE,
   GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS, GOOSE_RESUME_TYPE, GOOSE_RUNTIME_ID, GOOSE_SKILLS_SUBDIR,
-  buildGooseArgv, captureGooseSessionId, gooseLaunchEnv, gooseModeFor, gooseSessionPresence, gooseSessionsDbPath,
+  buildGooseArgv, captureGooseSessionId, readGooseUsage, gooseLaunchEnv, gooseModeFor, gooseSessionPresence, gooseSessionsDbPath,
   validateGooseSessionId, verifyGooseVersionOutput,
 } from "./goose-cli.js";
 
@@ -83,6 +83,14 @@ export const GOOSE_DESCRIPTOR: RuntimeDescriptor = {
       forkParent: record.forkParent,
     });
   },
+  // Usage (feature 1): the session row's running totals and goose's own cost.
+  readUsage: ({ seatStateDir, homedir, resumeToken }) => readGooseUsage({
+    dbPath: seatSessionsDb(nodeReadFs, seatStateDir, homedir),
+    deps: { exists: nodeReadFs.exists },
+    sessionId: resumeToken,
+  }),
+  // Each posture sets its own GOOSE_MODE, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   // All of a user's goose sessions share one database, so any seat can fork
   // another seat's session by id.
   supportsFork: true,

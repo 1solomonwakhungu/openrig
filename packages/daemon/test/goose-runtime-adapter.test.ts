@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GOOSE_REGISTRATION, GOOSE_SEAT_FILE, GOOSE_SPEC } from "../src/adapters/cli/goose/index.js";
 import {
   GOOSE_BUSY_PATTERNS, GOOSE_ERROR_PATTERNS, GOOSE_GATE_PATTERNS, GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS,
-  buildGooseArgv, captureGooseSessionId, gooseLaunchEnv, gooseSessionPresence, gooseSessionsDbPath, gooseTimestamp,
+  GOOSE_USAGE_SOURCE, buildGooseArgv, captureGooseSessionId, readGooseUsage, gooseLaunchEnv, gooseSessionPresence, gooseSessionsDbPath, gooseTimestamp,
   parseGooseVersion, validateGooseSessionId, verifyGooseVersionOutput,
 } from "../src/adapters/cli/goose/goose-cli.js";
 import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
@@ -36,7 +36,10 @@ function createSessionsDb(dbPath: string): Database.Database {
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', user_set_name BOOLEAN DEFAULT FALSE,
     session_type TEXT NOT NULL DEFAULT 'user', working_dir TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total_tokens INTEGER, accumulated_input_tokens INTEGER, accumulated_output_tokens INTEGER,
+    accumulated_cache_read_tokens INTEGER, accumulated_cache_write_tokens INTEGER, accumulated_cost REAL,
+    provider_name TEXT, model_config_json TEXT)`);
   return db;
 }
 
@@ -204,6 +207,50 @@ describe("captureGooseSessionId", () => {
     expect(gooseSessionPresence(db, ID, deps)).toBe("present");
     expect(gooseSessionPresence(db, MISSING_ID, deps)).toBe("missing");
     expect(gooseSessionPresence(`${db}.absent`, ID, deps)).toBe("missing");
+  });
+});
+
+describe("readGooseUsage (feature 1)", () => {
+  let root: string | null = null;
+  afterEach(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); root = null; });
+  const deps = { exists: (p: string) => fs.existsSync(p) };
+
+  /** A session row as goose 1.53.0 keeps it after a few turns (schema from a
+   *  live sessions.db; the numbers are illustrative). */
+  function dbWithUsage(): string {
+    root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-goose-usage-"));
+    const dbPath = nodePath.join(root, "sessions.db");
+    addSession(dbPath, { id: ID, name: "dev@rig", userSet: true, cwd: "/w", createdAt: "2026-10-03 03:38:34" });
+    const db = new Database(dbPath);
+    db.prepare(`UPDATE sessions SET updated_at = ?, total_tokens = ?, accumulated_input_tokens = ?, accumulated_output_tokens = ?,
+      accumulated_cache_read_tokens = ?, accumulated_cache_write_tokens = ?, accumulated_cost = ?, provider_name = ?, model_config_json = ?
+      WHERE id = ?`).run("2026-10-03 04:10:00", 18_400, 52_000, 6_100, 31_000, 2_200, 0.4125, "anthropic",
+      JSON.stringify({ model_name: "claude-sonnet-4-5", temperature: null, max_tokens: null, toolshim: false, toolshim_model: null }), ID);
+    db.close();
+    return dbPath;
+  }
+
+  it("reads the session totals, goose's own cost, the context fill, and the model", () => {
+    expect(readGooseUsage({ dbPath: dbWithUsage(), deps, sessionId: ID })).toEqual({
+      inputTokens: 52_000, outputTokens: 6_100, cacheReadTokens: 31_000, cacheWriteTokens: 2_200,
+      costUsd: 0.4125, costSource: "cli_reported", contextUsedTokens: 18_400,
+      model: "anthropic/claude-sonnet-4-5", observedAt: "2026-10-03T04:10:00.000Z", source: GOOSE_USAGE_SOURCE,
+    });
+  });
+
+  it("is null without a session id, a database, or a row, and before the first turn", () => {
+    const dbPath = dbWithUsage();
+    expect(readGooseUsage({ dbPath, deps, sessionId: null })).toBeNull();
+    expect(readGooseUsage({ dbPath, deps, sessionId: "../x" })).toBeNull();
+    expect(readGooseUsage({ dbPath, deps, sessionId: MISSING_ID })).toBeNull();
+    expect(readGooseUsage({ dbPath: `${dbPath}.absent`, deps, sessionId: ID })).toBeNull();
+    addSession(dbPath, { id: "20261003_9", name: "new@rig", userSet: true, cwd: "/w", createdAt: "2026-10-03 04:20:00" });
+    expect(readGooseUsage({ dbPath, deps, sessionId: "20261003_9" })).toBeNull();
+  });
+
+  it("is the descriptor's readUsage, and goose declares both permission modes", () => {
+    expect(typeof GOOSE_REGISTRATION.descriptor.readUsage).toBe("function");
+    expect(GOOSE_REGISTRATION.descriptor.permissionModes).toEqual(["floor", "full_bypass"]);
   });
 });
 

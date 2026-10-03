@@ -106,6 +106,23 @@ Where goose keeps sessions: `$GOOSE_PATH_ROOT/data/sessions/sessions.db`, else
 the path each launch resolved in the seat's state (`goose-seat.json`) and reads
 the database read-only.
 
+## Usage and cost
+
+`rig ps` and the usage poller read the seat's session row in goose's sessions
+database (read-only): the session's running totals (`accumulated_input_tokens`,
+`accumulated_output_tokens`, the cache read and write totals) and goose's own
+`accumulated_cost`, reported as `cli_reported`. The context fill is the row's
+`total_tokens` (the latest request's total) and the model is
+`provider/model_name`. The column meanings come from goose 1.53.0's schema; no
+conversation was run to watch them change. A session with no turns yet
+reports nothing.
+
+## Per-seat permissions
+
+Goose declares both `floor` and `full_bypass`, so `rig seat set-permissions`
+can select either for a goose seat; the next launch sets the matching
+`GOOSE_MODE`.
+
 ## Guidance and skills
 
 - Managed guidance blocks merge into `AGENTS.md` in the seat's working

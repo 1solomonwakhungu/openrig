@@ -39,6 +39,7 @@ import Database from "better-sqlite3";
 import type { ForkSource } from "../../../domain/runtime-adapter.js";
 import type { TuiCliErrorPattern, TuiCliGatePattern } from "../tui-cli-runtime-adapter.js";
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
+import { compactUsage, usageNumber, type RuntimeUsageSnapshot } from "../usage-snapshot.js";
 
 export const GOOSE_RUNTIME_ID = "goose";
 export const GOOSE_BINARY = "goose";
@@ -306,3 +307,57 @@ export function gooseSessionPresence(dbPath: string, token: string, deps: GooseS
   if (!rows) return "unknown";
   return rows.length > 0 ? "present" : "missing";
 }
+
+// ── usage (feature 1) ───────────────────────────────────────────────────────
+
+/** Session totals and the latest context fill for one goose session (sessions
+ *  table, goose 1.53.0 schema): accumulated_* are the session's running totals
+ *  and accumulated_cost goose's own cost; total_tokens is the latest request's
+ *  total, which goose shows as context use. */
+export const GOOSE_USAGE_SQL =
+  "SELECT accumulated_input_tokens, accumulated_output_tokens, accumulated_cache_read_tokens, accumulated_cache_write_tokens, "
+  + "accumulated_cost, total_tokens, provider_name, model_config_json, updated_at FROM sessions WHERE id = ? LIMIT 1";
+
+/** "YYYY-MM-DD HH:MM:SS" (UTC, as goose stores it) to ISO; undefined otherwise. */
+function gooseTimeToIso(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) return undefined;
+  const ms = Date.parse(`${value.replace(" ", "T")}Z`);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+}
+
+/**
+ * A goose seat's usage from its session row. Null when the session is not in
+ * the database, the database is unreadable, or the row has no numbers yet.
+ * Read-only; never throws.
+ */
+export function readGooseUsage(input: { dbPath: string; deps: GooseStoreDeps; sessionId: string | null | undefined; now?: () => Date }): RuntimeUsageSnapshot | null {
+  if (!input.sessionId || !validateGooseSessionId(input.sessionId).ok) return null;
+  const rows = readRows(input.dbPath, input.deps, GOOSE_USAGE_SQL, [input.sessionId.trim()]);
+  const row = rows?.[0];
+  if (!row) return null;
+  let modelName: string | undefined;
+  try {
+    const config = typeof row.model_config_json === "string" ? JSON.parse(row.model_config_json) as { model_name?: unknown } : null;
+    if (config && typeof config.model_name === "string" && config.model_name.trim()) modelName = config.model_name.trim();
+  } catch {
+    modelName = undefined;
+  }
+  const provider = typeof row.provider_name === "string" && row.provider_name.trim() ? row.provider_name.trim() : undefined;
+  const cost = usageNumber(row.accumulated_cost);
+  return compactUsage({
+    inputTokens: usageNumber(row.accumulated_input_tokens),
+    outputTokens: usageNumber(row.accumulated_output_tokens),
+    cacheReadTokens: usageNumber(row.accumulated_cache_read_tokens),
+    cacheWriteTokens: usageNumber(row.accumulated_cache_write_tokens),
+    costUsd: cost,
+    // goose computes the cost itself from its provider pricing.
+    costSource: cost !== undefined ? "cli_reported" : undefined,
+    contextUsedTokens: usageNumber(row.total_tokens),
+    model: modelName ? (provider ? `${provider}/${modelName}` : modelName) : undefined,
+    observedAt: gooseTimeToIso(row.updated_at) ?? (input.now ?? (() => new Date()))().toISOString(),
+    source: GOOSE_USAGE_SOURCE,
+  });
+}
+
+export const GOOSE_USAGE_SOURCE = "goose_sessions_db";
+
