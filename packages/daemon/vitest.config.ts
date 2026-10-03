@@ -11,5 +11,12 @@ export default defineConfig({
     // so the only cost is a slower surfacing of a genuine hang.
     testTimeout: 20000,
     hookTimeout: 20000,
+    // Type-level contract tests (*.test-d.ts) are checked by tsc during the
+    // normal run, so a contract change fails `npm test`, not only --typecheck.
+    typecheck: {
+      enabled: true,
+      include: ["test/**/*.test-d.ts"],
+      tsconfig: "./tsconfig.typecheck.json",
+    },
   },
 });

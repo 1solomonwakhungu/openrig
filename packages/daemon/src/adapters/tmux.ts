@@ -845,9 +845,9 @@ export class TmuxAdapter {
    * screen, NOT `-S -<lines>` scrollback: scrollback reintroduces the row drift
    * the absolute-paint seed exists to eliminate.
    */
-  async capturePaneScreen(paneId: string): Promise<string | null> {
+  async capturePaneScreen(paneId: string, opts?: CaptureOptions): Promise<string | null> {
     try {
-      const output = await this.exec(`tmux capture-pane -p -t ${shellQuote(paneId)}`);
+      const output = await this.exec(`tmux capture-pane -p${opts?.joinWrapped ? " -J" : ""} -t ${shellQuote(paneId)}`);
       return output || null;
     } catch {
       return null;

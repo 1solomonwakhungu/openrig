@@ -162,6 +162,11 @@ export interface RuntimeAdapter {
 
   /** Check if the runtime harness is responsive and ready. */
   checkReady(binding: NodeBinding): Promise<ReadinessResult>;
+
+  /** Optional (F1, feature 2): the seat's activity read from its pane, for
+   *  registry runtimes. Null = no confident read; callers keep their generic
+   *  source. claude-code, codex, and pi keep their existing activity sources. */
+  classifyActivity?(binding: NodeBinding): Promise<import("./runtime-capabilities.js").RuntimeActivityState | null>;
 }
 
 // -- Restore-time resume contract --

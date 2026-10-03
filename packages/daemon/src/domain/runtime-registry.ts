@@ -24,6 +24,10 @@ import {
   type ResumeTokenFormatResult,
 } from "./resume-token-formats.js";
 import type { ResumeTokenCaptureDeps } from "./resume-token-capture.js";
+import type {
+  RuntimeAuthContext, RuntimeAuthStatus, RuntimeModelShape, RuntimeTranscript, RuntimeTranscriptInput,
+  RuntimeUsageInput, RuntimeUsageSnapshot,
+} from "./runtime-capabilities.js";
 import type { ResolvedLaunchPosture } from "../adapters/yolo-mode.js";
 import { OPENRIG_HOME } from "../openrig-compat.js";
 import { seatStateDirFor } from "./runtime-capture.js";
@@ -135,6 +139,22 @@ export interface RuntimeDescriptor {
    *  emits. Permission drift compares it with the seat's policy posture.
    *  Absent = the runtime's observations are recorded but not compared. */
   readonly permissionPostureFor?: (observedValue: string) => ResolvedLaunchPosture | null;
+
+  // ── Capability hooks (F1, runtime-capabilities.ts). All optional and
+  // read-only; core calls them only through the runners there, which never
+  // throw. See adapters-and-runtimes.md "Capability hooks" for each consumer.
+
+  /** Seat usage and context (features 1, 4). Null = no data. */
+  readonly readUsage?: (input: RuntimeUsageInput) => RuntimeUsageSnapshot | null | Promise<RuntimeUsageSnapshot | null>;
+  /** Local sign-in status for `rig runtimes` / `rig doctor` (feature 6). */
+  readonly authStatus?: (ctx: RuntimeAuthContext) => RuntimeAuthStatus | Promise<RuntimeAuthStatus>;
+  /** Shape of a valid `model:` for the warn-only preflight advisory (feature 7). */
+  readonly modelShape?: RuntimeModelShape;
+  /** Repo-relative docs page, e.g. "docs/reference/runtimes/opencode.md" (feature 6). */
+  readonly docsPath?: string;
+  /** Transcript from the CLI's own session record, for full-screen CLIs whose
+   *  pane scrollback is thin (feature 5). Null = no record. */
+  readonly readTranscript?: (input: RuntimeTranscriptInput) => RuntimeTranscript | null | Promise<RuntimeTranscript | null>;
 }
 
 // ── Built-in descriptors (behavior-preserving) ──────────────────────────────
