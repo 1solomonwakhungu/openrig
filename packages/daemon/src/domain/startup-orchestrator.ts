@@ -144,7 +144,16 @@ export class StartupOrchestrator {
       return guard.lifecycle([input.nodeId], () => this.startNode(input));
     }
     try {
-      input = { ...input, binding: new NativePermissionStore(this.db).apply(input.binding, input.adapter.runtime) };
+      const permissions = new NativePermissionStore(this.db).resolve(input.binding, input.adapter.runtime);
+      input = { ...input, binding: permissions.binding };
+      if (permissions.fallback) {
+        // Runtime fallback: record whether the seat's selection carried over.
+        this.eventBus.emit({
+          type: "node.permission_selection_fallback", rigId: input.rigId, nodeId: input.nodeId,
+          selectionRuntime: permissions.fallback.selection.runtime, runtime: input.adapter.runtime,
+          mode: permissions.fallback.selection.mode, applied: permissions.fallback.applied,
+        });
+      }
     } catch (error) {
       return this.fail(input, "failed", [`Permission selection: ${(error as Error).message}`]);
     }

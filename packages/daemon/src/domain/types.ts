@@ -224,6 +224,9 @@ export type RigEvent =
   | { type: "node.startup_failed"; rigId: string; nodeId: string; error: string; sessionId?: string; freshContextPending?: boolean }
   // Runtime fallback: the seat launched on a fallback runtime instead of its declared one.
   | { type: "node.runtime_fallback"; rigId: string; nodeId: string; declaredRuntime: string; runtime: string; attempts: string }
+  // Runtime fallback: whether the seat's permission selection (made for its declared
+  // runtime) applied to the fallback runtime; when not, the policy posture applies.
+  | { type: "node.permission_selection_fallback"; rigId: string; nodeId: string; selectionRuntime: string; runtime: string; mode: string; applied: boolean }
   // OPR.0.4.3.06 — startup proof (challenge-verified orientation). Append-only.
   // `node.startup_challenged` freezes this launch's challenge ground truth
   // (challengeId + contractHash; the expected answer is recomputed, never

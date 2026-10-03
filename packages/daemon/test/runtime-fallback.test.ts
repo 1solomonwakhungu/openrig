@@ -21,6 +21,7 @@ import { verifyFallbackMemberRuntimes } from "../src/domain/rigspec-preflight.js
 import { WhoamiService } from "../src/domain/whoami-service.js";
 import { TranscriptStore } from "../src/domain/transcript-store.js";
 import { getNodeInventory } from "../src/domain/node-inventory.js";
+import { attemptResidueTargets, removeAttemptResidue, snapshotAttemptResidue } from "../src/domain/fallback-attempt-residue.js";
 import { describeFallbackAttempts, isCommandOnPath, isFallbackAttentionCode } from "../src/domain/runtime-fallback.js";
 import type { AgentResolverFsOps } from "../src/domain/agent-resolver.js";
 import type { HarnessLaunchResult, RuntimeAdapter } from "../src/domain/runtime-adapter.js";
@@ -203,7 +204,44 @@ describe("runtime fallback at a fresh launch", () => {
     db.close();
   });
 
-  it("all fail: attention with the evidence of every attempt, on the declared runtime", async () => {
+  it("claude to codex: the failed claude attempt's managed blocks and skills are removed, existing content kept", async () => {
+    installBinary("claude");
+    const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-fallback-cwd-"));
+    try {
+      const claudeMd = nodePath.join(cwd, "CLAUDE.md");
+      const otherBlock = "<!-- BEGIN OpenRig MANAGED BLOCK: other-seat -->\nother seat\n<!-- END OpenRig MANAGED BLOCK: other-seat -->";
+      fs.writeFileSync(claudeMd, `# Project notes\n\n${otherBlock}\n`);
+      fs.mkdirSync(nodePath.join(cwd, ".claude", "skills", "operator-skill"), { recursive: true });
+      const claude = mockAdapter("claude-code", LOGIN_GATE);
+      // Like the real adapter: project skills and merge guidance before the launch stops at the gate.
+      claude.project = vi.fn(async (_plan: unknown, b: { cwd: string }) => {
+        fs.mkdirSync(nodePath.join(b.cwd, ".claude", "skills", "openrig-start"), { recursive: true });
+        fs.writeFileSync(nodePath.join(b.cwd, ".claude", "skills", "openrig-start", "SKILL.md"), "skill");
+        fs.appendFileSync(nodePath.join(b.cwd, "CLAUDE.md"), "\n<!-- BEGIN OpenRig MANAGED BLOCK: role -->\nmanaged role\n<!-- END OpenRig MANAGED BLOCK: role -->\n");
+        return { projected: [], skipped: [], failed: [] };
+      }) as never;
+      const codex = mockAdapter("codex");
+      const { db, rigRepo, inst } = setup(claude, codex);
+      const result = await inst.instantiate(RigSpecCodec.serialize(spec(["codex"])), RIG_ROOT, { cwdOverride: cwd });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(claude.project).toHaveBeenCalled();
+      expect(rigRepo.getRig(result.result.rigId)!.nodes[0]!.runtime).toBe("codex");
+      const content = fs.readFileSync(claudeMd, "utf-8");
+      expect(content).not.toContain("MANAGED BLOCK: role");
+      expect(content).toContain("# Project notes");
+      expect(content).toContain("MANAGED BLOCK: other-seat");
+      expect(fs.existsSync(nodePath.join(cwd, ".claude", "skills", "openrig-start"))).toBe(false);
+      expect(fs.existsSync(nodePath.join(cwd, ".claude", "skills", "operator-skill"))).toBe(true);
+      const attempts = JSON.parse(fallbackEvents(db)[0]!.payload).attempts as string;
+      expect(attempts).toContain("removed its managed blocks [role] and skills [openrig-start]");
+      db.close();
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("all fail: attention with the evidence of every attempt, on the runtime of the session left at its gate", async () => {
     installBinary("claude");
     const claude = mockAdapter("claude-code", LOGIN_GATE);
     const codex = mockAdapter("codex", LOGIN_GATE);
@@ -212,9 +250,10 @@ describe("runtime fallback at a fresh launch", () => {
     expect(entry.reason).toContain("no runtime started for dev.impl");
     expect(entry.reason).toContain("claude-code: attention_required");
     expect(entry.reason).toContain("codex: attention_required");
+    // The codex session is still at its sign-in gate; the seat says so.
     const node = rigRepo.getRig(entry.rigId)!.nodes[0]!;
-    expect(node.runtime).toBe("claude-code");
-    expect(node.declaredRuntime).toBeNull();
+    expect(node.runtime).toBe("codex");
+    expect(node.declaredRuntime).toBe("claude-code");
     expect(fallbackEvents(db)).toHaveLength(0);
     db.close();
   });
@@ -226,6 +265,17 @@ describe("runtime fallback at a fresh launch", () => {
     const { db, inst } = setup(claude, codex);
     attentionNode(await inst.instantiate(RigSpecCodec.serialize(spec(["codex"])), RIG_ROOT));
     expect(codex.launchHarness).not.toHaveBeenCalled();
+    db.close();
+  });
+
+  it("a fallback that stops at a trust gate keeps that runtime on record (its session is live)", async () => {
+    installBinary("claude");
+    const claude = mockAdapter("claude-code", LOGIN_GATE);
+    const codex = mockAdapter("codex", { ok: false, recovery: "attention_required", error: "trust", attentionCode: "trust_gate" });
+    const { db, rigRepo, inst } = setup(claude, codex);
+    const entry = attentionNode(await inst.instantiate(RigSpecCodec.serialize(spec(["codex"])), RIG_ROOT));
+    expect(entry.reason).toContain("codex: attention_required");
+    expect(rigRepo.getRig(entry.rigId)!.nodes[0]).toMatchObject({ runtime: "codex", declaredRuntime: "claude-code" });
     db.close();
   });
 
@@ -347,5 +397,39 @@ describe("the running runtime on record", () => {
     expect(whoami.resolve({ nodeId: node.id }).identity).not.toHaveProperty("declaredRuntime");
     expect(getNodeInventory(db, rig.id)[0]!.declaredRuntime).toBeNull();
     db.close();
+  });
+});
+
+describe("fallback attempt residue", () => {
+  let cwd: string;
+  beforeEach(() => { cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-residue-")); });
+  afterEach(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const block = (id: string) => `<!-- BEGIN OpenRig MANAGED BLOCK: ${id} -->\n${id} body\n<!-- END OpenRig MANAGED BLOCK: ${id} -->`;
+
+  it("targets the runtime's guidance file and skills dir inside the cwd", () => {
+    expect(attemptResidueTargets({ runtime: "claude-code", cwd })).toEqual({ guidanceFile: nodePath.join(cwd, "CLAUDE.md"), skillsDir: nodePath.join(cwd, ".claude", "skills") });
+    expect(attemptResidueTargets({ runtime: "claude-code", cwd, claudeManagedBlockFile: "CLAUDE.local.md" }).guidanceFile).toBe(nodePath.join(cwd, "CLAUDE.local.md"));
+    expect(attemptResidueTargets({ runtime: "codex", cwd })).toEqual({ guidanceFile: nodePath.join(cwd, "AGENTS.md"), skillsDir: nodePath.join(cwd, ".agents", "skills") });
+    expect(attemptResidueTargets({ runtime: "pi", cwd })).toEqual({ guidanceFile: nodePath.join(cwd, "AGENTS.md"), skillsDir: null });
+  });
+
+  it("deletes a guidance file and skills dir the attempt created", () => {
+    const snapshot = snapshotAttemptResidue(attemptResidueTargets({ runtime: "codex", cwd }));
+    fs.writeFileSync(nodePath.join(cwd, "AGENTS.md"), `${block("role")}\n`);
+    fs.mkdirSync(nodePath.join(cwd, ".agents", "skills", "s1"), { recursive: true });
+    expect(removeAttemptResidue(snapshot)).toEqual({ blocks: ["role"], skills: ["s1"] });
+    expect(fs.existsSync(nodePath.join(cwd, "AGENTS.md"))).toBe(false);
+    expect(fs.existsSync(nodePath.join(cwd, ".agents", "skills"))).toBe(false);
+  });
+
+  it("keeps a pre-existing file even when only new blocks are removed, and touches nothing when nothing is new", () => {
+    const file = nodePath.join(cwd, "AGENTS.md");
+    fs.writeFileSync(file, `${block("kept")}\n`);
+    const snapshot = snapshotAttemptResidue(attemptResidueTargets({ runtime: "codex", cwd }));
+    expect(removeAttemptResidue(snapshot)).toEqual({ blocks: [], skills: [] });
+    expect(fs.readFileSync(file, "utf-8")).toBe(`${block("kept")}\n`);
+    fs.appendFileSync(file, `\n${block("new")}\n`);
+    expect(removeAttemptResidue(snapshot).blocks).toEqual(["new"]);
+    expect(fs.readFileSync(file, "utf-8")).toBe(`${block("kept")}\n`);
   });
 });

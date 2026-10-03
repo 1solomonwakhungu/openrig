@@ -1,4 +1,5 @@
 import { getRuntimeDescriptor } from "./runtime-registry.js";
+import { attemptResidueTargets, removeAttemptResidue, snapshotAttemptResidue } from "./fallback-attempt-residue.js";
 import { describeFallbackAttempts, isCommandOnPath, isFallbackAttentionCode, type FallbackAttempt } from "./runtime-fallback.js";
 import nodePath from "node:path";
 import type Database from "better-sqlite3";
@@ -1196,7 +1197,7 @@ export class PodRigInstantiator {
     }
     const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
     if (`${pod.id}.${member.id}` !== node.logicalId || !same(member.agentRef, node.agentRef) || !same(member.profile, node.profile)
-      || !same(member.runtime, node.runtime) || !same(member.role, node.role) || !same(member.label, node.label) || !same(member.codexConfigProfile, node.codexConfigProfile)
+      || !same(member.runtime, node.declaredRuntime ?? node.runtime) || !same(member.role, node.role) || !same(member.label, node.label) || !same(member.codexConfigProfile, node.codexConfigProfile)
       || !same(member.permissionPolicy, node.permissionPolicy) || !same(member.readinessTimeoutMs, node.readinessTimeoutMs)
       || (member.fallbackRuntimes ?? []).join(",") !== (node.fallbackRuntimes ?? []).join(",")) return refuse("Member source disagrees with the retained seat identity or policy.");
     const resolved = resolveAgentRef(member.agentRef, rigRoot, this.deps.fsOps);
@@ -1868,15 +1869,22 @@ export class PodRigInstantiator {
     const candidates = [declared, ...fallbacks];
     const attempts: FallbackAttempt[] = [];
     let last: AgentMemberLaunchResult | undefined;
+    const launchCwd = resolveLaunchCwd(input.member.cwd, input.rigRoot, input.cwdOverride);
     for (const [index, runtime] of candidates.entries()) {
       const hasNext = index < candidates.length - 1;
       const binary = getRuntimeDescriptor(runtime)?.binary;
-      if (binary && hasNext && !isCommandOnPath(binary, process.env.PATH, resolveLaunchCwd(input.member.cwd, input.rigRoot, input.cwdOverride))) {
+      if (binary && hasNext && !isCommandOnPath(binary, process.env.PATH, launchCwd)) {
         attempts.push({ runtime, outcome: "skipped", reason: `${binary} is not on the launch PATH` });
         continue;
       }
       // The launch env and seat identity read nodes.runtime, so it names this attempt.
       this.deps.rigRepo.setNodeRunningRuntime(input.nodeId, runtime);
+      // What this runtime's launch merges and projects into the cwd, so a failed
+      // attempt can be undone before the next runtime launches.
+      const residue = hasNext ? snapshotAttemptResidue(attemptResidueTargets({
+        runtime, cwd: launchCwd, sessionName: deriveCanonicalSessionName(input.pod.id, input.member.id, input.rigSpec.name),
+        claudeManagedBlockFile: this.deps.rigRepo.getRigClaudeManagedBlockFile(input.rigId),
+      })) : null;
       const result = await this.launchMemberOnRuntime({
         ...input,
         member: { ...input.member, runtime },
@@ -1897,9 +1905,16 @@ export class PodRigInstantiator {
       attempts.push({ runtime, outcome: result.status, reason: result.error });
       if (!hasNext || result.status !== "attention_required" || !isFallbackAttentionCode(result.attentionCode)) break;
       await this.releaseFailedAttempt(input.nodeId, result.sessionName);
+      if (residue) {
+        const removed = removeAttemptResidue(residue);
+        if (removed.blocks.length > 0 || removed.skills.length > 0) {
+          attempts[attempts.length - 1]!.reason = `${result.error ?? "attention required"}; removed its managed blocks [${removed.blocks.join(", ")}] and skills [${removed.skills.join(", ")}]`;
+        }
+      }
     }
-    // No runtime started: the seat keeps its declared runtime on record.
-    this.deps.rigRepo.setNodeRunningRuntime(input.nodeId, declared);
+    // No runtime reached readiness. The last attempt's session is still there
+    // (at its gate, for the operator), so the seat keeps that runtime on record:
+    // status, teardown and restore then follow the session that actually exists.
     const summary = `no runtime started for ${input.qualifiedId}: ${describeFallbackAttempts(attempts)}`;
     if (!last) return { status: "attention_required", error: summary, attentionCode: "runtime_missing" };
     return { ...last, error: summary };

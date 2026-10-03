@@ -361,7 +361,11 @@ Every other outcome stops the chain where it is: a trust gate, an update
 prompt, or a crash is reported for the runtime that hit it, not hidden by
 switching runtimes. Each attempt starts a fresh session after stopping the
 previous attempt's terminal session; a resume token never moves between
-runtimes. Rate limits do not trigger fallback: no runtime reports a rate limit
+runtimes. Before the next runtime launches, OpenRig also removes what
+the failed attempt added to the cwd: managed blocks it merged into that
+runtime's guidance file (for example `CLAUDE.md`) and skill directories it
+projected (for example `.claude/skills/<skill>`). Blocks and skills that were
+there before the attempt are left alone. Rate limits do not trigger fallback: no runtime reports a rate limit
 at launch through a signal OpenRig can detect reliably and test.
 
 The seat records the runtime it actually runs on:
@@ -374,9 +378,19 @@ The seat records the runtime it actually runs on:
 - A `node.runtime_fallback` event lists every attempt.
 - Restore resumes on the runtime the seat ran on and never falls back.
 - `rig spec export` keeps the declared `runtime` and `fallback_runtimes`.
+- A per-seat permission selection (`rig seat set-permissions`) made for one of
+  the seat's runtimes still applies on another of them when it is `floor` or
+  `full_bypass` and that runtime accepts the mode. Otherwise (a Claude-only
+  mode on Codex, or a runtime without per-seat modes such as Pi) the rig's
+  policy posture applies. Launch, restore, and handover follow this rule, and
+  each launch records the decision as a `node.permission_selection_fallback`
+  event.
 
-When no runtime starts, the seat needs attention, keeps its declared runtime
-on record, and the error lists each attempt and why it failed. Preflight
+When no runtime starts, the seat needs attention and the error lists each
+attempt and why it failed. The last attempt's session stays at its gate for
+the operator, so the seat records that runtime (with `declaredRuntime`), and
+status, teardown, and restore follow it. A first-start retry starts again from
+the declared runtime. Preflight
 warns when the declared runtime is missing but a fallback is available, and
 fails only when every candidate is missing.
 

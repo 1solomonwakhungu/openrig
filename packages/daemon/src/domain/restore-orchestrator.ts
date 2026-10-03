@@ -2,7 +2,6 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { NativePermissionStore } from "./native-permission-store.js";
-import { permissionBindingOverride } from "./native-permission-selection.js";
 import type { RigRepository } from "./rig-repository.js";
 import { resolvePermissionPolicyAttachment } from "./permission-policy/policy-ref.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -1709,11 +1708,10 @@ export class RestoreOrchestrator {
     const adapter = adapters.find((candidate) => candidate.canResume(resumeType, resumeToken));
     let permissionMode: string | undefined;
     try {
-      const selection = new NativePermissionStore(this.db).read(nodeId);
       // Pre-registry fallback: an unmatched pair was attributed to "pi".
       const runtime = adapter?.runtime ?? "pi";
-      if (selection && selection.runtime !== runtime) throw new Error("Seat runtime changed since permission selection; explicitly select again or inherit.");
-      const override = permissionBindingOverride(selection);
+      // A seat on a fallback runtime carries its selection per overrideFor.
+      const { override } = new NativePermissionStore(this.db).overrideFor(nodeId, runtime);
       resolvedPosture = override.launchPosture ?? resolvedPosture;
       permissionMode = override.permissionMode;
     } catch (error) { return { kind: "failed", message: `Permission selection: ${(error as Error).message}` }; }
