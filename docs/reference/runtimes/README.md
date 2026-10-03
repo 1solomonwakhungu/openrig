@@ -46,7 +46,7 @@ The checks are local only: the version probe is `<binary> --version` (as preflig
 | `grok` | `XAI_API_KEY`, or `<GROK_HOME or ~/.grok>/auth.json` | missing |
 | `goose` | a provider (`GOOSE_PROVIDER`, or `GOOSE_PROVIDER:` in `<XDG_CONFIG_HOME or ~/.config>/goose/config.yaml`) and its key in the env (or `secrets.yaml` with `GOOSE_DISABLE_KEYRING`) | missing without a provider; unknown when the key is in the system keychain |
 | `antigravity` | `GEMINI_API_KEY` with `modelProvider: "gemini"` in `~/.gemini/antigravity-cli/settings.json` | unknown (Google sign-in is in the OS keyring) |
-| `claude-code`, `codex`, `pi` | not checked | unknown |
+| `claude-code`, `codex`, `pi`, `omp` | not checked | unknown |
 
 ## Model names
 
