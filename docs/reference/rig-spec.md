@@ -220,8 +220,9 @@ Redirect targets (each verified in the CLI's source unless noted):
 | `pi` | the seat's own agent directory (`AGENTS.md` under OpenRig's Pi seat state), outside the repository |
 | `codex`, `gemini`, `opencode`, `copilot`, `cursor`, `antigravity`, `aider` | none: `redirect` behaves as `skip` (Codex's `AGENTS.override.md` hides `AGENTS.md`; the others need configuration, or are not verified) |
 
-A new redirect file inside a tracked directory shows as untracked in
-`git status` until you ignore it.
+A redirect file shows as untracked in `git status` until you ignore it. Add it
+to `.git/info/exclude` (local to your clone) or `.gitignore`; for `grok`, use
+`.git/info/exclude`, because Grok does not load a gitignored rule file.
 
 ### Attaching a permission policy
 

@@ -144,7 +144,9 @@ cannot be tied to one seat by the TUI's pid. The match is therefore guarded:
   `resolveWorkspaceRoot`), so a seat whose cwd is a repository subdirectory
   gets its blocks at the repository root. `rig-role` content is delivered per
   seat instead, and teardown strips the managed blocks from the same file.
-  Verified from source; which file a live session loads is not observable
+  Cline seats in different subdirectories of one repository share that root
+  `AGENTS.md`. Teardown also strips blocks an older OpenRig wrote into the
+  seat cwd's `AGENTS.md`. Verified from source; which file a live session loads is not observable
   without signing in.
 - Skills: projected into `<cwd>/.cline/skills/<skill>/`, one of Cline's
   workspace skill locations (alongside `.clinerules/skills` and `.agents/skills`).

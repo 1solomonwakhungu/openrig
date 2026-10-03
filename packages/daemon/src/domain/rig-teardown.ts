@@ -231,7 +231,13 @@ export class RigTeardownOrchestrator {
     const redirectPath = runtime === "claude-code"
       ? nodePath.join(cwd, CLAUDE_TRACKED_GUIDANCE_REDIRECT)
       : getRuntimeDescriptor(runtime)?.trackedGuidanceRedirect?.({ cwd }) ?? null;
-    for (const path of guidanceTeardownTargets({ targetPath, policy: this.deps.rigRepo.getRigGuidanceTrackedFile(rigId), redirectPath })) {
+    const policy = this.deps.rigRepo.getRigGuidanceTrackedFile(rigId);
+    const paths = guidanceTeardownTargets({ targetPath, policy, redirectPath });
+    // Launches before the runtime declared a guidanceRoot wrote into the seat
+    // cwd; strip their blocks too so they are not orphaned in the repository.
+    const legacyPath = runtime === "claude-code" ? null : legacyGuidanceCleanupFile(runtime, cwd);
+    if (legacyPath) paths.push(...guidanceTeardownTargets({ targetPath: legacyPath, policy }));
+    for (const path of paths) {
       removeManagedBlocksFromFile({
         exists: (p) => fs.existsSync(p),
         readFile: (p) => fs.readFileSync(p, "utf-8"),
@@ -249,4 +255,13 @@ export function registeredGuidanceCleanupFile(runtime: string, cwd: string): str
   if (!descriptor?.guidanceFile || descriptor.cleanupGuidanceOnTeardown === false) return null;
   // Symmetric with delivery: the same guidanceRoot the adapter wrote under.
   return nodePath.join(descriptor.guidanceRoot?.({ cwd }) ?? cwd, descriptor.guidanceFile);
+}
+
+/** The seat-cwd guidance file a runtime wrote before it declared a guidanceRoot,
+ *  or null when the root is the cwd (the regular cleanup already covers it). */
+export function legacyGuidanceCleanupFile(runtime: string, cwd: string): string | null {
+  const descriptor = getRuntimeDescriptor(runtime);
+  if (!descriptor?.guidanceRoot || !descriptor.guidanceFile || descriptor.cleanupGuidanceOnTeardown === false) return null;
+  const legacy = nodePath.join(cwd, descriptor.guidanceFile);
+  return legacy === registeredGuidanceCleanupFile(runtime, cwd) ? null : legacy;
 }
