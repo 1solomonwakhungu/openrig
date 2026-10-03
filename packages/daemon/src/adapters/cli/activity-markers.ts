@@ -171,6 +171,14 @@ const GOOSE: RuntimeActivityMarkers = {
   inputPromptPatterns: [anyPanePhrase(["Goose would like to call the above tool, do you allow?", "Do you allow this tool call?"])],
 };
 
+/** kiro-cli 2.27.1 (strings in kiro-cli-chat; crates/chat-cli/src/cli/chat). */
+const KIRO: RuntimeActivityMarkers = {
+  // The chat spinner while a turn runs.
+  busyPatterns: [panePhrase("Thinking...")],
+  // Tool approval: "Allow this action? Use 't' to trust (always allow) ... [y/n/t]".
+  inputPromptPatterns: [panePhrase("Allow this action?")],
+};
+
 const MARKERS: Readonly<Record<string, RuntimeActivityMarkers>> = {
   aider: AIDER,
   antigravity: ANTIGRAVITY,
@@ -181,6 +189,7 @@ const MARKERS: Readonly<Record<string, RuntimeActivityMarkers>> = {
   goose: GOOSE,
   grok: GROK,
   kilo: KILO,
+  kiro: KIRO,
   opencode: OPENCODE,
   qwen: QWEN,
 };

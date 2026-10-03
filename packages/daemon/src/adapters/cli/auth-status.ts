@@ -299,3 +299,18 @@ export function antigravityAuthStatus(ctx: RuntimeAuthContext): RuntimeAuthStatu
     detail: "Google sign-in is kept in the OS keyring, which OpenRig does not read",
   };
 }
+
+// ── Kiro CLI ────────────────────────────────────────────────────────────────
+
+/** kiro: KIRO_API_KEY (by name) signs a seat in for headless use. A browser
+ *  login lives in kiro-cli's own SQLite database (auth_kv in data.sqlite3),
+ *  which also exists before any sign-in and is never opened here, so without
+ *  the key the answer is "unknown", never a guess. */
+export function kiroAuthStatus(ctx: RuntimeAuthContext): RuntimeAuthStatus {
+  if ((ctx.env.KIRO_API_KEY ?? "").trim()) return { state: "signed_in", source: "env KIRO_API_KEY" };
+  return {
+    state: "unknown",
+    hint: "run `kiro-cli login` once, or set KIRO_API_KEY",
+    detail: "a browser sign-in is kept in kiro-cli's data.sqlite3, which this check does not open",
+  };
+}

@@ -1,0 +1,22 @@
+$ KIRO_TUI_READY_FILE=/home/user/workspaces/example-org/team-repositories/sandbox/kiroready.flag KIRO_TUI_READY_TOKEN=tok123 kiro-cli chat --trust-all-tools --model claude-sonnet-4.5
+
+Welcome to Kiro CLI, let's get you signed in!
+
+Press enter to continue to the browser or esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

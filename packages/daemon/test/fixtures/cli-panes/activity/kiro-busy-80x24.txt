@@ -1,0 +1,4 @@
+
+> Add a health route to the API
+
+⠋ Thinking...

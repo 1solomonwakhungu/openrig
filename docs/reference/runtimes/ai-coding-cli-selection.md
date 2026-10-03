@@ -135,8 +135,8 @@ Sources for vendor claims and status:
 
 | Candidate | Outcome | Reason |
 |---|---|---|
-| Goose (#11) | Runner-up; supported since (`runtime: goose`, [goose.md](goose.md)) | 54.8k stars but only about 60k CLI binary downloads/month and 1,156 Homebrew; much of its audience uses the desktop app. Within 0.03 of #10. |
-| Kiro CLI (#12) | Runner-up | Amazon Q Developer CLI was rebranded to Kiro CLI; the `amazon-q` cask no longer exists. Kiro CLI Homebrew 714/30d is comparable to Cursor CLI, but no stars or vendor claim specific to the CLI. Within 0.03 of #10. |
+| Goose (#11) | Runner-up; now supported (`runtime: goose`, [goose.md](goose.md)) | 54.8k stars but only about 60k CLI binary downloads/month and 1,156 Homebrew; much of its audience uses the desktop app. Within 0.03 of #10. |
+| Kiro CLI (#12) | Runner-up; now supported (`runtime: kiro`, [kiro.md](kiro.md); no resume, readiness partly derived) | Amazon Q Developer CLI was rebranded to Kiro CLI; the `amazon-q` cask no longer exists. Kiro CLI Homebrew 714/30d is comparable to Cursor CLI, but no stars or vendor claim specific to the CLI. Within 0.03 of #10. |
 | Kimi Code (#13) | Runner-up | Solid measured npm (154k) but small Homebrew and star counts. Legacy `kimi-cli` is archived. |
 | Crush (#14) | Runner-up | 28k stars but under 100k measured installs. |
 | Open Interpreter (#15) | Runner-up | High stars (68k) from its 2023-2024 peak; 29k PyPI/month now; less of a coding agent than a general computer-use shell. |

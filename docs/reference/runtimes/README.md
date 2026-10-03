@@ -20,7 +20,8 @@ One line per runtime, alphabetical by id:
 - `goose`: [Goose](goose.md) (`goose`). Resume by session id read from goose's sessions database, fork via `--fork`, managed `AGENTS.md` blocks, `.agents/skills`.
 - `grok`: Grok Build (`grok`). Resume and fork by minted session id, managed `AGENTS.md` blocks. [grok.md](grok.md)
 - `kilo`: Kilo CLI (`kilo`), an OpenCode fork. Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.kilo/skills`. No fork. See [kilo.md](kilo.md).
-- `omp`: Oh My Pi (`omp`, the Pi RPC runner in the pane, ported from upstream #35). Isolated per-seat state and HOME under `<OPENRIG_HOME>/state/omp/<seat>`, resume by session file once the file exists, fork, approval mode `always-ask` (floor) or `yolo` (full_bypass). See the `omp` notes in [rig-spec.md](../rig-spec.md).
+- `kiro`: [Kiro CLI](kiro.md) (`kiro-cli`). No resume (restore asks for `--fresh`), no fork, managed `AGENTS.md` blocks, `.kiro/skills`. Readiness partly derived from binary strings; see the doc.
+- `omp`: Oh My Pi (`omp`, the Pi RPC runner in the pane, ported from the upstream Oh My Pi runtime). Isolated per-seat state and HOME under `<OPENRIG_HOME>/state/omp/<seat>`, resume by session file once the file exists, fork, approval mode `always-ask` (floor) or `yolo` (full_bypass). See the `omp` notes in [rig-spec.md](../rig-spec.md).
 - `opencode`: OpenCode (`opencode`). Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.opencode/skills`. No fork. See [opencode.md](opencode.md).
 - `pi`: Pi coding agent (`pi`, RPC runner in the pane). Resume by session file, fork.
 - `qwen`: Qwen Code (`qwen`), a Gemini CLI fork. Resume by minted session id, managed `QWEN.md` blocks, `.qwen/skills`. Fork via `--fork-session`. See [qwen.md](qwen.md).
@@ -45,6 +46,7 @@ The checks are local only: the version probe is `<binary> --version` (as preflig
 | `aider` | a provider key in the env, or a `*_API_KEY=` line in `.env` (cwd or home) or `~/.aider/oauth-keys.env` | missing |
 | `grok` | `XAI_API_KEY`, or `<GROK_HOME or ~/.grok>/auth.json` | missing |
 | `goose` | a provider (`GOOSE_PROVIDER`, or `GOOSE_PROVIDER:` in `<XDG_CONFIG_HOME or ~/.config>/goose/config.yaml`) and its key in the env (or `secrets.yaml` with `GOOSE_DISABLE_KEYRING`) | missing without a provider; unknown when the key is in the system keychain |
+| `kiro` | `KIRO_API_KEY` in the env (checked by name) | unknown: a browser sign-in is kept in kiro-cli's `data.sqlite3`, which the check never opens |
 | `antigravity` | `GEMINI_API_KEY` with `modelProvider: "gemini"` in `~/.gemini/antigravity-cli/settings.json` | unknown (Google sign-in is in the OS keyring) |
 | `claude-code`, `codex`, `pi`, `omp` | not checked | unknown |
 
@@ -58,6 +60,7 @@ A member's `model:` is passed to its CLI as is. Preflight checks its form agains
 | `gemini` | a `gemini-*` id, or an alias: `auto`, `pro`, `flash`, `flash-lite` | `pro` |
 | `qwen` | a model id of the configured provider, without spaces | `qwen3-coder-plus` |
 | `goose` | a model id of the configured goose provider (`GOOSE_PROVIDER`), without spaces | `claude-sonnet-4-5` |
+| `kiro` | a Kiro model id as `kiro-cli chat --list-models` prints it (no provider prefix), or `auto` | `claude-sonnet-4.5` |
 | `copilot` | a Copilot model id without a provider prefix | `gpt-5.4` |
 | `cursor` | a Cursor model id without a provider prefix (bracket overrides allowed) | `gpt-5` |
 | `aider` | an aider alias or a provider model name | `sonnet` |

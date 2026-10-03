@@ -91,3 +91,12 @@ export const CLINE_MODEL_SHAPE: RuntimeModelShape = {
   example: "omit model:",
   note: "set it with cline auth <provider> -m <model>",
 };
+
+/** kiro: Kiro model ids (`kiro-cli chat --list-models`), e.g. claude-sonnet-4.5,
+ *  from kiro-cli-chat 2.27.1 strings; `auto` lets Kiro choose. Warn-only. */
+export const KIRO_MODEL_SHAPE: RuntimeModelShape = {
+  pattern: /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
+  example: "claude-sonnet-4.5",
+  note: "a Kiro model id from `kiro-cli chat --list-models` (no provider prefix), or auto",
+  aliases: ["auto"],
+};
