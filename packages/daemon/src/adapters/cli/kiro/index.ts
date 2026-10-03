@@ -96,6 +96,8 @@ export const KIRO_DESCRIPTOR: RuntimeDescriptor = {
   },
   // No resumeType: see the header. Restore stops for an explicit --fresh.
   supportsFork: false,
+  // Each posture passes its own tool-trust argument, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   // Kiro reads workspace AGENTS.md (derived) besides .kiro/steering.
   guidanceFile: "AGENTS.md",
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".kiro", "skills"),

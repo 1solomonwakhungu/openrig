@@ -38,6 +38,7 @@ describe("buildKiroArgv", () => {
     expect(observe("full_bypass")).toMatchObject({ state: "observed", value: "--trust-all-tools" });
     const postureFor = KIRO_DESCRIPTOR.permissionPostureFor!;
     expect([postureFor("--trust-tools="), postureFor("--trust-all-tools"), postureFor("--trust-tools=fs_read")]).toEqual(["floor", "full_bypass", null]);
+    expect(KIRO_DESCRIPTOR.permissionModes).toEqual(["floor", "full_bypass"]);
   });
 });
 

@@ -43,7 +43,8 @@ members:
 | `floor` (default) | `--trust-tools=` (trust no tools: Kiro asks before every tool call) |
 | `full_bypass` | `--trust-all-tools` (every tool runs without asking) |
 
-Both arguments come from `kiro-cli chat --help`. OpenRig records the emitted
+Both arguments come from `kiro-cli chat --help`. Kiro declares both modes, so
+`rig seat set-permissions` can select either for a kiro seat. OpenRig records the emitted
 argument as the seat's applied-launch observation (axis `permission`), and
 permission drift compares the posture it implies with the seat's policy.
 
