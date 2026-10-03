@@ -239,6 +239,9 @@ export function createTestApp(
     listProcesses?: () => Promise<Array<{ pid: number; ppid: number; command: string }>>;
     /** Per-seat runtime state root for launch records (trust answers). */
     runtimeStateRoot?: string;
+    /** The arbitrated seat activity oracle (feature 2): wired into the app,
+     *  the ps projection, and the attention reconciler when given. */
+    seatActivityService?: import("../../src/domain/seat-activity-service.js").SeatActivityService;
     /**
      * Agent Starter v1 vertical M2: optional real-fs upRouter for tests
      * that POST /api/up with a YAML spec on disk. Default behavior
@@ -395,6 +398,7 @@ export function createTestApp(
     agentActivityStore,
     db,
     tmux,
+    seatActivity: opts?.seatActivityService,
     reconcileRestoreOutcome: (rigId, nodeId) => restoreOrchestrator.reconcileNodeRuntimeTruth(rigId, nodeId),
   });
 
@@ -415,7 +419,7 @@ export function createTestApp(
     bootstrapOrchestrator, bootstrapRepo,
     discoveryCoordinator, discoveryRepo, claimService, selfAttachService, rigExpansionService,
     rigLifecycleService,
-    psProjectionService: new PsProjectionService({ db }),
+    psProjectionService: new PsProjectionService({ db, seatActivity: opts?.seatActivityService }),
     upRouter,
     teardownOrchestrator: new RigTeardownOrchestrator({ db, rigRepo, sessionRegistry, tmuxAdapter: tmux, snapshotCapture, eventBus }),
     podInstantiator,
@@ -438,6 +442,7 @@ export function createTestApp(
     // and pass it here explicitly.
     permissionDriftObserver: opts?.permissionDriftObserver ?? { diagnose: () => null },
     runtimeStateRoot,
+    seatActivityService: opts?.seatActivityService,
     // Caller-supplied adapters always reach route handlers; the always-ready
     // instantiator stubs only when explicitly wired, since they would make
     // restore routes report resumes.
@@ -452,7 +457,7 @@ export function createTestApp(
     bootstrapOrchestrator, bootstrapRepo,
     discoveryCoordinator, discoveryRepo, claimService, selfAttachService, rigExpansionService, tmuxScanner,
     rigLifecycleService,
-    psProjectionService: new PsProjectionService({ db }),
+    psProjectionService: new PsProjectionService({ db, seatActivity: opts?.seatActivityService }),
     upRouter,
     teardownOrchestrator: new RigTeardownOrchestrator({ db, rigRepo, sessionRegistry, tmuxAdapter: tmux, snapshotCapture, eventBus }),
     podInstantiator, podBundleSourceResolver, db, tmuxAdapter: tmux,

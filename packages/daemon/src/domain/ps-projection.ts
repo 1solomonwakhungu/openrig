@@ -77,11 +77,18 @@ export interface PsEntry {
  *   - a held seat (`heldReason` present)
  *   - a recorded startup error (`latestError` present)
  */
-export function seatNeedsAttention(entry: NodeInventoryEntry, activity: AgentActivity | null): boolean {
+export function seatNeedsAttention(
+  entry: NodeInventoryEntry,
+  activity: AgentActivity | null,
+  arbitratedNeedsInput = false,
+): boolean {
   return entry.lifecycleState === "attention_required"
     || entry.startupStatus === "attention_required"
     || entry.startupStatus === "failed"
     || activity?.state === "needs_input"
+    // The arbitrated seat state (feature 2): registry CLI seats report a visible
+    // gate or in-session prompt here, and have no hook activity.
+    || arbitratedNeedsInput
     || entry.heldReason != null
     || entry.latestError != null;
 }
@@ -279,7 +286,13 @@ export class PsProjectionService {
         const activity = this.agentActivity && node.canonicalSessionName
           ? this.agentActivity.getLatestForNode({ sessionName: node.canonicalSessionName, now: nowDate })
           : null;
-        if (seatNeedsAttention(node, activity)) attentionCount++;
+        // Capability-checked (as node-inventory does): a partial injected double
+        // without the S19 surface contributes nothing rather than throwing.
+        const arbitrated = this.seatActivity && node.canonicalSessionName
+          && typeof this.seatActivity.getSeatStateBySession === "function"
+          ? this.seatActivity.getSeatStateBySession(node.canonicalSessionName)
+          : null;
+        if (seatNeedsAttention(node, activity, (arbitrated?.needsInput.count ?? 0) > 0)) attentionCount++;
       }
 
       return {

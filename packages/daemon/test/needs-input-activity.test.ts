@@ -5,11 +5,13 @@
 
 import fs from "node:fs";
 import nodePath from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CLI_RUNTIME_REGISTRATIONS } from "../src/adapters/cli/index.js";
 import { activityMarkers } from "../src/adapters/cli/activity-markers.js";
 import { harnessBinding, harnessDeps, memFs, mockTmux } from "./helpers/tui-cli-adapter-harness.js";
 import { SeatActivityService } from "../src/domain/seat-activity-service.js";
+import { SeatAttentionReconciler } from "../src/domain/seat-attention-reconciler.js";
+import { createFullTestDb, createTestApp } from "./helpers/test-app.js";
 import { TUI_CLI_ACTIVITY_RUNG_INVENTORY, TMUX_GENERIC_RUNG_INVENTORY, runtimeRungInventory } from "../src/domain/activity-taxonomy.js";
 
 const FIXTURES = nodePath.join(__dirname, "fixtures");
@@ -135,3 +137,72 @@ describe("seat activity sweep feeds the pane classification", () => {
     expect(rig.state()).toMatchObject({ needsInput: { count: 0 } });
   });
 });
+
+describe("rig ps and the attention reconciler see a registry seat at a gate", () => {
+  /** A copilot seat whose pane shows the live 80x24 sign-in screen, classified by
+   *  the real copilot adapter through a real SeatActivityService sweep. */
+  async function gatedSeat() {
+    const db = createFullTestDb();
+    const registration = CLI_RUNTIME_REGISTRATIONS.find((r) => r.descriptor.id === "copilot")!;
+    const pane = mockTmux([{ command: "copilot", content: read("cli-panes/copilot-80-idle-unauth.txt") }]);
+    const adapter = registration.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: memFs() }));
+    const seatActivityService = new SeatActivityService({
+      tmux: { readPaneLastActivity: async () => Math.floor(Date.now() / 1000) - 60 },
+      defaultWindowSeconds: 3,
+      paneClassifier: {
+        supports: (runtime) => runtime === "copilot",
+        classify: async (_runtime, sessionName) => adapter.classifyActivity!(harnessBinding({ tmuxSession: sessionName })),
+      },
+    });
+    const app = createTestApp(db, { seatActivityService });
+    const rig = app.rigRepo.createRig("gate-rig");
+    const node = app.rigRepo.addNode(rig.id, "dev.impl", { runtime: "copilot", cwd: "/work/repo" });
+    const session = app.sessionRegistry.registerSession(node.id, "dev-impl@gate-rig");
+    app.sessionRegistry.updateStatus(session.id, "running");
+    await seatActivityService.pollAllRunningTmuxSeats(db);
+    return { db, app, rig, node, session, seatActivityService };
+  }
+
+  it("the ps node API shows needs-input and the rig rollup counts the seat for attention", async () => {
+    const { db, app, rig } = await gatedSeat();
+    try {
+      const nodes = await (await app.app.request(`/api/rigs/${rig.id}/nodes`)).json() as Array<{ activityState?: { display: string; needsInput: { count: number } } }>;
+      expect(nodes[0]!.activityState).toMatchObject({ display: "needs-input", needsInput: { count: 1 } });
+      const ps = await (await app.app.request("/api/ps")).json() as Array<{ rigId: string; attentionCount: number }>;
+      expect(ps.find((r) => r.rigId === rig.id)?.attentionCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("the attention reconciler refuses to clear a seat at a gate (via the app route)", async () => {
+    const { db, app, session } = await gatedSeat();
+    try {
+      app.sessionRegistry.updateStartupStatus(session.id, "attention_required");
+      const res = await app.app.request(`/api/sessions/${encodeURIComponent("dev-impl@gate-rig")}/clear-attention`, { method: "POST" });
+      const body = await res.json() as { ok: boolean; code?: string; detail?: string };
+      expect(body).toMatchObject({ ok: false, code: "not_demonstrably_responsive" });
+      expect(body.detail).toMatch(/needs-input/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("the reconciler types no liveness probe into a gated pane", async () => {
+    const { db, app, session, seatActivityService } = await gatedSeat();
+    try {
+      app.sessionRegistry.updateStartupStatus(session.id, "attention_required");
+      const sendVerify = vi.fn(async () => ({ ok: true, outcome: "delivered" as const }));
+      const reconciler = new SeatAttentionReconciler({
+        sessionRegistry: app.sessionRegistry, eventBus: app.eventBus,
+        agentActivityStore: { getLatestForNode: () => null } as never,
+        seatActivity: seatActivityService, sendVerify: sendVerify as never,
+      });
+      expect(await reconciler.clearAttention("dev-impl@gate-rig")).toMatchObject({ ok: false });
+      expect(sendVerify).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
+  });
+});
+
