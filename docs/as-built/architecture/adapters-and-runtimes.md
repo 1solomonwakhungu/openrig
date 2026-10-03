@@ -425,8 +425,13 @@ Optional, read-only hooks that a runtime implements and core consumes, added
 before the features that use them (`packages/daemon/src/domain/runtime-capabilities.ts`).
 Every hook reads local files and environment only: no network, no login, no
 keychain, no writes. Core calls a hook only through its runner, which never
-throws: a throw becomes the hook's unknown value (`null`, or `state: "unknown"`
-with a `detail`) and a logged reason that never includes a secret value. Seat
+throws and never hangs: a throw, or a miss of the runner's deadline
+(`CAPABILITY_TIMEOUTS_MS`: 2s for auth, 5s for usage and transcript; callers
+may pass `timeoutMs`), becomes the hook's unknown value (`null`, or
+`state: "unknown"` with a `detail`). The logged reason and the `detail` name
+only the error's `name` and `code`, never its message, because a `JSON.parse`
+error quotes the file it read and could leak key text. `checkModelShape`
+ignores `g` and `y` flags on a declared pattern so repeated checks agree. Seat
 hooks receive `RuntimeSeatReadInput` (`sessionName`, `cwd`, `seatStateDir`,
 `homedir`, `resumeToken`, and `launchStartedAt`, which the runner fills from
 the seat's `launch.json`). No built-in runtime declares a hook yet, so
@@ -440,7 +445,7 @@ the seat's `launch.json`). No built-in runtime declares a hook yet, so
 | `docsPath` | descriptor | repo-relative docs page | n/a | `rig runtimes` docs link (feature 6) |
 | `readTranscript` | descriptor | `(input) => { source; entries: { role; text; at? }[]; truncated? } \| null` | `runDescriptorTranscriptRead` (keeps the newest `maxEntries`) | `rig transcript` fallback when the pane transcript is thin, after transcript redaction (feature 5) |
 | `busyPatterns` | `TuiCliRuntimeSpec` | the CLI's busy markers | n/a | read by `classifyActivity` |
-| `classifyActivity` | `RuntimeAdapter` (optional), implemented once in `TuiCliRuntimeAdapter` | `(binding) => "working" \| "idle" \| "needs_input" \| null`: pane at a shell is null, then gate is needs_input, busy is working, ready is idle, otherwise null so a wrong guess never suppresses a wake | n/a | activity taxonomy and `rig ps` for registry runtimes; claude-code, codex, and pi keep their own sources (feature 2) |
+| `classifyActivity` | `RuntimeAdapter` (optional), implemented once in `TuiCliRuntimeAdapter` | `(binding) => "working" \| "idle" \| "needs_input" \| null`, read from the visible screen only (never scrollback), with gate and busy markers matched only in the bottom status region (`ACTIVITY_STATUS_LINES` non-blank lines) so stale lines never count: pane at a shell is null, then gate is needs_input, busy is working, ready is idle, otherwise null so a wrong guess never suppresses a wake | n/a | activity taxonomy and `rig ps` for registry runtimes; claude-code, codex, and pi keep their own sources (feature 2) |
 
 Per-seat permission modes (`permissionModes`) are added with their consumer in
 the feature-3 PR, not here.

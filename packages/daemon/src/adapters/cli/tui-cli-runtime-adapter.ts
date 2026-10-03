@@ -67,6 +67,8 @@ const PANE_CAPTURE_LINES = 40;
  *  long line printed inline wraps at the pane width, possibly mid-word, and
  *  patterns must see the line as printed. */
 const JOINED = { joinWrapped: true } as const;
+/** classifyActivity's bottom status region: the last N non-blank screen lines. */
+export const ACTIVITY_STATUS_LINES = 12;
 
 export interface TuiCliLaunchInput {
   binding: NodeBinding;
@@ -502,9 +504,13 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   }
 
   /**
-   * Activity from the pane (F1, feature 2), using the same joined capture and
-   * shell-foreground guard as readiness. In order: pane at a shell => null; a
-   * gate on screen => needs_input; a busy marker => working; a ready marker =>
+   * Activity from the pane (F1, feature 2), with the readiness shell guard.
+   * Reads the visible screen only (never scrollback), and matches gate and
+   * busy markers only in its bottom status region (the last
+   * ACTIVITY_STATUS_LINES non-blank lines), so an old busy line or an answered
+   * dialog left higher on the screen never reads as working or needs_input.
+   * In order: pane at a shell => null; a gate in the status region =>
+   * needs_input; a busy marker there => working; a ready marker on screen =>
    * idle; anything else => null, so callers fall back to their generic source
    * and a wrong guess never suppresses a wake.
    */
@@ -512,10 +518,11 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     if (!binding.tmuxSession) return null;
     const paneCommand = ((await this.tmux.getPaneCommand(binding.tmuxSession)) ?? "").trim().replace(/^-/, "");
     if (SHELL_COMMANDS.has(paneCommand)) return null;
-    const content = (await this.tmux.capturePaneContent(binding.tmuxSession, PANE_CAPTURE_LINES, JOINED)) ?? "";
-    if ((this.spec.gatePatterns ?? []).some((gate) => gate.pattern.test(content))) return "needs_input";
-    if ((this.spec.busyPatterns ?? []).some((pattern) => pattern.test(content))) return "working";
-    if (this.spec.readyPatterns.some((pattern) => pattern.test(content))) return "idle";
+    const screen = (await this.tmux.capturePaneScreen(binding.tmuxSession, JOINED)) ?? "";
+    const status = screen.split("\n").filter((line) => line.trim() !== "").slice(-ACTIVITY_STATUS_LINES).join("\n");
+    if ((this.spec.gatePatterns ?? []).some((gate) => gate.pattern.test(status))) return "needs_input";
+    if ((this.spec.busyPatterns ?? []).some((pattern) => pattern.test(status))) return "working";
+    if (this.spec.readyPatterns.some((pattern) => pattern.test(screen))) return "idle";
     return null;
   }
 

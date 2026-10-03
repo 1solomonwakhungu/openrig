@@ -40,7 +40,8 @@ export interface MockTmux {
 }
 
 /** A tmux mock whose pane is a script of frames. Each getPaneCommand call
- *  advances to the next frame; capturePaneContent reads the current one. A
+ *  advances to the next frame; capturePaneContent and capturePaneScreen read
+ *  the current one. A
  *  launch reads the first frame before typing (the base refuses unless it is
  *  a shell), so launch scripts start with a shell frame (atShell()).
  *
@@ -72,6 +73,7 @@ export function mockTmux(frames: PaneFrame[] = [{ command: "zsh", content: "" }]
     hasSession: vi.fn(async () => alive),
     getPaneCommand: vi.fn(async () => { index = Math.min(index + 1, script.length - 1); return current().command; }),
     capturePaneContent: vi.fn(async () => current().content),
+    capturePaneScreen: vi.fn(async () => current().content),
     getPaneLinePosition: vi.fn(async () => script[0]!.content.split("\n").length - 1),
     isPaneAlternateScreen: vi.fn(async () => current().alternate === true),
     capturePaneFromLine: vi.fn(async (_target: string, line: number) => {

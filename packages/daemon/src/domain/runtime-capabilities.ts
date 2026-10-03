@@ -101,10 +101,13 @@ export interface RuntimeModelShape {
 
 export type ModelShapeCheck = { ok: true } | { ok: false; expected: string; example: string };
 
-/** Pure check of a model name against a runtime's shape. */
+/** Pure check of a model name against a runtime's shape. The pattern is
+ *  copied without the g and y flags, whose lastIndex would make repeated
+ *  checks of the same name disagree. */
 export function checkModelShape(shape: RuntimeModelShape, model: string): ModelShapeCheck {
   const name = model.trim();
-  if (shape.aliases?.includes(name) || shape.pattern.test(name)) return { ok: true };
+  const pattern = new RegExp(shape.pattern.source, shape.pattern.flags.replace(/[gy]/g, ""));
+  if (shape.aliases?.includes(name) || pattern.test(name)) return { ok: true };
   return { ok: false, expected: shape.note ?? shape.pattern.source, example: shape.example };
 }
 
@@ -143,6 +146,14 @@ export interface RuntimeTranscript {
 
 // ── Runners: the one path every consumer and test calls ──────────────────────
 
+/** Default runner deadlines: a hung hook must never hang rig ps, rig runtimes,
+ *  or rig transcript. Callers may pass a different timeoutMs. */
+export const CAPABILITY_TIMEOUTS_MS = { auth: 2_000, usage: 5_000, transcript: 5_000 } as const;
+
+export interface CapabilityRunOptions {
+  timeoutMs?: number;
+}
+
 function withLaunchTime<T extends RuntimeSeatReadInput>(input: T): T {
   return {
     ...input,
@@ -151,50 +162,89 @@ function withLaunchTime<T extends RuntimeSeatReadInput>(input: T): T {
   };
 }
 
-function logged(descriptor: RuntimeDescriptor, hook: string, sessionName: string | null, err: unknown): void {
-  const seat = sessionName ? ` for ${sessionName}` : "";
-  console.warn(`[openrig] ${descriptor.id} ${hook} failed${seat}: ${(err as Error)?.message ?? String(err)}`);
+/**
+ * What a failure may say: the error's name and code only. Never the message:
+ * a JSON.parse error quotes the file's text, so a malformed credential file
+ * would otherwise leak key material into logs and user-facing detail.
+ */
+export function describeCapabilityError(err: unknown): string {
+  if (err instanceof CapabilityTimeout) return `timed out after ${err.timeoutMs}ms`;
+  const name = err instanceof Error ? err.name : typeof err;
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" || typeof code === "number" ? `${name} (${code})` : name;
 }
 
-/** Read a seat's usage. Null when the runtime has no reader, has no data, or
- *  the reader throws (logged). */
+class CapabilityTimeout extends Error {
+  constructor(readonly timeoutMs: number) {
+    super("capability hook timed out");
+    this.name = "CapabilityTimeout";
+  }
+}
+
+/** Run a hook against a deadline. A synchronous hook runs to completion before
+ *  the deadline can apply; only async waits are bounded. */
+async function withDeadline<T>(run: () => T | Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(run),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new CapabilityTimeout(timeoutMs)), timeoutMs); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function logged(descriptor: RuntimeDescriptor, hook: string, sessionName: string | null, err: unknown): string {
+  const reason = describeCapabilityError(err);
+  console.warn(`[openrig] ${descriptor.id} ${hook} failed${sessionName ? ` for ${sessionName}` : ""}: ${reason}`);
+  return reason;
+}
+
+/** Read a seat's usage. Null when the runtime has no reader, has no data, the
+ *  reader throws, or it misses the deadline (both logged). */
 export async function runDescriptorUsageRead(
   descriptor: RuntimeDescriptor,
   input: RuntimeUsageInput,
+  opts: CapabilityRunOptions = {},
 ): Promise<RuntimeUsageSnapshot | null> {
-  if (!descriptor.readUsage) return null;
+  const hook = descriptor.readUsage;
+  if (!hook) return null;
   try {
-    return (await descriptor.readUsage(withLaunchTime(input))) ?? null;
+    return (await withDeadline(() => hook(withLaunchTime(input)), opts.timeoutMs ?? CAPABILITY_TIMEOUTS_MS.usage)) ?? null;
   } catch (err) {
     logged(descriptor, "readUsage", input.sessionName, err);
     return null;
   }
 }
 
-/** A runtime's sign-in status. "unknown" when it has no check or the check
- *  throws (logged, detail carries the reason). */
+/** A runtime's sign-in status. "unknown" when it has no check, the check
+ *  throws, or it misses the deadline; detail names the error kind only. */
 export async function runDescriptorAuthStatus(
   descriptor: RuntimeDescriptor,
   ctx: RuntimeAuthContext,
+  opts: CapabilityRunOptions = {},
 ): Promise<RuntimeAuthStatus> {
-  if (!descriptor.authStatus) return { state: "unknown" };
+  const hook = descriptor.authStatus;
+  if (!hook) return { state: "unknown" };
   try {
-    return (await descriptor.authStatus(ctx)) ?? { state: "unknown" };
+    return (await withDeadline(() => hook(ctx), opts.timeoutMs ?? CAPABILITY_TIMEOUTS_MS.auth)) ?? { state: "unknown" };
   } catch (err) {
-    logged(descriptor, "authStatus", null, err);
-    return { state: "unknown", detail: `sign-in check failed: ${(err as Error)?.message ?? String(err)}` };
+    return { state: "unknown", detail: `sign-in check failed: ${logged(descriptor, "authStatus", null, err)}` };
   }
 }
 
 /** Read a seat's native transcript. Null when the runtime has no source, the
- *  record is absent, or the reader throws (logged). */
+ *  record is absent, the reader throws, or it misses the deadline. */
 export async function runDescriptorTranscriptRead(
   descriptor: RuntimeDescriptor,
   input: RuntimeTranscriptInput,
+  opts: CapabilityRunOptions = {},
 ): Promise<RuntimeTranscript | null> {
-  if (!descriptor.readTranscript) return null;
+  const hook = descriptor.readTranscript;
+  if (!hook) return null;
   try {
-    const transcript = await descriptor.readTranscript(withLaunchTime(input));
+    const transcript = await withDeadline(() => hook(withLaunchTime(input)), opts.timeoutMs ?? CAPABILITY_TIMEOUTS_MS.transcript);
     if (!transcript) return null;
     if (input.maxEntries !== undefined && transcript.entries.length > input.maxEntries) {
       return { ...transcript, entries: transcript.entries.slice(-input.maxEntries), truncated: true };
