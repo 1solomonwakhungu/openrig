@@ -55,6 +55,16 @@ function fixture(runtime = "codex", file = ":memory:") {
 }
 const input = (mode: string) => ({ seatRef: "dev-owner@permissions", mode, reason: "deliberate operator choice", actor: "operator@permissions" });
 const lineage = (db: Database.Database) => JSON.stringify(["nodes", "sessions", "occupant_tenures", "node_startup_context"].map(t => db.prepare(`SELECT * FROM ${t}`).all()));
+/** lineage restricted to the columns `before` had: later migrations may add
+ *  nullable columns (for example to nodes) without changing any existing value. */
+const lineageAsOf = (db: Database.Database, before: string) => {
+  const then = JSON.parse(before) as Array<Array<Record<string, unknown>>>;
+  const now = JSON.parse(lineage(db)) as Array<Array<Record<string, unknown>>>;
+  return JSON.stringify(now.map((rows, t) => rows.map((row, i) => {
+    const keys = Object.keys(then[t]?.[i] ?? row);
+    return Object.fromEntries(keys.map((key) => [key, row[key]]));
+  })));
+};
 const binding = (nodeId = "node"): NodeBinding => ({ id: "binding", nodeId, attachmentType: "tmux", tmuxSession: "seat", tmuxWindow: null, tmuxPane: "%1", cmuxWorkspace: null, cmuxSurface: null, updatedAt: "", cwd: "/inert/project" });
 
 describe("S03 future native permission selections (offline; no native effect claim)", () => {
@@ -70,7 +80,7 @@ describe("S03 future native permission selections (offline; no native effect cla
     db.prepare("INSERT INTO applied_launch_observations(generation_uuid,runtime,axis,observation_state,value) VALUES (?, 'codex','sandbox','observed','workspace-write')").run(generation);
     const before = lineage(db); const prior = db.prepare("SELECT * FROM applied_launch_observations").get();
     migrate(db, ALL_MIGRATIONS); migrate(db, ALL_MIGRATIONS);
-    expect(lineage(db)).toBe(before);
+    expect(lineageAsOf(db, before)).toBe(before);
     expect(db.prepare("SELECT * FROM applied_launch_observations").get()).toEqual({ ...prior as object, approval_policy: null });
     expect(db.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE name LIKE '088_%'").get()).toEqual({ n: 1 });
     expect(db.pragma("foreign_key_check")).toEqual([]);

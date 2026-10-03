@@ -883,10 +883,17 @@ export class SeatHandoverService {
   }
 
   private lookupNode(status: SeatStatus): NodeRow {
-    return this.db.prepare(
-      // SELECT *: readiness_timeout_ms is absent on pre-500 fixture DBs.
-      "SELECT * FROM nodes WHERE rig_id = ? AND logical_id = ?"
+    const node = this.db.prepare(
+      "SELECT id, runtime, cwd, model, codex_config_profile FROM nodes WHERE rig_id = ? AND logical_id = ?"
     ).get(status.rig_id, status.logical_id) as NodeRow;
+    // readiness_timeout_ms arrives with migration 500; older fixture DBs lack the column.
+    const hasReadinessTimeout = (this.db.prepare("PRAGMA table_info(nodes)").all() as Array<{ name: string }>)
+      .some((column) => column.name === "readiness_timeout_ms");
+    if (node && hasReadinessTimeout) {
+      const row = this.db.prepare("SELECT readiness_timeout_ms FROM nodes WHERE id = ?").get(node.id) as { readiness_timeout_ms: number | null } | undefined;
+      node.readiness_timeout_ms = row?.readiness_timeout_ms ?? null;
+    }
+    return node;
   }
 
   private lookupLatestSession(nodeId: string): SessionRow | null {

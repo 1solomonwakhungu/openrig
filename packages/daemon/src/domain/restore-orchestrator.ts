@@ -1926,6 +1926,12 @@ interface PlanEntry {
   node: NodeWithBinding;
 }
 
+/** The seat's readiness window as a trailing resume argument, passed only when
+ *  the seat sets one so the built-in resume calls are otherwise unchanged. */
+function readinessTail(r: { readinessTimeoutMs?: number }): [] | [number] {
+  return r.readinessTimeoutMs === undefined ? [] : [r.readinessTimeoutMs];
+}
+
 /** The built-in resume adapters behind the generic RuntimeResumeAdapter
  *  contract, in the pre-registry dispatch order (claude, codex, pi). */
 function builtinResumeAdapters(
@@ -1937,19 +1943,19 @@ function builtinResumeAdapters(
     {
       runtime: "claude-code",
       canResume: (type, token) => claude.canResume(type, token),
-      resume: (r) => claude.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.resolvedPosture, r.model, r.permissionMode, r.nodeId, r.readinessTimeoutMs),
+      resume: (r) => claude.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.resolvedPosture, r.model, r.permissionMode, r.nodeId, ...readinessTail(r)),
     },
     {
       runtime: "codex",
       canResume: (type, token) => codex.canResume(type, token),
-      resume: (r) => codex.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.codexConfigProfile, r.resolvedPosture, r.model, r.readinessTimeoutMs),
+      resume: (r) => codex.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.codexConfigProfile, r.resolvedPosture, r.model, ...readinessTail(r)),
     },
   ];
   if (pi) {
     adapters.push({
       runtime: "pi",
       canResume: (type, token) => pi.canResume(type, token),
-      resume: (r) => pi.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.model, r.resolvedPosture, r.readinessTimeoutMs),
+      resume: (r) => pi.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.model, r.resolvedPosture, ...readinessTail(r)),
     });
   }
   return adapters;
