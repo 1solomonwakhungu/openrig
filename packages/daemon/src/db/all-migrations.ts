@@ -94,11 +94,12 @@ import { nodePermissionSelectionsSchema } from "./migrations/088_node_permission
 import { classificationIdentityProvenanceSchema } from "./migrations/089_classification_identity_provenance.js";
 import { nodeReadinessTimeoutSchema } from "./migrations/500_node_readiness_timeout.js";
 import { rigGuidanceTrackedFileSchema } from "./migrations/501_rig_guidance_tracked_file.js";
+import { nodeRuntimeFallbackSchema } from "./migrations/502_node_runtime_fallback.js";
 import { runtimeUsageSchema } from "./migrations/505_runtime_usage.js";
 import { nodePermissionSelectionsAnyRuntimeSchema } from "./migrations/510_node_permission_selections_any_runtime.js";
 import type { Migration } from "./migrate.js";
 
-/** Ordered 001→089, then fork migrations from 500 (S02 086/089, S09 087, S03 088; 500 seat readiness window; 501 rig guidance tracked file; 505 registry runtime usage; 510 per-seat permissions for registry runtimes). */
+/** Ordered 001→089, then fork migrations from 500 (S02 086/089, S09 087, S03 088; 500 seat readiness window; 501 rig guidance tracked file; 502 runtime fallback; 505 registry runtime usage; 510 per-seat permissions for registry runtimes). */
 export const ALL_MIGRATIONS: Migration[] = [
   coreSchema,
   bindingsSessionsSchema,
@@ -191,6 +192,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   classificationIdentityProvenanceSchema,
   nodeReadinessTimeoutSchema,
   rigGuidanceTrackedFileSchema,
+  nodeRuntimeFallbackSchema,
   runtimeUsageSchema,
   nodePermissionSelectionsAnyRuntimeSchema,
 ];

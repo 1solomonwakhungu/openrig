@@ -399,6 +399,11 @@ export async function preflightValidatedSpec(rigSpec: PodRigSpec, preflightCtx: 
     errors.push(...piErrors);
     errors.push(...await verifyOmpRuntimeAvailable(rigSpec, preflightCtx.exec));
     errors.push(...await verifyCliRuntimesAvailable(rigSpec, preflightCtx.exec));
+    // Members with fallback_runtimes: a missing primary only warns while some
+    // fallback is available; it fails only when every candidate is missing.
+    const fallback = await verifyFallbackMemberRuntimes(rigSpec, preflightCtx.exec);
+    errors.push(...fallback.errors);
+    warnings.push(...fallback.warnings);
   }
 
   // §6 RECONCILIATION — WARNING EMISSION ORDER (PM ruling 2026-08-05): ACTIVITY-HOOK-FIRST,
@@ -428,8 +433,9 @@ export async function verifyPiRuntimeAvailable(
   rigSpec: PodRigSpec,
   exec: ExecFn,
 ): Promise<string[]> {
+  // Members with fallback_runtimes are checked by verifyFallbackMemberRuntimes.
   const hasPiMember = (rigSpec.pods ?? []).some((pod: RigSpecPod) =>
-    (pod.members ?? []).some((member: RigSpecPodMember) => member.runtime === "pi"),
+    (pod.members ?? []).some((member: RigSpecPodMember) => member.runtime === "pi" && !member.fallbackRuntimes?.length),
   );
   if (!hasPiMember) return [];
   try {
@@ -467,7 +473,8 @@ export async function verifyCliRuntimesAvailable(
   const runtimes = new Set<string>();
   for (const pod of rigSpec.pods ?? []) {
     for (const member of pod.members ?? []) {
-      if (member.runtime && !builtins.has(member.runtime)) runtimes.add(member.runtime);
+      // Members with fallback_runtimes are checked by verifyFallbackMemberRuntimes.
+      if (member.runtime && !builtins.has(member.runtime) && !member.fallbackRuntimes?.length) runtimes.add(member.runtime);
     }
   }
   const errors: string[] = [];
@@ -484,6 +491,49 @@ export async function verifyCliRuntimesAvailable(
     }
   }
   return errors;
+}
+
+/**
+ * Runtime fallback preflight: for each member with fallback_runtimes, probe the
+ * declared runtime and its fallbacks (each runtime probed once). A missing
+ * declared runtime warns when a fallback is available and fails only when every
+ * candidate is missing. Runtimes preflight does not probe for pod specs (no
+ * binary, or claude-code/codex, whose launch checks run later) count as available.
+ */
+export async function verifyFallbackMemberRuntimes(
+  rigSpec: PodRigSpec,
+  exec: ExecFn,
+): Promise<{ errors: string[]; warnings: string[] }> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const probed = new Map<string, boolean>();
+  const available = async (runtime: string): Promise<boolean> => {
+    if (probed.has(runtime)) return probed.get(runtime)!;
+    const descriptor = getRuntimeDescriptor(runtime);
+    const cmd = runtime === "claude-code" || runtime === "codex" ? null : runtimeProbeCommand(descriptor);
+    let ok = true;
+    if (cmd) {
+      try { await exec(cmd); } catch { ok = false; }
+    }
+    probed.set(runtime, ok);
+    return ok;
+  };
+  for (const pod of rigSpec.pods ?? []) {
+    for (const member of pod.members ?? []) {
+      const fallbacks = member.fallbackRuntimes ?? [];
+      if (!member.runtime || fallbacks.length === 0) continue;
+      const candidates = [member.runtime, ...fallbacks];
+      const results = await Promise.all(candidates.map(available));
+      const firstAvailable = candidates.find((_, i) => results[i]);
+      const seat = `${pod.id}.${member.id}`;
+      if (!firstAvailable) {
+        errors.push(`No runtime available for ${seat}: none of ${candidates.map((c) => `"${c}"`).join(", ")} answered its version probe. Install one of them and ensure it is on PATH.`);
+      } else if (firstAvailable !== member.runtime) {
+        warnings.push(`${seat}: runtime "${member.runtime}" is not available; the seat will fall back to "${firstAvailable}".`);
+      }
+    }
+  }
+  return { errors, warnings };
 }
 
 /**

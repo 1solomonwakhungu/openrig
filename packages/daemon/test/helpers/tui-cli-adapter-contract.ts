@@ -222,7 +222,8 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
           expect(ATTENTION_REQUIRED_READINESS_CODES.has(gate.code)).toBe(true);
           const { adapter } = launchRig([{ command: running, content: gate.screen }]);
           const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
-          expect(result).toMatchObject({ ok: false, recovery: "attention_required" });
+          // attentionCode lets callers (runtime fallback) act on the gate without parsing text.
+          expect(result).toMatchObject({ ok: false, recovery: "attention_required", attentionCode: gate.code });
           expect(result.ok === false && result.evidence).toBeTruthy();
           const readiness = await adapter.checkReady(harnessBinding());
           expect(readiness).toMatchObject({ ready: false, code: gate.code });
@@ -247,6 +248,12 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
           expect((pane.tmux.getPaneCommand as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThanOrEqual(3);
         });
       }
+
+      it("reports runtime_missing when the shell cannot find the CLI binary", async () => {
+        const { adapter } = launchRig([atShell(`zsh: command not found: ${running}\n$ `)]);
+        const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+        expect(result).toMatchObject({ ok: false, recovery: "attention_required", attentionCode: "runtime_missing" });
+      });
 
       it("fails fast when the CLI starts and then exits back to the shell", async () => {
         const { adapter, pane } = launchRig([{ command: running, content: "starting" }, atShell("starting\nbye\n$ ")]);

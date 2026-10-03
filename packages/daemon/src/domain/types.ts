@@ -35,6 +35,11 @@ export interface Node {
   /** Per-seat launch readiness window in ms (rig spec readiness_timeout_ms);
    *  null/absent = the built-in defaults. */
   readinessTimeoutMs?: number | null;
+  /** The runtime the spec declared, when a fallback runtime runs instead
+   *  (runtime then holds the fallback). Null when the declared runtime runs. */
+  declaredRuntime?: string | null;
+  /** The member's fallback_runtimes, in order (empty when none). */
+  fallbackRuntimes?: string[];
   /** OPR.0.4.8.3 Seam B: attached permission_policy REF (builtin:<name> or spec-relative custom
    *  path), or null when none is attached (= the floor). */
   permissionPolicy?: string | null;
@@ -217,6 +222,8 @@ export type RigEvent =
   | { type: "node.startup_pending"; rigId: string; nodeId: string; startupProof?: StartupProofSelection }
   | { type: "node.startup_ready"; rigId: string; nodeId: string }
   | { type: "node.startup_failed"; rigId: string; nodeId: string; error: string; sessionId?: string; freshContextPending?: boolean }
+  // Runtime fallback: the seat launched on a fallback runtime instead of its declared one.
+  | { type: "node.runtime_fallback"; rigId: string; nodeId: string; declaredRuntime: string; runtime: string; attempts: string }
   // OPR.0.4.3.06 — startup proof (challenge-verified orientation). Append-only.
   // `node.startup_challenged` freezes this launch's challenge ground truth
   // (challengeId + contractHash; the expected answer is recomputed, never
@@ -640,6 +647,8 @@ export interface NodeInventoryEntry {
   attachmentType?: "tmux" | "external_cli" | null;
   nodeKind: "agent" | "infrastructure";
   runtime: string | null;
+  /** The spec's runtime when a fallback runtime (`runtime`) runs instead; null otherwise. */
+  declaredRuntime?: string | null;
   sessionStatus: string | null;
   startupStatus: "pending" | "ready" | "attention_required" | "failed" | null;
   restoreOutcome: NodeRestoreOutcome;
@@ -1080,6 +1089,9 @@ export interface RigSpecPodMember {
   /** Launch readiness window in ms for this seat (`readiness_timeout_ms`,
    *  bounded by READINESS_TIMEOUT_MIN_MS/MAX_MS). Absent = built-in defaults. */
   readinessTimeoutMs?: number;
+  /** Runtimes tried in order when `runtime`'s CLI is missing or not signed in at a
+   *  fresh launch (rigspec fallback_runtimes; see domain/runtime-fallback.ts). */
+  fallbackRuntimes?: string[];
   /**
    * OPR.0.4.6.FAC1: optional seat-side role declaration (writes the
    * existing `nodes.role` column via createMemberNode → addNode). The

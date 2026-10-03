@@ -704,27 +704,27 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
           // The answer was sent once; give the dialog a few polls to close.
           answered.pollsSince++;
           if (answered.pollsSince >= ANSWER_SETTLE_POLLS) {
-            return this.failure(`${state.gate.reason} (still showing after OpenRig answered it)`, "attention_required", content);
+            return this.failure(`${state.gate.reason} (still showing after OpenRig answered it)`, "attention_required", content, state.gate.code);
           }
         } else if (state.gate.answer && !answered) {
           const fresh = window.line === null ? freshLines(content, window.lines) : content;
           const refusal = this.answerRefusal(state.gate, state.gate.answer, fresh, launch.binding);
           if (refusal && (refusal.final || ++unreadablePolls >= ANSWER_READ_POLLS)) {
-            return this.failure(`${state.gate.reason} (not answered automatically: ${refusal.why})`, "attention_required", content);
+            return this.failure(`${state.gate.reason} (not answered automatically: ${refusal.why})`, "attention_required", content, state.gate.code);
           }
           if (refusal) {
             if (attempt < attempts - 1) await this.sleep(pollMs);
             continue;
           }
           const sent = await this.tmux.sendKeys(sessionName, [...state.gate.answer.keys]);
-          if (!sent.ok) return this.failure(`${state.gate.reason} (sending the answer failed: ${sent.message})`, "attention_required", content);
+          if (!sent.ok) return this.failure(`${state.gate.reason} (sending the answer failed: ${sent.message})`, "attention_required", content, state.gate.code);
           answered = { gate: state.gate, pollsSince: 0 };
           this.recordGateAnswer(launch, state.gate, state.gate.answer);
         } else {
-          return this.failure(state.gate.reason, "attention_required", content);
+          return this.failure(state.gate.reason, "attention_required", content, state.gate.code);
         }
       }
-      if (state.kind === "error") return this.failure(state.pattern.reason, state.pattern.recovery ?? "attention_required", content);
+      if (state.kind === "error") return this.failure(state.pattern.reason, state.pattern.recovery ?? "attention_required", content, state.pattern.code);
       if (state.kind === "at_shell") {
         // Right after typing the pane is still at the shell, so a shell alone
         // is not an exit. It is one once the CLI was seen in the foreground, or
@@ -732,9 +732,9 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
         // (a CLI that exits before the first poll).
         const fresh = window.line === null ? freshLines(content, window.lines) : content;
         const error = this.matchError(fresh);
-        if (error) return this.failure(error.reason, error.recovery ?? "attention_required", content);
+        if (error) return this.failure(error.reason, error.recovery ?? "attention_required", content, error.code);
         if (MISSING_BINARY_RE.test(fresh)) {
-          return this.failure(`the ${this.descriptor.binary ?? this.runtime} binary was not found (command not found)`, "attention_required", content);
+          return this.failure(`the ${this.descriptor.binary ?? this.runtime} binary was not found (command not found)`, "attention_required", content, "runtime_missing");
         }
         if (sawRuntime) return this.failure(`the CLI exited back to the shell`, "attention_required", content);
       } else {
@@ -785,8 +785,11 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     this.writeLaunchRecord(launch.seatStateDir, launch.record);
   }
 
-  private failure(reason: string, recovery: HarnessLaunchRecovery, content: string): LaunchFailure {
-    return { ok: false, error: `${this.runtime} launch: ${reason}`, recovery, evidence: this.evidence(content) };
+  private failure(reason: string, recovery: HarnessLaunchRecovery, content: string, attentionCode?: string): LaunchFailure {
+    return {
+      ok: false, error: `${this.runtime} launch: ${reason}`, recovery, evidence: this.evidence(content),
+      ...(attentionCode ? { attentionCode } : {}),
+    };
   }
 
   private matchError(content: string): TuiCliErrorPattern | undefined {

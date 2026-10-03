@@ -81,7 +81,9 @@ export type StartupResult =
   // `recovery` carries the adapter's launch-failure recovery hint (for
   // example `retry_fresh`: the resume target is gone) so restore can map it to
   // the awaiting-decision stop-and-ask instead of a plain failure.
-  | { ok: false; startupStatus: "attention_required" | "failed"; errors: string[]; evidence?: string; recovery?: import("./runtime-adapter.js").HarnessLaunchRecovery };
+  // `attentionCode` is the readiness code (login_required, runtime_missing, ...)
+  // behind an attention_required outcome, when one is known.
+  | { ok: false; startupStatus: "attention_required" | "failed"; errors: string[]; evidence?: string; recovery?: import("./runtime-adapter.js").HarnessLaunchRecovery; attentionCode?: string };
 
 interface StartupOrchestratorDeps {
   db: Database.Database;
@@ -308,7 +310,7 @@ export class StartupOrchestrator {
             errors.push(`Harness launch requires attention: ${launchResult.error}`);
             // isRestore selects context, not native continuity: pod-aware exact
             // resume also uses false. Only an actual fresh launch may re-prime.
-            return this.fail(input, "attention_required", errors, launchResult.evidence, continuityOutcome === "fresh");
+            return this.fail(input, "attention_required", errors, launchResult.evidence, continuityOutcome === "fresh", undefined, launchResult.attentionCode);
           }
 
           errors.push(`Harness launch failed: ${launchResult.error}`);
@@ -341,7 +343,7 @@ export class StartupOrchestrator {
       if (!readiness.ready) {
         if (isAttentionRequiredReadinessCode(readiness.code)) {
           errors.push(`Startup requires attention: ${readiness.reason ?? "unknown"}`);
-          return this.fail(input, "attention_required", errors, undefined, isFreshLaunch);
+          return this.fail(input, "attention_required", errors, undefined, isFreshLaunch, undefined, readiness.code);
         }
         errors.push(`Readiness timeout after ${formatSeconds(readinessTimeoutMs)}: harness did not become interactive (raise readiness_timeout_ms on the member if it is slow to start): ${readiness.reason ?? "unknown"}`);
         return this.fail(input, "failed", errors);
@@ -458,7 +460,7 @@ export class StartupOrchestrator {
       try {
         const readiness = await input.adapter.checkReady(input.binding);
         if (!readiness.ready && isAttentionRequiredReadinessCode(readiness.code)) {
-          return this.fail(input, "attention_required", [readiness.reason ?? "The native provider prerequisite failed after context delivery."]);
+          return this.fail(input, "attention_required", [readiness.reason ?? "The native provider prerequisite failed after context delivery."], undefined, false, undefined, readiness.code);
         }
       } catch (error) {
         return this.fail(input, "attention_required", [`Post-delivery runtime state is unavailable: ${(error as Error).message}`]);
@@ -527,6 +529,7 @@ export class StartupOrchestrator {
     evidence?: string,
     freshContextPending = false,
     recovery?: import("./runtime-adapter.js").HarnessLaunchRecovery,
+    attentionCode?: string,
   ): StartupResult {
     this.sessionRegistry.updateStartupStatus(input.sessionId, status);
     this.eventBus.emit({
@@ -537,7 +540,7 @@ export class StartupOrchestrator {
       sessionId: input.sessionId,
       ...(freshContextPending ? { freshContextPending: true } : {}),
     });
-    return { ok: false, startupStatus: status, errors, evidence, ...(recovery ? { recovery } : {}) };
+    return { ok: false, startupStatus: status, errors, evidence, ...(recovery ? { recovery } : {}), ...(attentionCode ? { attentionCode } : {}) };
   }
 
   private async executeActions(

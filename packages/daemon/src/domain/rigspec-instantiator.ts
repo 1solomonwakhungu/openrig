@@ -1,3 +1,5 @@
+import { getRuntimeDescriptor } from "./runtime-registry.js";
+import { describeFallbackAttempts, isCommandOnPath, isFallbackAttentionCode, type FallbackAttempt } from "./runtime-fallback.js";
 import nodePath from "node:path";
 import type Database from "better-sqlite3";
 import {
@@ -1179,7 +1181,7 @@ export class PodRigInstantiator {
     const initialRefusal = eligible();
     if (initialRefusal) return refuse(initialRefusal);
 
-    const retainedFields = new Set(["id", "label", "agent_ref", "profile", "runtime", "model", "cwd", "role", "codex_config_profile", "permission_policy", "restore_policy", "readiness_timeout_ms"]);
+    const retainedFields = new Set(["id", "label", "agent_ref", "profile", "runtime", "model", "cwd", "role", "codex_config_profile", "permission_policy", "restore_policy", "readiness_timeout_ms", "fallback_runtimes"]);
     if (Object.keys(memberFragment).some(key => !retainedFields.has(key))) return refuse("Retry accepts only retained member fields; topology and startup overrides require a separate change.");
     const rawSpec = { version: "0.2", name: rig.rig.name, pods: [{ id: podRow.namespace, label: podRow.label, members: [memberFragment], edges: [] }], edges: [] };
     const validation = PodRigSpecSchema.validate(rawSpec);
@@ -1195,7 +1197,8 @@ export class PodRigInstantiator {
     const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
     if (`${pod.id}.${member.id}` !== node.logicalId || !same(member.agentRef, node.agentRef) || !same(member.profile, node.profile)
       || !same(member.runtime, node.runtime) || !same(member.role, node.role) || !same(member.label, node.label) || !same(member.codexConfigProfile, node.codexConfigProfile)
-      || !same(member.permissionPolicy, node.permissionPolicy) || !same(member.readinessTimeoutMs, node.readinessTimeoutMs)) return refuse("Member source disagrees with the retained seat identity or policy.");
+      || !same(member.permissionPolicy, node.permissionPolicy) || !same(member.readinessTimeoutMs, node.readinessTimeoutMs)
+      || (member.fallbackRuntimes ?? []).join(",") !== (node.fallbackRuntimes ?? []).join(",")) return refuse("Member source disagrees with the retained seat identity or policy.");
     const resolved = resolveAgentRef(member.agentRef, rigRoot, this.deps.fsOps);
     if (!resolved.ok) return refuse(resolved.code === "validation_failed" ? resolved.errors.join("; ") : resolved.error);
     if (!node.resolvedSpecHash || resolved.resolved.hash !== node.resolvedSpecHash) return refuse("Agent source hash differs from the failed first start.");
@@ -1432,6 +1435,7 @@ export class PodRigInstantiator {
             model: member.model,
             codexConfigProfile: member.codexConfigProfile,
             readinessTimeoutMs: member.readinessTimeoutMs,
+            fallbackRuntimes: member.fallbackRuntimes,
             // OPR.0.4.8.3 Seam B: bootstrap inline addNode is the FOURTH node-creation
             // site (see the role wire note above) — same member-ref persistence as
             // createMemberNode or `rig up <spec>` seats lose their policy ref.
@@ -1768,6 +1772,7 @@ export class PodRigInstantiator {
       model: input.member.model,
       codexConfigProfile: input.member.codexConfigProfile,
       readinessTimeoutMs: input.member.readinessTimeoutMs,
+      fallbackRuntimes: input.member.fallbackRuntimes,
       // OPR.0.4.8.3 Seam B: the member's OWN raw ref persists on the node (like role);
       // rig-level lives on the rig row; precedence applies at RESOLUTION, not storage.
       permissionPolicy: input.member.permissionPolicy,
@@ -1851,24 +1856,72 @@ export class PodRigInstantiator {
     } catch { /* best-effort on launch refresh only */ }
   }
 
-  private async launchExistingAgentMember(input: {
-    rigId: string;
-    rigSpec: PodRigSpec;
-    rigRoot: string;
-    pod: RigSpecPod;
-    member: RigSpecPodMember;
-    qualifiedId: string;
-    nodeId: string;
-    cwdOverride?: string;
-    /** P20 atom-4 — operator override: overwrite operator-edited (operator_conflict)
-     *  projection targets instead of protecting them. Absent = protect (safe default). */
-    force?: boolean;
-    resolveResult?: ReturnType<typeof resolveAgentRef> extends infer T ? T : never;
-    configResult?: ReturnType<typeof resolveNodeConfig> extends infer T ? T : never;
-  }): Promise<{ status: "launched" | "failed" | "attention_required"; error?: string; evidence?: string; sessionName?: string; warnings?: string[] }> {
+  /**
+   * Launch an agent member, falling back through its fallback_runtimes
+   * (domain/runtime-fallback.ts) when the runtime's CLI is missing or not
+   * signed in. Without fallbacks this is exactly launchMemberOnRuntime.
+   */
+  private async launchExistingAgentMember(input: AgentMemberLaunchInput): Promise<AgentMemberLaunchResult> {
+    const fallbacks = input.member.fallbackRuntimes ?? [];
+    if (fallbacks.length === 0) return this.launchMemberOnRuntime(input);
+    const declared = input.member.runtime;
+    const candidates = [declared, ...fallbacks];
+    const attempts: FallbackAttempt[] = [];
+    let last: AgentMemberLaunchResult | undefined;
+    for (const [index, runtime] of candidates.entries()) {
+      const hasNext = index < candidates.length - 1;
+      const binary = getRuntimeDescriptor(runtime)?.binary;
+      if (binary && hasNext && !isCommandOnPath(binary, process.env.PATH, resolveLaunchCwd(input.member.cwd, input.rigRoot, input.cwdOverride))) {
+        attempts.push({ runtime, outcome: "skipped", reason: `${binary} is not on the launch PATH` });
+        continue;
+      }
+      // The launch env and seat identity read nodes.runtime, so it names this attempt.
+      this.deps.rigRepo.setNodeRunningRuntime(input.nodeId, runtime);
+      const result = await this.launchMemberOnRuntime({
+        ...input,
+        member: { ...input.member, runtime },
+        // Config (skill pool, projection) is runtime-specific: re-resolve for a fallback.
+        configResult: runtime === declared ? input.configResult : undefined,
+      });
+      last = result;
+      if (result.status === "launched") {
+        attempts.push({ runtime, outcome: "launched" });
+        if (runtime === declared) return result;
+        const summary = `${input.qualifiedId} runs on fallback runtime "${runtime}" instead of "${declared}" (${describeFallbackAttempts(attempts)})`;
+        this.deps.eventBus.emit({
+          type: "node.runtime_fallback", rigId: input.rigId, nodeId: input.nodeId,
+          declaredRuntime: declared, runtime, attempts: describeFallbackAttempts(attempts),
+        });
+        return { ...result, warnings: [...(result.warnings ?? []), summary] };
+      }
+      attempts.push({ runtime, outcome: result.status, reason: result.error });
+      if (!hasNext || result.status !== "attention_required" || !isFallbackAttentionCode(result.attentionCode)) break;
+      await this.releaseFailedAttempt(input.nodeId, result.sessionName);
+    }
+    // No runtime started: the seat keeps its declared runtime on record.
+    this.deps.rigRepo.setNodeRunningRuntime(input.nodeId, declared);
+    const summary = `no runtime started for ${input.qualifiedId}: ${describeFallbackAttempts(attempts)}`;
+    if (!last) return { status: "attention_required", error: summary, attentionCode: "runtime_missing" };
+    return { ...last, error: summary };
+  }
+
+  /** Free the seat after a fallback-worthy failed attempt so the next runtime can
+   *  launch into it: stop its tmux session, mark the session exited, and clear the
+   *  binding (the same compensation as a failed fresh relaunch). */
+  private async releaseFailedAttempt(nodeId: string, sessionName: string | undefined): Promise<void> {
+    if (sessionName) {
+      try { await this.deps.tmuxAdapter?.killSession(sessionName); } catch { /* best-effort */ }
+    }
+    const session = this.deps.db.prepare("SELECT id FROM sessions WHERE node_id = ? ORDER BY rowid DESC LIMIT 1")
+      .get(nodeId) as { id: string } | undefined;
+    if (session) this.deps.sessionRegistry.updateStatus(session.id, "exited");
+    this.deps.sessionRegistry.clearBinding(nodeId);
+  }
+
+  private async launchMemberOnRuntime(input: AgentMemberLaunchInput): Promise<AgentMemberLaunchResult> {
     const guard = this.deps.tmuxAdapter?.deliveryGuard;
     if (guard && !guard.ownsLifecycle(input.nodeId)) {
-      return guard.lifecycle([input.nodeId], () => this.launchExistingAgentMember(input));
+      return guard.lifecycle([input.nodeId], () => this.launchMemberOnRuntime(input));
     }
     const resolveResult = input.resolveResult ?? resolveAgentRef(input.member.agentRef, input.rigRoot, this.deps.fsOps);
     if (!resolveResult.ok) {
@@ -2203,6 +2256,7 @@ export class PodRigInstantiator {
       evidence: startupResult.evidence,
       sessionName: canonicalSessionName,
       warnings: launchResult.warnings,
+      ...(startupResult.attentionCode ? { attentionCode: startupResult.attentionCode } : {}),
     };
   }
 
@@ -2537,3 +2591,22 @@ export class PodRigInstantiator {
     });
   }
 }
+
+/** Input shared by the fallback loop and the per-runtime member launch. */
+interface AgentMemberLaunchInput {
+    rigId: string;
+    rigSpec: PodRigSpec;
+    rigRoot: string;
+    pod: RigSpecPod;
+    member: RigSpecPodMember;
+    qualifiedId: string;
+    nodeId: string;
+    cwdOverride?: string;
+    /** P20 atom-4 — operator override: overwrite operator-edited (operator_conflict)
+     *  projection targets instead of protecting them. Absent = protect (safe default). */
+    force?: boolean;
+    resolveResult?: ReturnType<typeof resolveAgentRef> extends infer T ? T : never;
+    configResult?: ReturnType<typeof resolveNodeConfig> extends infer T ? T : never;
+}
+
+type AgentMemberLaunchResult = { status: "launched" | "failed" | "attention_required"; error?: string; evidence?: string; sessionName?: string; warnings?: string[]; attentionCode?: string };

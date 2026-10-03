@@ -152,9 +152,11 @@ export class RigSpecExporter {
           id: idToMemberLocal.get(node.id) ?? node.logicalId,
           agentRef: node.agentRef ?? "",
           profile: node.profile ?? "default",
-          runtime: node.runtime,
+          // Export the spec as written: the declared runtime, not a fallback that runs.
+          runtime: node.declaredRuntime ?? node.runtime,
           cwd: node.cwd ?? ".",
         };
+        if (node.fallbackRuntimes?.length) member.fallbackRuntimes = [...node.fallbackRuntimes];
         if (node.label) member.label = node.label;
         if (node.codexConfigProfile) member.codexConfigProfile = node.codexConfigProfile;
         if (node.model) member.model = node.model;

@@ -316,6 +316,7 @@ directory's `CLAUDE.md`, including blocks written by other rigs.
 | `profile` | string | yes | — | Profile name from the referenced AgentSpec. Use `default` for the default profile. Exception: `none` for terminal nodes. |
 | `codex_config_profile` | string | no | — | Codex-only native profile passed as `-p <name>`; letters, numbers, `_`, `.`, `-`. Separate from the AgentSpec `profile`. With the normal launch mode, this replaces OpenRig's explicit workspace-write sandbox flag. A full-bypass policy instead emits danger-full-access and omits this profile argument. |
 | `runtime` | string | yes | — | Agent runtime. Built-in values: `claude-code`, `codex`, `pi`, `omp`, `terminal`. Registered CLI runtimes are listed in [`runtimes/README.md`](runtimes/README.md), the single index of registry runtimes. |
+| `fallback_runtimes` | string[] | no | `[]` | Up to 3 other agent runtimes to try, in order, when `runtime` cannot start at a fresh launch (CLI missing or not signed in). Each must be a registered agent runtime, distinct, and different from `runtime`. See "Runtime fallback" below. |
 | `cwd` | string | yes | — | Working directory for the agent. Resolved relative to the rig root (the directory containing the rig spec). Use `"."` for the rig root itself. Can be overridden at launch time with `rig up --cwd`. |
 | `label` | string | no | — | Human-readable member name. Shown in UI when present. |
 | `model` | string | no | — | Model override. Runtime-specific (e.g., `claude-opus-4-6` for Claude Code). Preflight warns (never blocks) when it does not fit a registry runtime's expected form; see `docs/reference/runtimes/README.md`, "Model names". |
@@ -332,6 +333,52 @@ directory's `CLAUDE.md`, including blocks written by other rigs.
 - **Approval posture:** The default floor is `--approval-mode always-ask`. Because the runner is headless, OMP approval requests are cancelled and the seat stays in needing-attention after the turn ends, until the next agent run starts. A `full_bypass` permission policy selects `--approval-mode yolo`.
 - **Model errors:** A rejected prompt, a provider or authentication error during a turn, or exhausted automatic retries is printed in the pane and keeps the seat in needing-attention until the next agent run starts.
 - **Restore:** OMP creates its session file after the first persisted turn. A new seat with no persisted turn has no resume token; restoring it requires `rig up --existing <rig> --fresh <seat>`. After that file exists, OpenRig restores that exact session file. If a full rig restore leaves an OMP seat in `attention_required` or `failed`, `rig seat clear-attention` cannot yet reconcile it to `operator_recovered`, even with `--reason`, because restore reconciliation only verifies Claude Code and Codex processes ([#41](https://github.com/mvschwarz/openrig/issues/41)). Relaunch that seat with `rig up --existing <rig> --fresh <seat>`, or restore it manually.
+
+### Runtime fallback
+
+A member can name backup runtimes for the case where its own CLI is not
+usable on this machine:
+
+```yaml
+- id: impl
+  agent_ref: local:agents/impl
+  profile: default
+  runtime: claude-code
+  fallback_runtimes: [codex, pi]
+  cwd: .
+```
+
+At a fresh launch (`rig up`, adding a member, a first-start retry), OpenRig
+tries `runtime`, then each fallback in order. It moves on when:
+
+- the runtime's CLI binary is not on the launch PATH (checked before launching
+  any runtime except the last), or
+- the launch or readiness check stops at a sign-in gate (`login_required`: not
+  signed in, or no provider configured), or the shell reports the binary
+  missing (`runtime_missing`).
+
+Every other outcome stops the chain where it is: a trust gate, an update
+prompt, or a crash is reported for the runtime that hit it, not hidden by
+switching runtimes. Each attempt starts a fresh session after stopping the
+previous attempt's terminal session; a resume token never moves between
+runtimes. Rate limits do not trigger fallback: no runtime reports a rate limit
+at launch through a signal OpenRig can detect reliably and test.
+
+The seat records the runtime it actually runs on:
+
+- `rig ps` marks the RUNTIME cell with `*` and prints
+  `! <session> runs on fallback runtime "codex" (declared "claude-code")`
+  below the table, in the compact and full views. `rig ps --json` carries
+  `declaredRuntime` for such seats.
+- `rig whoami --json` reports `runtime` (actual) and `declaredRuntime`.
+- A `node.runtime_fallback` event lists every attempt.
+- Restore resumes on the runtime the seat ran on and never falls back.
+- `rig spec export` keeps the declared `runtime` and `fallback_runtimes`.
+
+When no runtime starts, the seat needs attention, keeps its declared runtime
+on record, and the error lists each attempt and why it failed. Preflight
+warns when the declared runtime is missing but a fallback is available, and
+fails only when every candidate is missing.
 
 ### Terminal Nodes
 
@@ -618,6 +665,7 @@ These rules are enforced by the validator. A spec that violates any of these wil
 24. Startup action `idempotent` is a required boolean.
 25. Non-idempotent actions must not include `restore` in `applies_on`.
 26. `applies_on` values must be from: `fresh_start`, `restore`.
+27. `fallback_runtimes` lists at most 3 distinct registered agent runtimes, none equal to the member's `runtime`; the member's `runtime` must be an agent runtime.
 
 ---
 

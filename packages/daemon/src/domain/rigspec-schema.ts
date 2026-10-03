@@ -56,6 +56,7 @@ const MEMBER_KEYS = new Set([
   "model", "role", "permission_policy", "cwd", "restore_policy",
   "compaction_strategy", "mechanic", "startup", "session_source", "starter_ref",
   "readiness_timeout_ms",
+  "fallback_runtimes",
 ]);
 const EDGE_KEYS = new Set(["kind", "from", "to"]);
 
@@ -63,6 +64,37 @@ const EDGE_KEYS = new Set(["kind", "from", "to"]);
  *  short enough that a wedged launch still surfaces within ten minutes. */
 export const READINESS_TIMEOUT_MIN_MS = 5_000;
 export const READINESS_TIMEOUT_MAX_MS = 600_000;
+
+/** At most this many fallback runtimes per member. */
+export const MAX_FALLBACK_RUNTIMES = 3;
+
+/** fallback_runtimes: registered agent runtimes tried, in order, when the
+ *  primary's CLI is missing or not signed in at a fresh launch. */
+function validateFallbackRuntimes(prefix: string, primary: unknown, raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [`${prefix}.fallback_runtimes: must be a list of runtime ids`];
+  const errors: string[] = [];
+  if (raw.length === 0) errors.push(`${prefix}.fallback_runtimes: must list at least one runtime (or be omitted)`);
+  if (raw.length > MAX_FALLBACK_RUNTIMES) errors.push(`${prefix}.fallback_runtimes: at most ${MAX_FALLBACK_RUNTIMES} runtimes`);
+  if (typeof primary === "string") {
+    const primaryDescriptor = getRuntimeDescriptor(primary);
+    if (primaryDescriptor && primaryDescriptor.kind !== "agent") {
+      errors.push(`${prefix}.fallback_runtimes: only agent runtimes can fall back (runtime is "${primary}")`);
+    }
+  }
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    const descriptor = typeof entry === "string" ? getRuntimeDescriptor(entry) : undefined;
+    if (!descriptor || descriptor.kind !== "agent" || descriptor.internal) {
+      errors.push(`${prefix}.fallback_runtimes: ${JSON.stringify(entry)} is not a registered agent runtime`);
+    } else if (entry === primary) {
+      errors.push(`${prefix}.fallback_runtimes: "${entry}" is already the member's runtime`);
+    } else if (seen.has(entry as string)) {
+      errors.push(`${prefix}.fallback_runtimes: "${entry}" is listed twice`);
+    }
+    if (typeof entry === "string") seen.add(entry);
+  }
+  return errors;
+}
 
 /** OPR.0.5.8.7 — the topology normalizer is an explicit literal. Reject an
  * unknown structural key before that literal can make accepted input vanish.
@@ -495,6 +527,9 @@ function validateMember(member: Record<string, unknown>, index: number, podPrefi
   }
   if (!member["runtime"] || typeof member["runtime"] !== "string") {
     errors.push(`${prefix}.runtime: required non-empty string`);
+  }
+  if (member["fallback_runtimes"] !== undefined) {
+    errors.push(...validateFallbackRuntimes(prefix, member["runtime"], member["fallback_runtimes"]));
   }
   if (member["codex_config_profile"] !== undefined) {
     if (typeof member["codex_config_profile"] !== "string" || !member["codex_config_profile"].trim()) {
@@ -1164,6 +1199,7 @@ function normalizePod(raw: Record<string, unknown>): RigSpecPod {
     codexConfigProfile: m["codex_config_profile"] as string | undefined,
     model: m["model"] as string | undefined,
     readinessTimeoutMs: m["readiness_timeout_ms"] as number | undefined,
+    ...(Array.isArray(m["fallback_runtimes"]) ? { fallbackRuntimes: [...(m["fallback_runtimes"] as string[])] } : {}),
     role: m["role"] as string | undefined,
     permissionPolicy: m["permission_policy"] as string | undefined,
     cwd: m["cwd"] as string,
