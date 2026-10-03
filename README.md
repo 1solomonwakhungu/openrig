@@ -225,7 +225,7 @@ Hono HTTP daemon
 
 ## Supported runtimes
 
-OpenRig is not limited to Claude Code and Codex. A seat can run Claude Code, Codex, Pi, Oh My Pi, a plain terminal, or one of the registry CLIs: Aider, Antigravity, Cline, Copilot, Cursor, Gemini, Goose, Grok, Kilo, OpenCode and Qwen. Mix them in one rig by setting `runtime:` per member.
+OpenRig is not limited to Claude Code and Codex. A seat can run Claude Code, Codex, Pi, Oh My Pi, a plain terminal, or one of the registry CLIs: Aider, Antigravity, Cline, Copilot, Cursor, Gemini, Goose, Grok, Kilo, Kiro, OpenCode and Qwen. Mix them in one rig by setting `runtime:` per member.
 
 - `rig runtimes` shows which are installed and signed in, and whether each can resume and fork.
 - `rig specs` lists the mixed-runtime templates (`polyglot-dev`, `review-pair`, `budget-team`); read a template's README before `rig up`.
