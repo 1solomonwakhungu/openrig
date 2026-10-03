@@ -5,6 +5,7 @@ import type { TranscriptIngestHealth, TranscriptStore } from "../domain/transcri
 import type { TmuxAdapter } from "../adapters/tmux.js";
 import { startTmuxTranscriptCapture } from "../domain/transcript-capture.js";
 import { redactTranscriptContent } from "../domain/transcript-redaction.js";
+import { parseTranscriptSource, readNativeSeatTranscript, type NativeSeatTranscript, type TranscriptSourcePreference } from "../domain/native-transcript.js";
 
 interface SessionRow {
   node_id: string;
@@ -133,6 +134,31 @@ function transcriptIngestError(sessionName: string, health: RouteIngestHealth, s
   return `Transcript ingest degraded for '${sessionName}' (${runtime}; state=${health.state}; reason=${health.reason}). Do not conclude the session was quiet from this transcript.`;
 }
 
+const INVALID_SOURCE = "Invalid source: use auto, pane, or native";
+
+/**
+ * The CLI's own transcript record (feature 5), when the request allows it and
+ * the runtime has one. "auto" (the default) prefers it: a runtime declares a
+ * native reader because its pane scrollback is thin. "native" requires it.
+ */
+async function nativeFor(
+  db: Database.Database,
+  preference: TranscriptSourcePreference,
+  resolution: { nodeId: string; runtime: string | null },
+  sessionName: string,
+): Promise<NativeSeatTranscript | null> {
+  if (preference === "pane") return null;
+  return readNativeSeatTranscript(db, { runtime: resolution.runtime, nodeId: resolution.nodeId, sessionName });
+}
+
+function nativeMissing(sessionName: string, runtime: string | null): string {
+  return `No native transcript for '${sessionName}' (${runtime ?? "unknown runtime"}): the runtime has no session record OpenRig can read, or it is empty. Use source=pane for the pane capture.`;
+}
+
+function nativeFields(native: NativeSeatTranscript) {
+  return { source: "native" as const, nativeSource: native.source, nativeEntries: native.entries, nativeTruncated: native.truncated };
+}
+
 export function transcriptRoutes(): Hono {
   const router = new Hono();
 
@@ -144,6 +170,8 @@ export function transcriptRoutes(): Hono {
     const sessionName = c.req.param("session");
     const rawLines = parseInt(c.req.query("lines") ?? "50", 10);
     const lines = isNaN(rawLines) || rawLines < 1 ? 50 : rawLines;
+    const preference = parseTranscriptSource(c.req.query("source"));
+    if (!preference) return c.json({ error: INVALID_SOURCE }, 400);
 
     if (!transcriptStore?.enabled) {
       return c.json(
@@ -156,6 +184,13 @@ export function transcriptRoutes(): Hono {
     if ("error" in resolution) {
       return c.json({ error: resolution.error }, resolution.status as 404);
     }
+
+    const native = await nativeFor(db, preference, resolution, sessionName);
+    if (native) {
+      const content = native.text.split("\n").slice(-lines).join("\n");
+      return c.json({ session: sessionName, lines, content, ...nativeFields(native) });
+    }
+    if (preference === "native") return c.json({ error: nativeMissing(sessionName, resolution.runtime) }, 404);
 
     const ingest = await ensureTranscriptIngest(
       db, transcriptStore, tmuxAdapter, resolution, sessionName,
@@ -181,7 +216,7 @@ export function transcriptRoutes(): Hono {
       );
     }
 
-    return c.json({ session: sessionName, lines, content, ingestHealth });
+    return c.json({ session: sessionName, lines, content, ingestHealth, source: "pane" });
   });
 
   router.get("/:session/grep", async (c) => {
@@ -191,6 +226,8 @@ export function transcriptRoutes(): Hono {
     const tmuxAdapter = c.get("tmuxAdapter" as never) as TmuxAdapter | undefined;
     const sessionName = c.req.param("session");
     const pattern = c.req.query("pattern");
+    const preference = parseTranscriptSource(c.req.query("source"));
+    if (!preference) return c.json({ error: INVALID_SOURCE }, 400);
 
     if (!pattern) {
       return c.json({ error: "Missing required query parameter: pattern" }, 400);
@@ -218,6 +255,14 @@ export function transcriptRoutes(): Hono {
       return c.json({ error: resolution.error }, resolution.status as 404);
     }
 
+    const native = await nativeFor(db, preference, resolution, sessionName);
+    if (native) {
+      const regex = new RegExp(pattern);
+      const matches = native.text.split("\n").filter((line) => regex.test(line));
+      return c.json({ session: sessionName, pattern, matches, ...nativeFields(native) });
+    }
+    if (preference === "native") return c.json({ error: nativeMissing(sessionName, resolution.runtime) }, 404);
+
     const ingest = await ensureTranscriptIngest(
       db, transcriptStore, tmuxAdapter, resolution, sessionName,
     );
@@ -234,7 +279,7 @@ export function transcriptRoutes(): Hono {
       return c.json({ error: transcriptIngestError(sessionName, ingestHealth), ingestHealth }, 503);
     }
 
-    return c.json({ session: sessionName, pattern, matches, ingestHealth });
+    return c.json({ session: sessionName, pattern, matches, ingestHealth, source: "pane" });
   });
 
   // GET /:session/full — return the full transcript content for a session.
@@ -256,6 +301,8 @@ export function transcriptRoutes(): Hono {
     const rigRepo = c.get("rigRepo" as never) as RigRepository;
     const tmuxAdapter = c.get("tmuxAdapter" as never) as TmuxAdapter | undefined;
     const sessionName = c.req.param("session");
+    const preference = parseTranscriptSource(c.req.query("source"));
+    if (!preference) return c.json({ error: INVALID_SOURCE }, 400);
 
     if (!transcriptStore?.enabled) {
       return c.json(
@@ -268,6 +315,11 @@ export function transcriptRoutes(): Hono {
     if ("error" in resolution) {
       return c.json({ error: resolution.error }, resolution.status as 404);
     }
+
+    // Native text is already redacted (native-transcript.ts).
+    const native = await nativeFor(db, preference, resolution, sessionName);
+    if (native) return c.json({ session: sessionName, content: native.text, ...nativeFields(native) });
+    if (preference === "native") return c.json({ error: nativeMissing(sessionName, resolution.runtime) }, 404);
 
     const ingest = await ensureTranscriptIngest(
       db, transcriptStore, tmuxAdapter, resolution, sessionName,
@@ -290,7 +342,7 @@ export function transcriptRoutes(): Hono {
     // v9 + orch decision approved-option-a: the wire payload MUST be
     // already redacted; do NOT rely on client-side redaction.
     const content = redactTranscriptContent(raw);
-    return c.json({ session: sessionName, content, ingestHealth });
+    return c.json({ session: sessionName, content, ingestHealth, source: "pane" });
   });
 
   return router;

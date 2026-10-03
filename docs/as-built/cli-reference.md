@@ -976,7 +976,7 @@ Notes:
 
 ### `rig transcript`
 
-Usage: `rig transcript <session> [--tail <lines>] [--grep <pattern>] [--host <id>] [--json]`
+Usage: `rig transcript <session> [--tail <lines>] [--grep <pattern>] [--source <auto|pane|native>] [--host <id>] [--json]`
 
 Defaults:
 - `--tail 50`
@@ -984,6 +984,12 @@ Defaults:
 Notes:
 - Reads transcript files, not pane scrollback.
 - `--grep` treats the pattern as regex.
+- `--source` (feature 5): `auto` (default) reads the CLI's own session record
+  when the seat's runtime has a native transcript reader (today: `cline`, whose
+  full-screen TUI leaves the pane capture thin), else the pane capture; `pane`
+  always reads the pane capture; `native` reads only the record and fails with
+  a 404 when the runtime has none. A native read prints a `note:` line on
+  stderr naming the record; its text is redacted like `/full`.
 - **v0.4.6 (OPR.0.4.6.MH4)** — `--host <id>` / the `agent@rig@host` session form reads the
   transcript from a remote host, CLI-direct against that daemon's shipped
   `GET /api/transcripts/:session/tail|grep` routes (http-registered hosts only — an

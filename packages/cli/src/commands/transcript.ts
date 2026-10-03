@@ -25,6 +25,7 @@ export function transcriptCommand(depsOverride?: TranscriptDeps): Command {
     .argument("<session>", "Session name (e.g. dev-impl@my-rig)")
     .option("--tail <lines>", "Show last N lines (default: 50)", "50")
     .option("--grep <pattern>", "Search for lines matching pattern (regex)")
+    .option("--source <source>", "auto (default: the CLI's own session record when the runtime has one, else the pane), pane, or native")
     .option("--host <id>", "Read from a remote host declared in ~/.openrig/hosts.yaml (http hosts only — CLI-direct to the remote daemon's transcript routes)")
     .option("--json", "JSON output for agents")
     .addHelpText("after", `
@@ -32,6 +33,7 @@ Examples:
   rig transcript dev-impl@my-rig --tail 100
   rig transcript dev-impl@my-rig --grep "decision|architecture"
   rig transcript dev-impl@my-rig --json
+  rig transcript dev-cline@my-rig --source native
   rig transcript --host vps-b dev-impl@my-rig --tail 100
   rig transcript dev-impl@my-rig@vps-b --grep "handoff"
 
@@ -50,7 +52,7 @@ nothing. OpenRig launches Claude seats with CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN
 by default (classic renderer, native scrollback). A thin transcript means the
 seat predates that default or was launched with
 OPENRIG_CLAUDE_DISABLE_ALTERNATE_SCREEN=0 — relaunch it to restore scrollback.`)
-    .action(async (session: string, opts: { tail?: string; grep?: string; host?: string; json?: boolean }) => {
+    .action(async (session: string, opts: { tail?: string; grep?: string; host?: string; json?: boolean; source?: string }) => {
       // OPR.0.4.6.MH4 C2 — cross-host observe: explicit --host > the
       // `agent@rig@host` target sugar > the persisted host selection
       // (resolveEffectiveHost). The local path below is byte-untouched.
@@ -72,9 +74,16 @@ OPENRIG_CLAUDE_DISABLE_ALTERNATE_SCREEN=0 — relaunch it to restore scrollback.
       // --grep takes precedence over --tail when both given
       const useGrep = !!opts.grep;
       const tailLines = parseInt(opts.tail ?? "50", 10);
+      if (opts.source !== undefined && !["auto", "pane", "native"].includes(opts.source)) {
+        console.error("--source must be auto, pane, or native");
+        process.exitCode = 1;
+        return;
+      }
+      // Only a non-default source is sent, so the default request is unchanged.
+      const sourceQuery = opts.source && opts.source !== "auto" ? `&source=${opts.source}` : "";
       const apiPath = useGrep
-        ? `/api/transcripts/${encodeURIComponent(session)}/grep?pattern=${encodeURIComponent(opts.grep!)}`
-        : `/api/transcripts/${encodeURIComponent(session)}/tail?lines=${isNaN(tailLines) ? 50 : tailLines}`;
+        ? `/api/transcripts/${encodeURIComponent(session)}/grep?pattern=${encodeURIComponent(opts.grep!)}${sourceQuery}`
+        : `/api/transcripts/${encodeURIComponent(session)}/tail?lines=${isNaN(tailLines) ? 50 : tailLines}${sourceQuery}`;
 
       // --- Cross-host path (CLI-direct GET to the remote daemon's shipped
       // transcript routes — the SAME paths the local path builds, origin
@@ -168,6 +177,13 @@ async function runCrossHostTranscript(
 /** One renderer, two callers — the remote output shape is the origin's,
  *  so local and cross-host reads render identically. */
 function renderTranscript(data: Record<string, unknown>, useGrep: boolean): void {
+  // Feature 5: say on stderr when the CLI's own record was read instead of the
+  // pane, so stdout stays the transcript.
+  const native = data["source"] === "native";
+  if (native) {
+    const record = typeof data["nativeSource"] === "string" ? data["nativeSource"] : "session record";
+    console.error(`note: from the CLI's own session record (${record}), not the pane capture.${data["nativeTruncated"] === true ? " Older entries were left out." : ""}`);
+  }
   if (useGrep) {
     const matches = data["matches"] as string[] | undefined;
     if (matches && matches.length > 0) {
@@ -193,7 +209,7 @@ function renderTranscript(data: Record<string, unknown>, useGrep: boolean): void
     // OPR.0.5.3.1 item 4 — point-of-use hint: a near-empty transcript for a Claude
     // seat almost always means the fullscreen renderer (alternate screen → no
     // scrollback). Emit to stderr so it never pollutes the content on stdout.
-    if (printed <= THIN_TRANSCRIPT_LINES) emitThinTranscriptHint(printed);
+    if (!native && printed <= THIN_TRANSCRIPT_LINES) emitThinTranscriptHint(printed);
   }
 }
 
