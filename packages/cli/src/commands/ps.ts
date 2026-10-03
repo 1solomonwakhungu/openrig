@@ -1293,8 +1293,10 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
+// Every fixed-width cell keeps a one-space gutter, so a value as long as its
+// column never runs into the next one.
 function fitCell(value: string, width: number): string {
-  return truncate(value, width).padEnd(width);
+  return truncate(value, width - 1).padEnd(width);
 }
 
 function padRigRow(rig: string, nodes: string, running: string, active: string, work: string, attn: string, status: string, lifecycle: string, uptime: string, snapshot: string): string {
@@ -1333,7 +1335,7 @@ export function padNodeRow(rig: string, pod: string, member: string, session: st
     // Slice 15 — distinct TERMINAL + WORK columns.
     fitCell(terminal, 9),
     fitCell(work, 6),
-    fitCell(activity, 12),
+    fitCell(activity, 16),
     fitCell(ctx, 6),
     fitCell(cost, 9),
     fitCell(restore, 10),
@@ -1346,7 +1348,7 @@ export function padCompactNodeRow(rig: string, session: string, lifecycle: strin
     fitCell(rig, 22),
     fitCell(session, 38),
     fitCell(lifecycle, 11),
-    fitCell(activity, 14),
+    fitCell(activity, 16),
     fitCell(work, 6),
     reason,
   ].join("");

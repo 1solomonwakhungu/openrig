@@ -253,10 +253,14 @@ function seatLifecycleStatus(code: SeatRefusal["code"]): 400 | 404 | 409 | 500 |
 
 seatRoutes.post("/set-permissions/:seatRef", async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
-  const actor = transportSenderSession(c);
-  if (!actor || !body || Array.isArray(body) || typeof body.mode !== "string" || typeof body.reason !== "string") {
-    return c.json({ error: "Sender identity, mode and reason are required" }, 400);
+  if (!body || Array.isArray(body) || typeof body.mode !== "string" || typeof body.reason !== "string") {
+    return c.json({ error: "Mode and reason are required" }, 400);
   }
+  // A seat's request is audited as its transport sender, which the body cannot
+  // override. An operator terminal sends no sender, so it is audited as the
+  // --operator address, like the other lifecycle verbs, or as "operator".
+  const operator = typeof body.operator === "string" ? body.operator.trim() : "";
+  const actor = transportSenderSession(c) ?? (operator || "operator");
   const result = await seatLifecycleService(c).setPermissions({
     seatRef: decodeURIComponent(c.req.param("seatRef")), mode: body.mode, reason: body.reason, actor,
   });
