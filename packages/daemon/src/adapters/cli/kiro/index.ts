@@ -24,7 +24,8 @@ import type { CliRuntimeRegistration } from "../types.js";
 import { anyPanePhrase, panePhraseSource } from "../pane-phrase.js";
 import { activityMarkers } from "../activity-markers.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
-import type { RuntimeAuthContext, RuntimeAuthStatus, RuntimeModelShape } from "../../../domain/runtime-capabilities.js";
+import { kiroAuthStatus } from "../auth-status.js";
+import { KIRO_MODEL_SHAPE } from "../model-shapes.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 
@@ -82,31 +83,6 @@ export const KIRO_READY_RE = new RegExp(
   `^(?![\\s\\S]*(?:${KIRO_NOT_READY_RE.source}))[\\s\\S]*${panePhraseSource("Ask a question or describe a task")}`,
   "i",
 );
-
-/**
- * Sign-in status from local signals only (feature 6). KIRO_API_KEY (by name)
- * signs a seat in for headless use. A browser login lives in kiro-cli's own
- * SQLite database (auth_kv in data.sqlite3), which also exists before any
- * sign-in and is never opened here, so without the key the answer is
- * "unknown", never a guess.
- */
-export function kiroAuthStatus(ctx: RuntimeAuthContext): RuntimeAuthStatus {
-  if ((ctx.env.KIRO_API_KEY ?? "").trim()) return { state: "signed_in", source: "env KIRO_API_KEY" };
-  return {
-    state: "unknown",
-    hint: "run `kiro-cli login` once, or set KIRO_API_KEY",
-    detail: "a browser sign-in is kept in kiro-cli's data.sqlite3, which this check does not open",
-  };
-}
-
-/** Kiro model ids (`kiro-cli chat --list-models`), e.g. claude-sonnet-4.5,
- *  from kiro-cli-chat 2.27.1 strings; `auto` lets Kiro choose. Warn-only. */
-export const KIRO_MODEL_SHAPE: RuntimeModelShape = {
-  pattern: /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
-  example: "claude-sonnet-4.5",
-  note: "a Kiro model id from `kiro-cli chat --list-models` (no provider prefix), or auto",
-  aliases: ["auto"],
-};
 
 export const KIRO_DESCRIPTOR: RuntimeDescriptor = {
   id: KIRO_RUNTIME_ID,

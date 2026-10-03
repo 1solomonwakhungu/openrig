@@ -5,10 +5,12 @@
 
 import fs, { readFileSync } from "node:fs";
 import { checkModelShape } from "../src/domain/runtime-capabilities.js";
+import { kiroAuthStatus } from "../src/adapters/cli/auth-status.js";
+import { KIRO_MODEL_SHAPE } from "../src/adapters/cli/model-shapes.js";
 import nodePath from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  KIRO_DESCRIPTOR, KIRO_MODEL_SHAPE, KIRO_NOT_READY_RE, KIRO_READY_RE, KIRO_REGISTRATION, KIRO_SPEC, kiroAuthStatus,
+  KIRO_DESCRIPTOR, KIRO_NOT_READY_RE, KIRO_READY_RE, KIRO_REGISTRATION, KIRO_SPEC,
   buildKiroArgv, parseKiroVersion, verifyKiroVersionOutput,
 } from "../src/adapters/cli/kiro/index.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
