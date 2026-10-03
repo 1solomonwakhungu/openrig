@@ -17,6 +17,9 @@ const RIG_SPECS = [
   "rigs/launch/demo/rig.yaml",
   "rigs/preview/product-team/rig.yaml",
   "rigs/launch/secrets-manager/rig.yaml",
+  "rigs/mixed/polyglot-dev/rig.yaml",
+  "rigs/mixed/review-pair/rig.yaml",
+  "rigs/mixed/budget-team/rig.yaml",
 ];
 const PROOF_RIG_SPECS: string[] = [];
 

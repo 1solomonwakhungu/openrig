@@ -1,0 +1,28 @@
+version: "0.2"
+name: polyglot-dev
+summary: >
+  A builder on OpenCode and an independent reviewer on Gemini CLI, so the code and
+  its review come from different model families. Requires opencode (signed in to a
+  provider, or on its free OpenCode Zen models) and gemini with GEMINI_API_KEY or
+  Vertex AI credentials. See README.md in this directory.
+
+pods:
+  - id: dev
+    label: Polyglot Development
+    members:
+      - id: builder
+        agent_ref: "local:../../../agents/development/implementer"
+        runtime: opencode
+        profile: default
+        cwd: "."
+      - id: reviewer
+        agent_ref: "local:../../../agents/review/independent-reviewer"
+        runtime: gemini
+        profile: default
+        cwd: "."
+    edges:
+      - kind: delegates_to
+        from: builder
+        to: reviewer
+
+edges: []

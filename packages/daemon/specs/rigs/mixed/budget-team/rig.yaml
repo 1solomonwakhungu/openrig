@@ -1,0 +1,28 @@
+version: "0.2"
+name: budget-team
+summary: >
+  A no-cost starting point: a builder on OpenCode and a checker on Kilo CLI, both
+  able to run on their providers' free models without signing in. Requires opencode
+  and kilo installed; sign in or set a provider key for stronger models. See
+  README.md in this directory.
+
+pods:
+  - id: dev
+    label: Budget Team
+    members:
+      - id: builder
+        agent_ref: "local:../../../agents/development/implementer"
+        runtime: opencode
+        profile: default
+        cwd: "."
+      - id: checker
+        agent_ref: "local:../../../agents/development/qa"
+        runtime: kilo
+        profile: default
+        cwd: "."
+    edges:
+      - kind: delegates_to
+        from: builder
+        to: checker
+
+edges: []
