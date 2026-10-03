@@ -25,6 +25,7 @@ import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
 import { antigravityAuthStatus } from "../auth-status.js";
+import { ANTIGRAVITY_MODEL_SHAPE } from "../model-shapes.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -111,6 +112,7 @@ export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
   installHint: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
   authStatus: antigravityAuthStatus,
   docsPath: "docs/reference/runtimes/antigravity.md",
+  modelShape: ANTIGRAVITY_MODEL_SHAPE,
   resumeType: "antigravity_conversation_id",
   validateResumeToken: validateAntigravityConversationId,
   // Read-only late capture. The conversation is created lazily, so launch-time

@@ -18,6 +18,7 @@ import { CLINE_ERROR_PATTERNS, CLINE_GATE_PATTERNS, CLINE_READY_PATTERNS } from 
 import { readClineUsage } from "./usage.js";
 import { clineSeatHubEnv, prepareClineSeatHub, recordClineVersion, type ClineHubFs, type ClineSeatHubDeps } from "./hub.js";
 import { clineAuthStatus } from "../auth-status.js";
+import { CLINE_MODEL_SHAPE } from "../model-shapes.js";
 
 export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   id: CLINE_RUNTIME_ID,
@@ -27,6 +28,7 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   installHint: CLINE_INSTALL_HINT,
   authStatus: clineAuthStatus,
   docsPath: "docs/reference/runtimes/cline.md",
+  modelShape: CLINE_MODEL_SHAPE,
   // The per-seat hub and the stop reap need cline >= CLINE_MIN_VERSION.
   verify: async ({ version }) => (version
     ? clineVersionFloorError(version)

@@ -25,6 +25,7 @@ import {
 import { openSessionDbReadonly, readCurrentSessionId, sessionPresence } from "./session-store.js";
 import { readOpencodeUsage } from "./usage.js";
 import { opencodeFamilyAuthStatus } from "../auth-status.js";
+import { PROVIDER_SLASH_MODEL_SHAPE } from "../model-shapes.js";
 
 export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): RuntimeDescriptor {
   return {
@@ -35,6 +36,7 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
     installHint: variant.installHint,
     authStatus: opencodeFamilyAuthStatus(variant.id),
     docsPath: `docs/reference/runtimes/${variant.id}.md`,
+    modelShape: PROVIDER_SLASH_MODEL_SHAPE,
     resumeType: `${variant.id.replace(/-/g, "_")}_session_id`,
     validateResumeToken: validateOpencodeSessionId,
     // Sessions appear on the first prompt, so this usually finds nothing right
