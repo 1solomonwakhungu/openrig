@@ -7,9 +7,9 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  CLINE_TRANSCRIPT_MAX_BYTES, CLINE_TRANSCRIPT_SOURCE, clineMessagesPath, parseClineMessages, readClineTranscript,
-} from "../src/adapters/cli/cline/transcript.js";
+import { CLINE_TRANSCRIPT_SOURCE, clineMessagesPath, parseClineMessages, readClineTranscript } from "../src/adapters/cli/cline/transcript.js";
+import { NATIVE_TRANSCRIPT_MAX_BYTES } from "../src/adapters/cli/transcript-text.js";
+import { vi } from "vitest";
 import { CLINE_DESCRIPTOR } from "../src/adapters/cli/cline/index.js";
 import { createNodeFsOps } from "../src/adapters/node-fs-ops.js";
 
@@ -61,33 +61,39 @@ describe("readClineTranscript", () => {
     }));
     return root;
   }
-  const size = (path: string) => { try { return fs.statSync(path).size; } catch { return null; } };
 
-  it("reads the seat's session by its resume token", () => {
+  it("reads the seat's session by its resume token", async () => {
     const sessionsDir = store();
-    const transcript = readClineTranscript({ fs: createNodeFsOps(), fileSize: size, sessionsDir, resumeToken: SID, cwd: null });
+    const transcript = await readClineTranscript({ fs: createNodeFsOps(), sessionsDir, resumeToken: SID, cwd: null });
     expect(transcript?.source).toBe(CLINE_TRANSCRIPT_SOURCE);
     expect(transcript?.entries).toHaveLength(5);
   });
 
-  it("without a token, reads the one session this launch created (capture's attribution)", () => {
+  it("without a token, reads the one session this launch created (capture's attribution)", async () => {
     const sessionsDir = store();
-    const input = { fs: createNodeFsOps(), fileSize: size, sessionsDir, resumeToken: null, cwd: "/work/api" };
-    expect(readClineTranscript({ ...input, launchStartedAt: new Date("2026-10-03T03:19:59.000Z") })?.entries).toHaveLength(5);
-    expect(readClineTranscript({ ...input, launchStartedAt: new Date("2026-10-03T04:00:00.000Z") })).toBeNull();
-    expect(readClineTranscript({ ...input, cwd: "/work/other", launchStartedAt: new Date("2026-10-03T03:19:59.000Z") })).toBeNull();
-    expect(readClineTranscript(input)).toBeNull();
+    const input = { fs: createNodeFsOps(), sessionsDir, resumeToken: null, cwd: "/work/api" };
+    expect((await readClineTranscript({ ...input, launchStartedAt: new Date("2026-10-03T03:19:59.000Z") }))?.entries).toHaveLength(5);
+    expect(await readClineTranscript({ ...input, launchStartedAt: new Date("2026-10-03T04:00:00.000Z") })).toBeNull();
+    expect(await readClineTranscript({ ...input, cwd: "/work/other", launchStartedAt: new Date("2026-10-03T03:19:59.000Z") })).toBeNull();
+    expect(await readClineTranscript(input)).toBeNull();
   });
 
-  it("filters by since, and returns null for a missing, oversized, or malformed record", () => {
+  it("filters by since, and returns null for a missing, oversized, or malformed record", async () => {
     const sessionsDir = store();
-    const base = { fs: createNodeFsOps(), fileSize: size, sessionsDir, resumeToken: SID, cwd: null };
-    expect(readClineTranscript({ ...base, since: new Date("2026-10-03T03:20:03.000Z") })?.entries.map((e) => e.text))
+    const base = { fs: createNodeFsOps(), sessionsDir, resumeToken: SID, cwd: null };
+    expect((await readClineTranscript({ ...base, since: new Date("2026-10-03T03:20:03.000Z") }))?.entries.map((e) => e.text))
       .toEqual(["Add a health check to the API.", "File written.", "Done. The route returns 200."]);
-    expect(readClineTranscript({ ...base, resumeToken: "1790997600001_zzzzz" })).toBeNull();
-    expect(readClineTranscript({ ...base, fileSize: () => CLINE_TRANSCRIPT_MAX_BYTES + 1 })).toBeNull();
+    expect(await readClineTranscript({ ...base, resumeToken: "1790997600001_zzzzz" })).toBeNull();
+    // Over the cap: stat says too large, the record is never read, and the skip is logged.
+    const read = vi.fn(async () => "[]");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const huge = { stat: async () => ({ size: NATIVE_TRANSCRIPT_MAX_BYTES + 1 }), readFile: read };
+    expect(await readClineTranscript({ ...base, fileOps: huge })).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`cline native transcript skipped: ${SID}.messages.json 32 MiB is over the 32 MiB cap`));
+    warn.mockRestore();
     fs.writeFileSync(clineMessagesPath(sessionsDir, SID), "{ torn");
-    expect(readClineTranscript(base)).toBeNull();
+    expect(await readClineTranscript(base)).toBeNull();
   });
 
   it("is the cline descriptor's readTranscript hook", () => {

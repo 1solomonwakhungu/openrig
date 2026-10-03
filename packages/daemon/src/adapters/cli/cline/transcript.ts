@@ -10,7 +10,7 @@
 // ({ name, input }), tool_result ({ content }), and others (image, file, ...).
 // `ts` is epoch ms on assistant messages.
 //
-// Read-only, size-capped, and never throws (the F1 runner adds the deadline
+// Read-only, size-capped (NATIVE_TRANSCRIPT_MAX_BYTES, async stat then read), and never throws (the F1 runner adds the deadline
 // and the error logging).
 
 import nodePath from "node:path";
@@ -18,11 +18,9 @@ import type { RuntimeTranscript, RuntimeTranscriptEntry } from "../../../domain/
 import type { CliAdapterFsOps } from "../types.js";
 import { findClineSessionForLaunch } from "./sessions.js";
 import { validateClineSessionId } from "./launch.js";
-import { transcriptPreview as preview } from "../transcript-text.js";
+import { noteSkippedTranscript, readTranscriptFile, transcriptPreview as preview, type TranscriptFileOps } from "../transcript-text.js";
 
 export const CLINE_TRANSCRIPT_SOURCE = "cline_messages_json";
-/** Larger records are not read (the route would not render them usefully). */
-export const CLINE_TRANSCRIPT_MAX_BYTES = 32 * 1024 * 1024;
 
 export function clineMessagesPath(sessionsDir: string, sessionId: string): string {
   return nodePath.join(sessionsDir, sessionId, `${sessionId}.messages.json`);
@@ -88,9 +86,10 @@ export function parseClineMessages(text: string): RuntimeTranscriptEntry[] | nul
 }
 
 export interface ClineTranscriptInput {
+  /** Session lookup (metadata files); the record itself is read through fileOps. */
   fs: Pick<CliAdapterFsOps, "exists" | "readFile" | "listFiles">;
-  /** Size of a file in bytes, or null when unknown. */
-  fileSize(path: string): number | null;
+  /** Bounded async record read; defaults to node fs. */
+  fileOps?: TranscriptFileOps;
   sessionsDir: string;
   /** The seat's persisted session id, when captured. */
   resumeToken: string | null;
@@ -102,9 +101,10 @@ export interface ClineTranscriptInput {
 /**
  * The seat's cline transcript. The session is the seat's resume token, else
  * the one session this launch created (the same attribution as capture).
- * Null when there is no such session or no readable record.
+ * Null when there is no such session, no readable record, or the record is
+ * over NATIVE_TRANSCRIPT_MAX_BYTES (logged).
  */
-export function readClineTranscript(input: ClineTranscriptInput): RuntimeTranscript | null {
+export async function readClineTranscript(input: ClineTranscriptInput): Promise<RuntimeTranscript | null> {
   let sessionId = input.resumeToken && validateClineSessionId(input.resumeToken).ok ? input.resumeToken : null;
   if (!sessionId && input.cwd && input.launchStartedAt) {
     const found = findClineSessionForLaunch({ fs: input.fs as CliAdapterFsOps, sessionsDir: input.sessionsDir, cwd: input.cwd, launchStartedAt: input.launchStartedAt });
@@ -112,10 +112,12 @@ export function readClineTranscript(input: ClineTranscriptInput): RuntimeTranscr
   }
   if (!sessionId) return null;
   const path = clineMessagesPath(input.sessionsDir, sessionId);
-  if (!input.fs.exists(path)) return null;
-  const size = input.fileSize(path);
-  if (size === null || size > CLINE_TRANSCRIPT_MAX_BYTES) return null;
-  const entries = parseClineMessages(input.fs.readFile(path));
+  const read = await readTranscriptFile(path, { ops: input.fileOps });
+  if (!read.ok) {
+    noteSkippedTranscript("cline", path, read);
+    return null;
+  }
+  const entries = parseClineMessages(read.text);
   if (!entries) return null;
   const since = input.since?.getTime();
   const kept = since === undefined ? entries : entries.filter((entry) => !entry.at || Date.parse(entry.at) >= since);

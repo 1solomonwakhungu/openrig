@@ -11,7 +11,7 @@ import { GEMINI_DIALECT, validateSessionToken } from "../gemini-family/launch-ar
 import { GEMINI_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
 import { checkGeminiResumeTarget, findGeminiSessionFile, geminiSessionIsResumable } from "../gemini-family/session-store.js";
 import { readGeminiUsage } from "../gemini-family/usage.js";
-import { readGeminiTranscript } from "../gemini-family/transcript.js";
+import { readGeminiTranscript, readSessionTranscript } from "../gemini-family/transcript.js";
 import { readSessionText } from "../gemini-family/runtime.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 import { geminiAuthStatus } from "../auth-status.js";
@@ -69,7 +69,7 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   // file as usage.
   readTranscript: ({ resumeToken, cwd, homedir, since }) => {
     if (!resumeToken || !cwd) return null;
-    return readGeminiTranscript(readSessionText((ctx) => findGeminiSessionFile(ctx, resumeToken.trim()), { cwd, homedir }), since);
+    return readSessionTranscript("gemini", (ctx) => findGeminiSessionFile(ctx, resumeToken.trim()), { cwd, homedir }, (text) => readGeminiTranscript(text, since));
   },
   supportsFork: false,
   // Each posture maps to distinct launch flags, so a seat may select either.

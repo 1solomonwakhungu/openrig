@@ -15,7 +15,9 @@
 // Thoughts are left out. Read-only; never throws.
 
 import type { RuntimeTranscript, RuntimeTranscriptEntry } from "../../../domain/runtime-capabilities.js";
-import { toolCallText, transcriptPreview, transcriptTime } from "../transcript-text.js";
+import { noteSkippedTranscript, readTranscriptFile, toolCallText, transcriptPreview, transcriptTime, type TranscriptFileOps } from "../transcript-text.js";
+import { NODE_SESSION_STORE_FS } from "./runtime.js";
+import type { SessionStoreContext } from "./session-store.js";
 import { geminiSessionMessages } from "./session-store.js";
 
 export const GEMINI_TRANSCRIPT_SOURCE = "gemini_session_jsonl";
@@ -123,3 +125,30 @@ export function readQwenTranscript(text: string | null, since?: Date): RuntimeTr
   }
   return { source: QWEN_TRANSCRIPT_SOURCE, entries: sinceFilter(entries, since) };
 }
+
+/**
+ * Locate a seat's session file (gemini or qwen finder) and read it with the
+ * shared async, size-capped read. Null when there is no file, it is over
+ * NATIVE_TRANSCRIPT_MAX_BYTES (logged), or it cannot be read.
+ */
+export async function readSessionTranscript(
+  runtime: string,
+  find: (ctx: SessionStoreContext) => string | null,
+  input: { cwd: string; homedir: string; env?: NodeJS.ProcessEnv; fileOps?: TranscriptFileOps },
+  parse: (text: string) => RuntimeTranscript | null,
+): Promise<RuntimeTranscript | null> {
+  let path: string | null;
+  try {
+    path = find({ cwd: input.cwd, homedir: input.homedir, fs: NODE_SESSION_STORE_FS, env: input.env ?? process.env });
+  } catch {
+    return null;
+  }
+  if (!path) return null;
+  const read = await readTranscriptFile(path, { ops: input.fileOps });
+  if (!read.ok) {
+    noteSkippedTranscript(runtime, path, read);
+    return null;
+  }
+  return parse(read.text);
+}
+

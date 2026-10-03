@@ -14,10 +14,15 @@ import type { RuntimeTranscript, RuntimeTranscriptEntry } from "../../../domain/
 import { toolCallText, transcriptPreview, transcriptTime } from "../transcript-text.js";
 import type { SessionDbReader } from "./session-store.js";
 
+/** The newest `?` parts, newest first (the SQL bounds the read; the reader
+ *  reverses them into conversation order). */
 export const OPENCODE_TRANSCRIPT_PARTS_SQL =
   "SELECT json_extract(m.data, '$.role') AS role, m.time_created AS at, p.data AS part "
   + "FROM part p JOIN message m ON m.id = p.message_id "
-  + "WHERE p.session_id = ? ORDER BY m.time_created, m.id, p.id";
+  + "WHERE p.session_id = ? ORDER BY m.time_created DESC, m.id DESC, p.id DESC LIMIT ?";
+
+/** Parts read when the caller names no bound (the route passes its own). */
+export const OPENCODE_TRANSCRIPT_DEFAULT_PARTS = 5_000;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -26,11 +31,13 @@ export function readOpencodeTranscript(input: {
   sessionId: string | null | undefined;
   source: string;
   since?: Date;
+  /** At most this many parts, the newest. */
+  maxParts?: number;
 }): RuntimeTranscript | null {
   if (!input.db?.all || !input.sessionId) return null;
   let rows: Array<Record<string, unknown>>;
   try {
-    rows = input.db.all(OPENCODE_TRANSCRIPT_PARTS_SQL, [input.sessionId]);
+    rows = input.db.all(OPENCODE_TRANSCRIPT_PARTS_SQL, [input.sessionId, input.maxParts ?? OPENCODE_TRANSCRIPT_DEFAULT_PARTS]).reverse();
   } catch {
     return null;
   }

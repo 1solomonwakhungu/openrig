@@ -70,7 +70,7 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
     // Native transcript (feature 5): the full-screen TUI leaves the pane thin,
     // so `rig transcript` reads the session's messages from the seat database.
     // The session is the resume token, else the seat's current session.
-    readTranscript: ({ resumeToken, seatStateDir, launchStartedAt, since }) => {
+    readTranscript: ({ resumeToken, seatStateDir, launchStartedAt, since, maxEntries }) => {
       const dbPath = opencodeFamilyDbPath(variant, seatStateDir);
       if (!fs.existsSync(dbPath)) return null;
       let sessionId = resumeToken?.trim() || null;
@@ -81,7 +81,7 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
       if (!sessionId) return null;
       const db = openSessionDbReadonly(dbPath);
       try {
-        return readOpencodeTranscript({ db, sessionId, source: `${variant.id}_session_db`, since });
+        return readOpencodeTranscript({ db, sessionId, source: `${variant.id}_session_db`, since, maxParts: maxEntries });
       } finally {
         db.close();
       }

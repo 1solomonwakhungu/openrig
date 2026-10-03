@@ -990,7 +990,9 @@ Notes:
   thin), else the pane capture; `pane`
   always reads the pane capture; `native` reads only the record and fails with
   a 404 when the runtime has none. A native read prints a `note:` line on
-  stderr naming the record; its text is redacted like `/full`.
+  stderr naming the record; its text is redacted like `/full`. Records over
+  32 MiB are skipped (logged), so such a seat falls back to the pane capture
+  under `auto`.
 - **v0.4.6 (OPR.0.4.6.MH4)** — `--host <id>` / the `agent@rig@host` session form reads the
   transcript from a remote host, CLI-direct against that daemon's shipped
   `GET /api/transcripts/:session/tail|grep` routes (http-registered hosts only — an

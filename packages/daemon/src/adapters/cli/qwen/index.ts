@@ -16,7 +16,7 @@ import {
   captureQwenForkChild, checkQwenResumeTarget, findQwenSessionFile, type SessionStoreContext,
 } from "../gemini-family/session-store.js";
 import { readQwenUsage } from "../gemini-family/usage.js";
-import { readQwenTranscript } from "../gemini-family/transcript.js";
+import { readQwenTranscript, readSessionTranscript } from "../gemini-family/transcript.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify, readSessionText } from "../gemini-family/runtime.js";
 import { qwenAuthStatus } from "../auth-status.js";
 import { QWEN_MODEL_SHAPE } from "../model-shapes.js";
@@ -102,7 +102,7 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   // file as usage.
   readTranscript: ({ resumeToken, cwd, homedir, since }) => {
     if (!resumeToken || !cwd) return null;
-    return readQwenTranscript(readSessionText((ctx) => findQwenSessionFile(ctx, resumeToken.trim()), { cwd, homedir }), since);
+    return readSessionTranscript("qwen", (ctx) => findQwenSessionFile(ctx, resumeToken.trim()), { cwd, homedir }, (text) => readQwenTranscript(text, since));
   },
   supportsFork: true,
   // Each posture maps to distinct launch flags, so a seat may select either.

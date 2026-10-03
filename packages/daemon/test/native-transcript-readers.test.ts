@@ -9,7 +9,9 @@ import os from "node:os";
 import nodePath from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { GEMINI_TRANSCRIPT_SOURCE, QWEN_TRANSCRIPT_SOURCE, readGeminiTranscript, readQwenTranscript } from "../src/adapters/cli/gemini-family/transcript.js";
+import { GEMINI_TRANSCRIPT_SOURCE, QWEN_TRANSCRIPT_SOURCE, readGeminiTranscript, readQwenTranscript, readSessionTranscript } from "../src/adapters/cli/gemini-family/transcript.js";
+import { NATIVE_TRANSCRIPT_MAX_BYTES } from "../src/adapters/cli/transcript-text.js";
+import { vi } from "vitest";
 import { OPENCODE_TRANSCRIPT_PARTS_SQL, readOpencodeTranscript } from "../src/adapters/cli/opencode/transcript.js";
 import { openSessionDbReadonly } from "../src/adapters/cli/opencode/session-store.js";
 import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
@@ -58,6 +60,40 @@ describe("qwen (0.24.7 chat jsonl)", () => {
   });
 });
 
+describe("bounded session-file reads (gemini and qwen)", () => {
+  it("reads a located file asynchronously within the cap", async () => {
+    const text = fixture("qwen-0.24.7-chat.jsonl");
+    const ops = { stat: async () => ({ size: text.length }), readFile: vi.fn(async () => text) };
+    const transcript = await readSessionTranscript("qwen", () => "/q/chats/s1.jsonl", { cwd: "/w", homedir: "/h", fileOps: ops }, (t) => readQwenTranscript(t));
+    expect(transcript?.entries).toHaveLength(5);
+    expect(ops.readFile).toHaveBeenCalledWith("/q/chats/s1.jsonl");
+  });
+
+  it("over the cap returns null without reading, and logs why", async () => {
+    const ops = { stat: async () => ({ size: NATIVE_TRANSCRIPT_MAX_BYTES + 1 }), readFile: vi.fn(async () => "") };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await readSessionTranscript("gemini", () => "/g/chats/session-x.jsonl", { cwd: "/w", homedir: "/h", fileOps: ops }, (t) => readGeminiTranscript(t))).toBeNull();
+      expect(ops.readFile).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("gemini native transcript skipped: session-x.jsonl 32 MiB is over the 32 MiB cap"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("no located file, or a missing one, is null and quiet", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const missing = { stat: async () => { throw Object.assign(new Error("gone"), { code: "ENOENT" }); }, readFile: async () => "" };
+    try {
+      expect(await readSessionTranscript("qwen", () => null, { cwd: "/w", homedir: "/h" }, (t) => readQwenTranscript(t))).toBeNull();
+      expect(await readSessionTranscript("qwen", () => "/q/x.jsonl", { cwd: "/w", homedir: "/h", fileOps: missing }, (t) => readQwenTranscript(t))).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe("opencode / kilo (seat session database, v1.18.33 schema)", () => {
   let tmp: string | null = null;
   afterEach(() => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); tmp = null; });
@@ -102,6 +138,9 @@ describe("opencode / kilo (seat session database, v1.18.33 schema)", () => {
       });
       expect(readOpencodeTranscript({ db, sessionId: "ses_1", source: "x", since: new Date("2026-10-03T03:00:15.000Z") })?.entries).toHaveLength(5);
       expect(readOpencodeTranscript({ db, sessionId: "ses_missing", source: "x" })?.entries).toEqual([]);
+      // The bound is in the SQL: the newest parts, returned in conversation order.
+      expect(readOpencodeTranscript({ db, sessionId: "ses_1", source: "x", maxParts: 2 })?.entries.map((e) => e.text))
+        .toEqual(['bash({"command":"npm test"})', "error: exit 1"]);
     } finally {
       db.close();
     }
@@ -112,7 +151,7 @@ describe("opencode / kilo (seat session database, v1.18.33 schema)", () => {
     const empty = { get: () => undefined, all: () => { throw new Error("no such table: part"); }, close: () => {} };
     expect(readOpencodeTranscript({ db: empty, sessionId: "ses_1", source: "x" })).toBeNull();
     expect(readOpencodeTranscript({ db: { get: () => undefined, close: () => {} }, sessionId: "ses_1", source: "x" })).toBeNull();
-    expect(OPENCODE_TRANSCRIPT_PARTS_SQL).toContain("WHERE p.session_id = ?");
+    expect(OPENCODE_TRANSCRIPT_PARTS_SQL).toMatch(/WHERE p\.session_id = \? ORDER BY .* DESC LIMIT \?$/);
   });
 });
 

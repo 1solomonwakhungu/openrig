@@ -1,7 +1,6 @@
 // Cline CLI runtime registration (`runtime: cline`).
 // Reference: docs/reference/runtimes/cline.md.
 
-import fs from "node:fs";
 import { activityMarkers } from "../activity-markers.js";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
@@ -61,13 +60,6 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   // `rig transcript` reads the session's messages record instead of the pane.
   readTranscript: ({ cwd, launchStartedAt, homedir, resumeToken, since }) => readClineTranscript({
     fs: createNodeFsOps(),
-    fileSize: (path) => {
-      try {
-        return fs.statSync(path).size;
-      } catch {
-        return null;
-      }
-    },
     sessionsDir: clineSessionsDir(clineLaunchEnv(), homedir),
     resumeToken,
     cwd,
