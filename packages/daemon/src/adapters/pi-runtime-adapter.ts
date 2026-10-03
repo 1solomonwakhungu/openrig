@@ -27,7 +27,7 @@ import { observePiResourceTrust, observeOmpApprovalMode } from "../domain/permis
 import {
   piSeatPaths, parsePiRunnerState, buildPiRunnerCommand, buildPendingRunnerState,
   PI_RUNNER_READY_MARKER, PI_RUNNER_ERROR_MARKER, PI_RUNNER_EXIT_MARKER,
-  type PiRunnerState, type RunnerRuntime,
+  type PiRunnerState, type RunnerRuntime, OMP_SIGN_IN_HINT
 } from "./pi-runner-protocol.js";
 
 const SHELL_COMMANDS = new Set(["bash", "fish", "nu", "sh", "tmux", "zsh"]);
@@ -316,6 +316,9 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     const atShell = SHELL_COMMANDS.has(paneCommand);
     const state = this.readRunnerState(binding.tmuxSession);
     if (state?.exited) {
+      if (state.exited.reason === "login_required") {
+        return { ready: false, reason: `${this.runtime} is not signed in: ${OMP_SIGN_IN_HINT}`, code: "login_required" };
+      }
       return { ready: false, reason: `${this.runtime}-runner exited (code ${state.exited.code ?? "unknown"})`, code: "runner_exited" };
     }
     if (state?.ready) {
@@ -374,13 +377,22 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
       if (state?.launchId === launchId) {
         if (state.exited) {
           const paneContent = (await this.tmux.capturePaneContent(sessionName, 40)) ?? "";
+          const evidence = paneContent.split("\n").slice(-12).join("\n");
+          // OMP with no model credentials: a sign-in gate, so runtime fallback
+          // (fallback_runtimes) can move the seat to its next runtime.
+          if (state.exited.reason === "login_required") {
+            return {
+              ok: false,
+              failure: { ok: false, error: `${this.runtime} is not signed in: ${OMP_SIGN_IN_HINT}`, recovery: "attention_required", attentionCode: "login_required", evidence },
+            };
+          }
           return {
             ok: false,
             failure: {
               ok: false,
               error: `${this.runtime} launch failed: the runner exited (code ${state.exited.code ?? "unknown"})`,
               recovery: "attention_required",
-              evidence: paneContent.split("\n").slice(-12).join("\n"),
+              evidence,
             },
           };
         }

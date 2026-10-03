@@ -76,7 +76,7 @@ export function validatePiSessionFileToken(token: string): ResumeTokenFormatResu
   return validateSessionFileToken("Pi", token);
 }
 
-/** OMP session files share Pi's floor (upstream #35). */
+/** OMP session files share Pi's floor (as in the upstream Oh My Pi runtime). */
 export function validateOmpSessionFileToken(token: string): ResumeTokenFormatResult {
   return validateSessionFileToken("OMP", token);
 }

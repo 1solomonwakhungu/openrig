@@ -390,7 +390,7 @@ describe("P17 — conflicts surface LOUDLY (never a silent overwrite)", () => {
     const src = fsMod.readFileSync(new URL("../src/domain/rigspec-instantiator.ts", import.meta.url), "utf8");
     const callBlock = /planProjection\(\{[\s\S]*?\n\s*\}\);/.exec(src)?.[0] ?? "";
     // #25: the resolver may be wrapped to pass the rig's managed-block file;
-    // OMP (upstream #35) branches skills to the adapter's own target. Either
+    // OMP (ported from upstream) branches skills to the adapter's own target. Either
     // way the Claude conflict resolver stays the default.
     expect(callBlock, "planProjection call must inject resolveTargetPath").toMatch(
       /(?:^|\n)\s*resolveTargetPath:\s*(claudeConflictTargetPath\b|\([^)]*\)\s*=>)/,

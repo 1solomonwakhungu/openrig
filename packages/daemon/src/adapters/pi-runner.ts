@@ -29,7 +29,7 @@ import { stripVTControlCharacters } from "node:util";
 import {
   piSeatPaths, buildPiChildArgs, buildPiChildEnv, buildPendingRunnerState, parsePiRunnerState,
   PI_RUNNER_READY_MARKER, PI_RUNNER_EXIT_MARKER, PI_RUNNER_ERROR_MARKER,
-  type PiRunnerState, type RunnerRuntime,
+  type PiRunnerState, type RunnerRuntime, OMP_NO_CREDENTIALS_RE, OMP_SIGN_IN_HINT
 } from "./pi-runner-protocol.js";
 
 // ── Submitted input boundaries ─────────────────────────────────────────────
@@ -380,15 +380,15 @@ export class RunnerCore {
   }
 
   /** Child process exit: honest, loud, durable. */
-  handlePiExit(code: number | null): void {
+  handlePiExit(code: number | null, reason?: "login_required"): void {
     this.ready = false;
     this.io.mirrorLine(`[${this.runtime}-runner] EXITED ${this.runtime} exited (code ${code ?? "unknown"})`);
-    this.writeSidecar({ exited: { code, at: this.io.now() } });
+    this.writeSidecar({ exited: { code, at: this.io.now(), ...(reason ? { reason } : {}) } });
     this.io.postActivity(this.activityPayload("Stop", `${this.runtime}_exited`));
   }
 
   private handleResponse(record: Record<string, unknown>): void {
-    // OMP only (upstream #35): a failed RPC response. Pi keeps its existing
+    // OMP only (from the upstream Oh My Pi runtime): a failed RPC response. Pi keeps its existing
     // handling of failed responses unchanged.
     if (this.runtime === "omp" && (record.success === false || record.error != null)) {
       const message = typeof record.error === "string" ? record.error : "request failed";
@@ -892,7 +892,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   // Re-deliver OMP identity until the daemon confirms the resume token.
   const identityRetry = runtime === "omp" ? setInterval(() => core.retrySessionIdentity(), IDENTITY_RETRY_MS) : undefined;
   identityRetry?.unref();
+  // OMP prints its no-credentials notice on stderr and exits; remember it so
+  // the exit is reported as a sign-in problem, not a launch failure.
+  let noCredentials = false;
   readline.createInterface({ input: child.stderr }).on("line", (line) => {
+    if (runtime === "omp" && OMP_NO_CREDENTIALS_RE.test(line)) noCredentials = true;
     if (line.trim()) process.stdout.write(`[${runtime}:err] ${line}\n`);
   });
   const input = createRunnerInput(process.stdin, process.stdout, (block) => core.handleUserBlock(block));
@@ -921,11 +925,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     exited = true;
     clearInterval(identityRetry);
     if (!core.isReady()) {
-      console.error(transportUp
-        ? "[omp-runner] ERROR OMP did not establish a resumable RPC session. Authenticate this isolated seat using HOME=<seat-root> PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login, or provide its declared model provider key in the OpenRig daemon environment. Default OMP credentials are not shared."
-        : `[omp-runner] ERROR OMP exited before its RPC transport started (${command}, code ${code ?? "unknown"}). This is a launch failure, not a credential problem; see the output above.`);
+      console.error(noCredentials
+        ? `[omp-runner] ERROR ${OMP_SIGN_IN_HINT}`
+        : transportUp
+          ? `[omp-runner] ERROR OMP did not establish a resumable RPC session. ${OMP_SIGN_IN_HINT}`
+          : `[omp-runner] ERROR OMP exited before its RPC transport started (${command}, code ${code ?? "unknown"}); see its output above.`);
     }
-    core.handlePiExit(code);
+    core.handlePiExit(code, !core.isReady() && noCredentials ? "login_required" : undefined);
     input.close();
     process.exitCode = code ?? 1;
   };
@@ -933,7 +939,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.error(`[omp-runner] ERROR failed to spawn omp: ${err.message}`);
     recordExit(null);
   });
-  child.on("exit", recordExit);
+  // "close" (not "exit"): it fires after the child's stdio is drained, so the
+  // no-credentials notice on stderr is always seen before the exit is recorded.
+  child.on("close", recordExit);
 }
 
 // Compiled-entry guard: run main() only when executed directly (not imported

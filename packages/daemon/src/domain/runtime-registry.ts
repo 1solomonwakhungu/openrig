@@ -284,7 +284,7 @@ const TERMINAL: RuntimeDescriptor = {
   supportsFork: false,
 };
 
-// Oh My Pi (upstream #35): the Pi RPC runner with OMP's own CLI, a per-seat
+// Oh My Pi (ported from upstream): the Pi RPC runner with OMP's own CLI, a per-seat
 // isolated state root and HOME, and approval-mode posture. No Node engine
 // floor: omp is its own executable.
 const OMP: RuntimeDescriptor = {

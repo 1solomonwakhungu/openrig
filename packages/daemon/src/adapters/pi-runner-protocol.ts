@@ -67,8 +67,10 @@ export interface PiRunnerState {
   lastEntryId?: string;
   /** ISO timestamp of the last sidecar write. */
   updatedAt: string;
-  /** Set when the pi process exited; the seat is honestly non-running. */
-  exited?: { code: number | null; at: string };
+  /** Set when the pi process exited; the seat is honestly non-running.
+   *  `reason: "login_required"` (OMP only) means the CLI exited because it
+   *  has no model credentials, which the adapter reports as a sign-in gate. */
+  exited?: { code: number | null; at: string; reason?: "login_required" };
 }
 
 /** The launch-scoped pending record every writer uses when resetting the
@@ -117,6 +119,17 @@ export const PI_PROVIDER_ENV_VARS: Record<string, string> = {
 
 /** Explicit OMP chat-provider credential names. Only the declared provider's
  *  key can cross into the child; arbitrary *_KEY variables are never forwarded. */
+/** OMP's own output when it starts with no usable model (no provider key in
+ *  its environment and no models.yml): "No models available. Use /login or
+ *  set an API key environment variable. ..." (seen in a no-credentials
+ *  smoke run). */
+export const OMP_NO_CREDENTIALS_RE = /No models available\. Use \/login or set an API key environment variable/;
+
+/** What an OMP seat with no model credentials needs (each seat has its own
+ *  HOME, so the operator's default OMP sign-in is not shared). */
+export const OMP_SIGN_IN_HINT =
+  "OMP has no model credentials for this seat. Sign it in with HOME=<seat-root> PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login, or set the model provider's API key (for example ANTHROPIC_API_KEY) in the OpenRig daemon environment. Default OMP credentials are not shared.";
+
 export const OMP_PROVIDER_ENV_VARS: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
