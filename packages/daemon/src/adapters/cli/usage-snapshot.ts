@@ -3,15 +3,8 @@
 // that does not record something leaves it absent (never zero-filled), and a
 // reader that finds nothing returns null.
 
-import type { RuntimeUsageSnapshot as CapabilityUsageSnapshot } from "../../domain/runtime-capabilities.js";
-
-/** The F1 readUsage snapshot plus two optional fields the CLI records carry:
- *  reasoning tokens, and whether the figures are rounded (aider). */
-export type RuntimeUsageSnapshot = CapabilityUsageSnapshot & {
-  reasoningTokens?: number;
-  /** True when the CLI only reports rounded figures (aider's "2.1k sent"). */
-  approximate?: boolean;
-};
+export type { RuntimeUsageSnapshot } from "../../domain/runtime-capabilities.js";
+import type { RuntimeUsageSnapshot } from "../../domain/runtime-capabilities.js";
 
 /** A finite, non-negative number, else undefined. */
 export function usageNumber(value: unknown): number | undefined {

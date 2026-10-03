@@ -6,9 +6,8 @@
 import type Database from "better-sqlite3";
 import type { RuntimeUsageSnapshot } from "./runtime-capabilities.js";
 
-/** A stored reading; `approximate` and `reasoningTokens` are optional extras
- *  some readers report (aider's rounded counts, reasoning models). */
-export type RuntimeUsageReading = RuntimeUsageSnapshot & { reasoningTokens?: number; approximate?: boolean };
+/** A stored reading: the readUsage snapshot. */
+export type RuntimeUsageReading = RuntimeUsageSnapshot;
 
 export interface RuntimeUsageRecord extends RuntimeUsageReading {
   runtime: string;
