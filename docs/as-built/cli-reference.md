@@ -985,8 +985,9 @@ Notes:
 - Reads transcript files, not pane scrollback.
 - `--grep` treats the pattern as regex.
 - `--source` (feature 5): `auto` (default) reads the CLI's own session record
-  when the seat's runtime has a native transcript reader (today: `cline`, whose
-  full-screen TUI leaves the pane capture thin), else the pane capture; `pane`
+  when the seat's runtime has a native transcript reader (today: `cline`,
+  `opencode`, `kilo`, `gemini`, and `qwen`, whose TUIs leave the pane capture
+  thin), else the pane capture; `pane`
   always reads the pane capture; `native` reads only the record and fails with
   a 404 when the runtime has none. A native read prints a `note:` line on
   stderr naming the record; its text is redacted like `/full`.

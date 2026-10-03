@@ -16,6 +16,8 @@ import { validateOpencodeSessionId } from "./family.js";
 export interface SessionDbReader {
   /** First row of a read-only query, or undefined. */
   get(sql: string, params: readonly unknown[]): Record<string, unknown> | undefined;
+  /** Every row of a read-only query (native transcripts); absent = unsupported. */
+  all?(sql: string, params: readonly unknown[]): Array<Record<string, unknown>>;
   close(): void;
 }
 
@@ -39,6 +41,7 @@ export function openSessionDbReadonly(path: string): SessionDbReader {
   const db = new Database(path, { readonly: true, fileMustExist: true, timeout: 2_000 });
   return {
     get: (sql, params) => db.prepare(sql).get(...params) as Record<string, unknown> | undefined,
+    all: (sql, params) => db.prepare(sql).all(...params) as Array<Record<string, unknown>>,
     close: () => db.close(),
   };
 }

@@ -26,6 +26,7 @@ import { openSessionDbReadonly, readCurrentSessionId, sessionPresence } from "./
 import { readOpencodeUsage } from "./usage.js";
 import { opencodeFamilyAuthStatus } from "../auth-status.js";
 import { PROVIDER_SLASH_MODEL_SHAPE } from "../model-shapes.js";
+import { readOpencodeTranscript } from "./transcript.js";
 
 export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): RuntimeDescriptor {
   return {
@@ -62,6 +63,25 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
       const db = openSessionDbReadonly(dbPath);
       try {
         return readOpencodeUsage({ db, sessionId: resumeToken.trim(), source: `${variant.id}_session_db` });
+      } finally {
+        db.close();
+      }
+    },
+    // Native transcript (feature 5): the full-screen TUI leaves the pane thin,
+    // so `rig transcript` reads the session's messages from the seat database.
+    // The session is the resume token, else the seat's current session.
+    readTranscript: ({ resumeToken, seatStateDir, launchStartedAt, since }) => {
+      const dbPath = opencodeFamilyDbPath(variant, seatStateDir);
+      if (!fs.existsSync(dbPath)) return null;
+      let sessionId = resumeToken?.trim() || null;
+      if (!sessionId) {
+        const current = readCurrentSessionId(dbPath, { exists: (path) => fs.existsSync(path) }, launchStartedAt);
+        sessionId = current.ok ? current.token : null;
+      }
+      if (!sessionId) return null;
+      const db = openSessionDbReadonly(dbPath);
+      try {
+        return readOpencodeTranscript({ db, sessionId, source: `${variant.id}_session_db`, since });
       } finally {
         db.close();
       }

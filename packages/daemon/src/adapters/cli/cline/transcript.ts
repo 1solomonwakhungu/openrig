@@ -18,25 +18,14 @@ import type { RuntimeTranscript, RuntimeTranscriptEntry } from "../../../domain/
 import type { CliAdapterFsOps } from "../types.js";
 import { findClineSessionForLaunch } from "./sessions.js";
 import { validateClineSessionId } from "./launch.js";
+import { transcriptPreview as preview } from "../transcript-text.js";
 
 export const CLINE_TRANSCRIPT_SOURCE = "cline_messages_json";
 /** Larger records are not read (the route would not render them usefully). */
 export const CLINE_TRANSCRIPT_MAX_BYTES = 32 * 1024 * 1024;
-/** Tool inputs are summarized, never dumped whole. */
-const TOOL_INPUT_PREVIEW = 300;
 
 export function clineMessagesPath(sessionsDir: string, sessionId: string): string {
   return nodePath.join(sessionsDir, sessionId, `${sessionId}.messages.json`);
-}
-
-function preview(value: unknown): string {
-  let text: string;
-  try {
-    text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
-  } catch {
-    text = "";
-  }
-  return text.length > TOOL_INPUT_PREVIEW ? `${text.slice(0, TOOL_INPUT_PREVIEW)}...` : text;
 }
 
 function blockTexts(content: unknown): string[] {

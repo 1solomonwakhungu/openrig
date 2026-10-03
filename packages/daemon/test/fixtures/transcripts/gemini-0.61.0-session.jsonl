@@ -1,0 +1,7 @@
+{"sessionId": "0198a2f0-1111-7222-8333-444455556666", "projectHash": "abc", "startTime": "2026-10-03T03:00:00.000Z", "lastUpdated": "2026-10-03T03:05:00.000Z", "kind": "main"}
+{"$set": {"messages": [{"id": "m1", "timestamp": "2026-10-03T03:00:10.000Z", "type": "user", "content": [{"text": "Add a health route."}]}]}}
+{"id": "m2", "timestamp": "2026-10-03T03:00:20.000Z", "type": "gemini", "content": [{"text": "thinking about it", "thought": true}, {"text": "Adding GET /health."}], "thoughts": [{"subject": "Plan", "description": "secret plan", "timestamp": "2026-10-03T03:00:15.000Z"}], "toolCalls": [{"id": "c1", "name": "write_file", "args": {"file_path": "src/health.ts", "content": "export const ok = true;"}, "result": [{"functionResponse": {"name": "write_file", "response": {"output": "Wrote src/health.ts"}}}], "status": "success", "timestamp": "2026-10-03T03:00:21.000Z"}, {"id": "c2", "name": "run_shell_command", "args": {"command": "npm test"}, "result": "exit 1", "status": "error", "timestamp": "2026-10-03T03:00:25.000Z"}], "model": "gemini-3.5-pro", "tokens": {"input": 5200, "output": 300, "cached": 0, "thoughts": 10, "tool": 0, "total": 5510}}
+{"id": "m3", "timestamp": "2026-10-03T03:00:30.000Z", "type": "info", "content": "Request cancelled."}
+{"id": "m4", "timestamp": "2026-10-03T03:00:40.000Z", "type": "gemini", "content": "(rewound away)"}
+{"$rewindTo": "m4"}
+{"id": "m5", "timestamp": "2026-10-03T03:01:00.000Z", "type": "gemini", "content": "Done; tests need a fix."}
