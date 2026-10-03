@@ -1,0 +1,27 @@
+version: "0.2"
+name: review-pair
+summary: >
+  A Claude Code builder with an independent GitHub Copilot CLI reviewer. Requires
+  claude (signed in) and copilot (`copilot login`, or COPILOT_GITHUB_TOKEN set).
+  See README.md in this directory.
+
+pods:
+  - id: dev
+    label: Review Pair
+    members:
+      - id: builder
+        agent_ref: "local:../../../agents/development/implementer"
+        runtime: claude-code
+        profile: default
+        cwd: "."
+      - id: reviewer
+        agent_ref: "local:../../../agents/review/independent-reviewer"
+        runtime: copilot
+        profile: default
+        cwd: "."
+    edges:
+      - kind: delegates_to
+        from: builder
+        to: reviewer
+
+edges: []
