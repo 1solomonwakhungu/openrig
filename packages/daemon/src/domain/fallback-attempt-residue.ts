@@ -23,6 +23,8 @@ const BLOCK_ID_RE = /<!-- BEGIN OpenRig MANAGED BLOCK: ([^>]+?) -->/g;
 export interface AttemptResidueTargets {
   guidanceFiles: string[];
   skillsDir: string | null;
+  /** The seat's workspace (git top level, else the cwd): nothing outside it is touched. */
+  workspace: string;
 }
 
 export interface AttemptResidueSnapshot {
@@ -31,6 +33,9 @@ export interface AttemptResidueSnapshot {
   blockIds: Map<string, Set<string> | null>;
   /** Entries of the skills directory before the attempt (null: no directory). */
   skillEntries: Set<string> | null;
+  /** Directories between the workspace and the targets that did not exist before
+   *  the attempt, deepest first; removed afterwards only if they are empty. */
+  absentDirs: string[];
 }
 
 export interface AttemptResidueRemoval {
@@ -74,6 +79,7 @@ export function attemptResidueTargets(input: {
   return {
     guidanceFiles: guidanceFiles.filter((file) => inside(workspace, file)),
     skillsDir: skillsDir && inside(workspace, skillsDir) ? skillsDir : null,
+    workspace,
   };
 }
 
@@ -90,11 +96,26 @@ function readEntries(dir: string): Set<string> | null {
   }
 }
 
+/** Directories from `dir` up to (not including) `workspace` that do not exist yet. */
+function missingDirs(dir: string, workspace: string): string[] {
+  const missing: string[] = [];
+  for (let current = dir; inside(workspace, current); current = nodePath.dirname(current)) {
+    if (fs.existsSync(current)) break;
+    missing.push(current);
+  }
+  return missing;
+}
+
 export function snapshotAttemptResidue(targets: AttemptResidueTargets): AttemptResidueSnapshot {
+  const dirs = new Set<string>();
+  if (targets.skillsDir) for (const dir of missingDirs(targets.skillsDir, targets.workspace)) dirs.add(dir);
+  for (const file of targets.guidanceFiles) for (const dir of missingDirs(nodePath.dirname(file), targets.workspace)) dirs.add(dir);
   return {
     targets,
     blockIds: new Map(targets.guidanceFiles.map((file) => [file, readBlockIds(file)])),
     skillEntries: targets.skillsDir ? readEntries(targets.skillsDir) : null,
+    // Deepest first, so a parent is considered only after its children.
+    absentDirs: [...dirs].sort((a, b) => b.length - a.length),
   };
 }
 
@@ -134,10 +155,11 @@ export function removeAttemptResidue(snapshot: AttemptResidueSnapshot): AttemptR
         removal.skills.push(entry);
       } catch { /* best-effort */ }
     }
-    // A skills directory the attempt created and that is now empty goes too.
-    if (snapshot.skillEntries === null) {
-      try { if (fs.readdirSync(skillsDir).length === 0) fs.rmdirSync(skillsDir); } catch { /* best-effort */ }
-    }
+  }
+  // Directories the attempt created (for example `.kiro/` around `.kiro/skills`)
+  // go once they are empty; a pre-existing or non-empty directory is never removed.
+  for (const dir of snapshot.absentDirs) {
+    try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* absent or not removable */ }
   }
   return removal;
 }

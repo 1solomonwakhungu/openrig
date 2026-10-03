@@ -368,7 +368,9 @@ runtime's guidance files (the same files `rig down` cleans: for example
 `CLAUDE.md`, Cline's `AGENTS.md` at the repository root, or a
 `guidance.tracked_file: redirect` alternate) and skill directories it
 projected (for example `.claude/skills/<skill>`). Blocks and skills that were
-there before the attempt are left alone. Rate limits do not trigger fallback: no runtime reports a rate limit
+there before the attempt are left alone. Directories the attempt created (for
+example `.kiro/` around `.kiro/skills`) are removed once they are empty; an
+existing or non-empty directory is never removed. Rate limits do not trigger fallback: no runtime reports a rate limit
 at launch through a signal OpenRig can detect reliably and test.
 
 The seat records the runtime it actually runs on:
@@ -377,7 +379,8 @@ The seat records the runtime it actually runs on:
   `! <session> runs on fallback runtime "codex" (declared "claude-code")`
   below the table, in the compact and full views. `rig ps --json` carries
   `declaredRuntime` for such seats.
-- `rig whoami --json` reports `runtime` (actual) and `declaredRuntime`.
+- `rig whoami --json` reports `runtime` (actual) and `declaredRuntime`;
+  `rig whoami` prints `Runtime: opencode (fallback; declared kiro)`.
 - A `node.runtime_fallback` event lists every attempt.
 - Restore resumes on the runtime the seat ran on and never falls back.
 - `rig spec export` keeps the declared `runtime` and `fallback_runtimes`.

@@ -83,6 +83,10 @@ describe("Whoami CLI", () => {
       } else if (url.includes("/api/whoami") && url.includes("nodeId=node-3")) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ...WHOAMI_RESPONSE, trustAnswers: [TRUST_ANSWER] }));
+      } else if (url.includes("/api/whoami") && url.includes("nodeId=node-4")) {
+        // A seat running on a fallback runtime.
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ...WHOAMI_RESPONSE, identity: { ...WHOAMI_RESPONSE.identity, runtime: "opencode", declaredRuntime: "kiro" } }));
       } else if (url.includes("/api/whoami") && url.includes("nodeId=node-2")) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(UNBOUND_WHOAMI_RESPONSE));
@@ -293,6 +297,20 @@ describe("Whoami CLI", () => {
     process.env["OPENRIG_NODE_ID"] = "node-1";
     const plain = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami", "--json"]); });
     expect(JSON.parse(plain.logs.join("\n"))).not.toHaveProperty("trustAnswers");
+  });
+
+  it("a seat on a fallback runtime shows its declared runtime in compact --json and human output", async () => {
+    process.env["OPENRIG_NODE_ID"] = "node-4";
+    const json = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami", "--json"]); });
+    expect(JSON.parse(json.logs.join("\n")).identity).toMatchObject({ runtime: "opencode", declaredRuntime: "kiro" });
+    const human = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami"]); });
+    expect(human.logs.join("\n")).toContain("Runtime:    opencode (fallback; declared kiro)");
+    // A seat on its declared runtime shows neither.
+    process.env["OPENRIG_NODE_ID"] = "node-1";
+    const plainJson = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami", "--json"]); });
+    expect(JSON.parse(plainJson.logs.join("\n")).identity).not.toHaveProperty("declaredRuntime");
+    const plain = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami"]); });
+    expect(plain.logs.join("\n")).not.toContain("fallback; declared");
   });
 
   it("human output includes rig, pod, session, peers, edges, transcript", async () => {
