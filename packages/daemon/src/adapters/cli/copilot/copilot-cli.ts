@@ -143,6 +143,9 @@ export const COPILOT_GATE_PATTERNS: readonly TuiCliGatePattern[] = [
     pattern: /Please use \/login to sign in to use Copilot[ \t]*\r?\n[^\n]*\r?\n[ \t]*─+[ \t]*\r?\n[ \t]*❯/,
     code: "login_required",
     reason: "copilot is not signed in (run `copilot login` or set COPILOT_GITHUB_TOKEN)",
+    // Anchored to the line above the input box, so a match is current even
+    // though the idle footer (a ready marker) also shows.
+    currentWhileReady: true,
   },
 ];
 

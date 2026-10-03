@@ -45,6 +45,36 @@ describe("classifyActivity on 80x24 screens", () => {
     expect(await classify(runtime, read(`cli-panes/activity/${runtime}-prompt-80x24.txt`))).toBe("needs_input");
   });
 
+  it.each([
+    ["aider", "cli-panes/aider/missing-api-key-80x24.txt"],
+    ["aider", "cli-panes/aider/openrouter-onboarding-80x24.txt"],
+    ["aider", "cli-panes/aider/no-git-repo-80x24.txt"],
+    ["cline", "cli-panes/cline/announcement-modal-80x24.txt"],
+  ])("%s live gate (%s) is needs_input", async (runtime, fixture) => {
+    expect(await classify(runtime, read(fixture))).toBe("needs_input");
+  });
+
+  it("aider: an answered gate left above a fresh prompt does not read as needs_input", async () => {
+    // A line-printing CLI keeps the answered gate in its visible history.
+    const gate = read("cli-panes/aider/missing-api-key-80x24.txt").trimEnd().split("\n")
+      .filter((line) => line.trim() !== "");
+    const answered = [...gate.slice(0, -1), `${gate[gate.length - 1]} n`,
+      "Aider v0.86.0", "Main model: claude-sonnet-4-5 with diff edit format", "Git repo: .git with 12 files", ""];
+    expect(await classify("aider", [...answered, ">"].join("\n"))).toBe("idle");
+    // The same history with aider back at work is working, not needs_input.
+    expect(await classify("aider", [...answered, "⠋ Waiting for claude-sonnet-4-5"].join("\n"))).toBe("working");
+  });
+
+  it("cline: an answered sign-in screen above the ready home does not read as needs_input", async () => {
+    const gate = read("cli-panes/cline/login-required-80x24.txt").trimEnd().split("\n").slice(0, 10);
+    const ready = read("cli-panes/cline/home-ready-80x24.txt").trimEnd().split("\n").slice(-8);
+    expect(await classify("cline", [...gate, ...ready].join("\n"))).toBe("idle");
+  });
+
+  it("copilot's sign-in gate is current even with the idle footer showing (currentWhileReady)", async () => {
+    expect(await classify("copilot", read("cli-panes/copilot-80-idle-unauth.txt"))).toBe("needs_input");
+  });
+
   it("aider's mid-session (Y)es/(N)o confirm is already a gate", async () => {
     const confirm = "> fix it\n\nRun shell command? (Y)es/(N)o [Yes]: ";
     expect(await classify("aider", confirm)).toBe("needs_input");
