@@ -12,6 +12,6 @@ A Claude Code builder with an independent GitHub Copilot CLI reviewer.
 - **claude** on `PATH` and signed in.
 - **copilot** on `PATH` (`npm install -g @github/copilot`, or `brew install --cask copilot-cli`). Sign in once with `copilot login`, or export `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN` / `GITHUB_TOKEN`; a fine-grained token needs the "Copilot Requests" permission) in the environment the daemon starts seats from. See `docs/reference/runtimes/copilot.md`.
 
-A seat that is missing its CLI or sign-in stops at `attention_required` with the reason, rather than starting.
+If a CLI is missing, `rig up` refuses in preflight and names the install command; if a CLI is installed but not signed in, that seat stops at `attention_required` with the reason.
 
 Neither seat sets `model:`, so each CLI uses its default model. Set `model:` per member to choose.

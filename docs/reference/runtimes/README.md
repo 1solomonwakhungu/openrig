@@ -35,4 +35,4 @@ Ready-made specs that combine runtimes, listed by `rig specs` and launchable by 
 
 - `polyglot-dev`: builder on `opencode`, independent reviewer on `gemini` (`packages/daemon/specs/rigs/mixed/polyglot-dev`).
 - `review-pair`: builder on `claude-code`, independent reviewer on `copilot` (`packages/daemon/specs/rigs/mixed/review-pair`).
-- `budget-team`: builder on `opencode`, checker on `kilo`, both able to run on free models without signing in (`packages/daemon/specs/rigs/mixed/budget-team`).
+- `budget-team`: builder on `opencode`, checker on `kilo`, both able to run on free models without signing in; without sign-in, prompts and code go anonymously to those free models, so do not use it on private code (`packages/daemon/specs/rigs/mixed/budget-team`).

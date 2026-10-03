@@ -2,9 +2,9 @@ version: "0.2"
 name: budget-team
 summary: >
   A no-cost starting point: a builder on OpenCode and a checker on Kilo CLI, both
-  able to run on their providers' free models without signing in. Requires opencode
-  and kilo installed; sign in or set a provider key for stronger models. See
-  README.md in this directory.
+  able to run on their providers' free models without signing in. Without sign-in,
+  prompts and code go anonymously to those free models: do not use it on private
+  code (see the privacy note in README.md). Requires opencode and kilo installed.
 
 pods:
   - id: dev
