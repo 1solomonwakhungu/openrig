@@ -27,6 +27,7 @@ import { harnessDeps, memFs, mockTmux as harnessTmux } from "./helpers/tui-cli-a
 import { QWEN_DESCRIPTOR } from "../src/adapters/cli/qwen/index.js";
 import { CLINE_DESCRIPTOR } from "../src/adapters/cli/cline/index.js";
 import { GROK_DESCRIPTOR } from "../src/adapters/cli/grok/index.js";
+import { GOOSE_DESCRIPTOR } from "../src/adapters/cli/goose/index.js";
 import { KILO_REGISTRATION } from "../src/adapters/cli/kilo/index.js";
 import { OPENCODE_REGISTRATION } from "../src/adapters/cli/opencode/index.js";
 import { PiRuntimeAdapter } from "../src/adapters/pi-runtime-adapter.js";
@@ -248,9 +249,12 @@ describe("per-runtime redirect targets (verified in each CLI's source)", () => {
   });
 
   it("runtimes without a qualifying alternate declare none", () => {
-    for (const id of ["gemini", "copilot", "cursor", "aider", "antigravity", "codex", "claude-code", "pi"]) {
+    for (const id of ["gemini", "copilot", "cursor", "aider", "antigravity", "codex", "claude-code", "pi", "omp"]) {
       expect(getRuntimeDescriptor(id)?.trackedGuidanceRedirect, id).toBeUndefined();
     }
+    // goose writes AGENTS.md and has no untracked alternate: redirect behaves as skip.
+    expect(GOOSE_DESCRIPTOR.guidanceFile).toBe("AGENTS.md");
+    expect(GOOSE_DESCRIPTOR.trackedGuidanceRedirect).toBeUndefined();
   });
 
   it("pi: redirect writes the seat's own agent-dir AGENTS.md, never the repo", async () => {

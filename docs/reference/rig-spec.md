@@ -218,7 +218,8 @@ Redirect targets (each verified in the CLI's source unless noted):
 | `cline` | `<git root>/.cline/rules/openrig.md` (the cwd outside a repository) |
 | `grok` | `.grok/rules/openrig.md` in the cwd. Grok skips gitignored rule files, so exclude it with `.git/info/exclude` rather than `.gitignore` |
 | `pi` | the seat's own agent directory (`AGENTS.md` under OpenRig's Pi seat state), outside the repository |
-| `codex`, `gemini`, `opencode`, `copilot`, `cursor`, `antigravity`, `aider` | none: `redirect` behaves as `skip` (Codex's `AGENTS.override.md` hides `AGENTS.md`; the others need configuration, or are not verified) |
+| `omp` | the seat's own agent directory, as for `pi` (the runner sets it as Oh My Pi's `PI_CODING_AGENT_DIR`; whether Oh My Pi loads `AGENTS.md` from it is not verified) |
+| `codex`, `gemini`, `opencode`, `copilot`, `cursor`, `antigravity`, `aider`, `goose` | none: `redirect` behaves as `skip` (Codex's `AGENTS.override.md` hides `AGENTS.md`; the others need configuration, or are not verified) |
 
 A redirect file shows as untracked in `git status` until you ignore it. Add it
 to `.git/info/exclude` (local to your clone) or `.gitignore`; for `grok`, use
