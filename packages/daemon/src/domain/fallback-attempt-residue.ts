@@ -3,30 +3,32 @@
 // A launch projects skills and merges managed guidance blocks before the
 // runtime starts, so a runtime that then stops at a sign-in gate leaves them
 // behind, and teardown later follows the runtime the seat fell back to. Before
-// an attempt that may fall back, OpenRig snapshots the runtime's guidance file
-// (which managed blocks it holds) and its skills directory (which entries it
-// holds). After a failed attempt it removes only what is new: blocks and skill
+// an attempt that may fall back, OpenRig snapshots the runtime's guidance files
+// (seat-guidance-files.ts, the resolver teardown uses: the guidance file under
+// its guidanceRoot and the tracked-file redirect) and its skills directory. After a failed attempt it removes only what is new: blocks and skill
 // entries that were not there before. Anything that already existed (another
 // seat's blocks, an operator's skill) is left alone. Seat launches within one
 // instantiate run one at a time, so what is new belongs to the attempt.
-// Only paths inside the seat cwd are touched.
+// Only paths inside the seat's workspace (the git top level of the cwd, else
+// the cwd) are touched.
 
 import fs from "node:fs";
 import nodePath from "node:path";
-import { DEFAULT_CLAUDE_MANAGED_BLOCK_FILE } from "./managed-blocks.js";
+import { guidanceTargetDeps, type TrackedGuidancePolicy } from "./guidance-target.js";
 import { getRuntimeDescriptor } from "./runtime-registry.js";
+import { seatGuidanceWriteTargets } from "./seat-guidance-files.js";
 
 const BLOCK_ID_RE = /<!-- BEGIN OpenRig MANAGED BLOCK: ([^>]+?) -->/g;
 
 export interface AttemptResidueTargets {
-  guidanceFile: string | null;
+  guidanceFiles: string[];
   skillsDir: string | null;
 }
 
 export interface AttemptResidueSnapshot {
   targets: AttemptResidueTargets;
-  /** Managed block ids in the guidance file before the attempt (null: no file). */
-  blockIds: Set<string> | null;
+  /** Managed block ids per guidance file before the attempt (null: no file). */
+  blockIds: Map<string, Set<string> | null>;
   /** Entries of the skills directory before the attempt (null: no directory). */
   skillEntries: Set<string> | null;
 }
@@ -36,42 +38,42 @@ export interface AttemptResidueRemoval {
   skills: string[];
 }
 
-function inside(cwd: string, target: string): boolean {
-  const relative = nodePath.relative(cwd, target);
+function inside(root: string, target: string): boolean {
+  const relative = nodePath.relative(root, target);
   return relative !== "" && !relative.startsWith("..") && !nodePath.isAbsolute(relative);
 }
 
-/** Where `runtime` writes guidance and skills for a seat in `cwd` (inside cwd only). */
+/** Where `runtime` writes guidance and skills for a seat in `cwd`, limited to
+ *  the seat's workspace. Guidance comes from the shared seat guidance resolver. */
 export function attemptResidueTargets(input: {
   runtime: string;
   cwd: string;
   sessionName?: string;
   claudeManagedBlockFile?: string | null;
+  trackedFile?: TrackedGuidancePolicy | null;
 }): AttemptResidueTargets {
   const { runtime, cwd } = input;
-  let guidanceFile: string | null = null;
+  const workspace = guidanceTargetDeps.toplevel(cwd) ?? cwd;
   let skillsDir: string | null = null;
-  if (runtime === "claude-code") {
-    guidanceFile = nodePath.join(cwd, input.claudeManagedBlockFile ?? DEFAULT_CLAUDE_MANAGED_BLOCK_FILE);
-    skillsDir = nodePath.join(cwd, ".claude", "skills");
-  } else if (runtime === "codex") {
-    guidanceFile = nodePath.join(cwd, "AGENTS.md");
-    skillsDir = nodePath.join(cwd, ".agents", "skills");
-  } else if (runtime === "pi") {
-    // Pi's skills live in its per-seat state directory, outside the cwd.
-    guidanceFile = nodePath.join(cwd, "AGENTS.md");
-  } else {
-    const descriptor = getRuntimeDescriptor(runtime);
-    if (descriptor?.guidanceFile) guidanceFile = nodePath.join(cwd, descriptor.guidanceFile);
+  if (runtime === "claude-code") skillsDir = nodePath.join(cwd, ".claude", "skills");
+  else if (runtime === "codex") skillsDir = nodePath.join(cwd, ".agents", "skills");
+  else if (runtime !== "pi") {
+    // Pi's skills live in its per-seat state directory, outside the workspace.
     try {
-      skillsDir = descriptor?.skillsDir?.({ cwd, sessionName: input.sessionName }) ?? null;
+      skillsDir = getRuntimeDescriptor(runtime)?.skillsDir?.({ cwd, sessionName: input.sessionName }) ?? null;
     } catch {
       skillsDir = null;
     }
   }
+  let guidanceFiles: string[] = [];
+  try {
+    guidanceFiles = seatGuidanceWriteTargets(runtime, cwd, { claudeManagedBlockFile: input.claudeManagedBlockFile, trackedFile: input.trackedFile });
+  } catch {
+    guidanceFiles = [];
+  }
   return {
-    guidanceFile: guidanceFile && inside(cwd, guidanceFile) ? guidanceFile : null,
-    skillsDir: skillsDir && inside(cwd, skillsDir) ? skillsDir : null,
+    guidanceFiles: guidanceFiles.filter((file) => inside(workspace, file)),
+    skillsDir: skillsDir && inside(workspace, skillsDir) ? skillsDir : null,
   };
 }
 
@@ -91,7 +93,7 @@ function readEntries(dir: string): Set<string> | null {
 export function snapshotAttemptResidue(targets: AttemptResidueTargets): AttemptResidueSnapshot {
   return {
     targets,
-    blockIds: targets.guidanceFile ? readBlockIds(targets.guidanceFile) : null,
+    blockIds: new Map(targets.guidanceFiles.map((file) => [file, readBlockIds(file)])),
     skillEntries: targets.skillsDir ? readEntries(targets.skillsDir) : null,
   };
 }
@@ -103,11 +105,12 @@ function escapeRegex(value: string): string {
 /** Remove the managed blocks and skill entries the attempt added. Best-effort per item. */
 export function removeAttemptResidue(snapshot: AttemptResidueSnapshot): AttemptResidueRemoval {
   const removal: AttemptResidueRemoval = { blocks: [], skills: [] };
-  const { guidanceFile, skillsDir } = snapshot.targets;
-  if (guidanceFile) {
+  const { guidanceFiles, skillsDir } = snapshot.targets;
+  for (const guidanceFile of guidanceFiles) {
+    const before = snapshot.blockIds.get(guidanceFile) ?? null;
     try {
       const now = readBlockIds(guidanceFile);
-      const added = now ? [...now].filter((id) => !snapshot.blockIds?.has(id)) : [];
+      const added = now ? [...now].filter((id) => !before?.has(id)) : [];
       if (added.length > 0) {
         let content = fs.readFileSync(guidanceFile, "utf-8");
         for (const id of added) {
@@ -116,7 +119,7 @@ export function removeAttemptResidue(snapshot: AttemptResidueSnapshot): AttemptR
           content = content.replace(new RegExp(`(?:\\n|^)\\s*${begin}[\\s\\S]*?${end}\\s*(?=\\n|$)`, "g"), "\n");
         }
         const cleaned = content.replace(/\n{3,}/g, "\n\n").trim();
-        if (cleaned === "" && snapshot.blockIds === null) fs.unlinkSync(guidanceFile);
+        if (cleaned === "" && before === null) fs.unlinkSync(guidanceFile);
         else fs.writeFileSync(guidanceFile, cleaned === "" ? "" : `${cleaned}\n`, "utf-8");
         removal.blocks.push(...added);
       }

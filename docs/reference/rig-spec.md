@@ -363,7 +363,9 @@ switching runtimes. Each attempt starts a fresh session after stopping the
 previous attempt's terminal session; a resume token never moves between
 runtimes. Before the next runtime launches, OpenRig also removes what
 the failed attempt added to the cwd: managed blocks it merged into that
-runtime's guidance file (for example `CLAUDE.md`) and skill directories it
+runtime's guidance files (the same files `rig down` cleans: for example
+`CLAUDE.md`, Cline's `AGENTS.md` at the repository root, or a
+`guidance.tracked_file: redirect` alternate) and skill directories it
 projected (for example `.claude/skills/<skill>`). Blocks and skills that were
 there before the attempt are left alone. Rate limits do not trigger fallback: no runtime reports a rate limit
 at launch through a signal OpenRig can detect reliably and test.

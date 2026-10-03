@@ -1884,6 +1884,7 @@ export class PodRigInstantiator {
       const residue = hasNext ? snapshotAttemptResidue(attemptResidueTargets({
         runtime, cwd: launchCwd, sessionName: deriveCanonicalSessionName(input.pod.id, input.member.id, input.rigSpec.name),
         claudeManagedBlockFile: this.deps.rigRepo.getRigClaudeManagedBlockFile(input.rigId),
+        trackedFile: this.deps.rigRepo.getRigGuidanceTrackedFile(input.rigId),
       })) : null;
       const result = await this.launchMemberOnRuntime({
         ...input,

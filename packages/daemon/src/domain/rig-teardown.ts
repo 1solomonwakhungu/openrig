@@ -1,4 +1,5 @@
-import { CLAUDE_TRACKED_GUIDANCE_REDIRECT, guidanceTeardownTargets } from "./guidance-target.js";
+import { guidanceTeardownTargets } from "./guidance-target.js";
+import { seatGuidanceFiles, seatGuidanceWriteTargets } from "./seat-guidance-files.js";
 import type Database from "better-sqlite3";
 import type { RigRepository } from "./rig-repository.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -9,7 +10,7 @@ import { RigNotFoundError } from "./errors.js";
 import type { ResumeMetadataRefresher } from "./resume-metadata-refresher.js";
 import fs from "node:fs";
 import nodePath from "node:path";
-import { removeManagedBlocksFromFile, DEFAULT_CLAUDE_MANAGED_BLOCK_FILE } from "./managed-blocks.js";
+import { removeManagedBlocksFromFile } from "./managed-blocks.js";
 import { stopTranscriptRotation } from "./transcript-rotation.js";
 import { getRuntimeDescriptor } from "./runtime-registry.js";
 
@@ -220,19 +221,16 @@ export class RigTeardownOrchestrator {
       return;
     }
     // #25: clean only the rig's selected Claude file; the other file is never touched.
-    const targetPath = runtime === "claude-code"
-      ? nodePath.join(cwd, this.deps.rigRepo.getRigClaudeManagedBlockFile(rigId) ?? DEFAULT_CLAUDE_MANAGED_BLOCK_FILE)
-      : registeredGuidanceCleanupFile(runtime, cwd);
-    if (!targetPath) {
+    // Other runtimes clean their registry guidance file unless they opt out.
+    if (runtime !== "claude-code" && !registeredGuidanceCleanupFile(runtime, cwd)) {
       return;
     }
     // guidance.tracked_file: clean exactly what delivery could have written
     // (a tracked file under skip/redirect is left alone; a redirect alternate is cleaned).
-    const redirectPath = runtime === "claude-code"
-      ? nodePath.join(cwd, CLAUDE_TRACKED_GUIDANCE_REDIRECT)
-      : getRuntimeDescriptor(runtime)?.trackedGuidanceRedirect?.({ cwd }) ?? null;
     const policy = this.deps.rigRepo.getRigGuidanceTrackedFile(rigId);
-    const paths = guidanceTeardownTargets({ targetPath, policy, redirectPath });
+    const paths = seatGuidanceWriteTargets(runtime, cwd, {
+      claudeManagedBlockFile: this.deps.rigRepo.getRigClaudeManagedBlockFile(rigId), trackedFile: policy,
+    });
     // Launches before the runtime declared a guidanceRoot wrote into the seat
     // cwd; strip their blocks too so they are not orphaned in the repository.
     const legacyPath = runtime === "claude-code" ? null : legacyGuidanceCleanupFile(runtime, cwd);
@@ -254,7 +252,7 @@ export function registeredGuidanceCleanupFile(runtime: string, cwd: string): str
   const descriptor = getRuntimeDescriptor(runtime);
   if (!descriptor?.guidanceFile || descriptor.cleanupGuidanceOnTeardown === false) return null;
   // Symmetric with delivery: the same guidanceRoot the adapter wrote under.
-  return nodePath.join(descriptor.guidanceRoot?.({ cwd }) ?? cwd, descriptor.guidanceFile);
+  return seatGuidanceFiles(runtime, cwd).targetPath;
 }
 
 /** The seat-cwd guidance file a runtime wrote before it declared a guidanceRoot,

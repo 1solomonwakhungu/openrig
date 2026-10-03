@@ -407,10 +407,10 @@ describe("fallback attempt residue", () => {
   const block = (id: string) => `<!-- BEGIN OpenRig MANAGED BLOCK: ${id} -->\n${id} body\n<!-- END OpenRig MANAGED BLOCK: ${id} -->`;
 
   it("targets the runtime's guidance file and skills dir inside the cwd", () => {
-    expect(attemptResidueTargets({ runtime: "claude-code", cwd })).toEqual({ guidanceFile: nodePath.join(cwd, "CLAUDE.md"), skillsDir: nodePath.join(cwd, ".claude", "skills") });
-    expect(attemptResidueTargets({ runtime: "claude-code", cwd, claudeManagedBlockFile: "CLAUDE.local.md" }).guidanceFile).toBe(nodePath.join(cwd, "CLAUDE.local.md"));
-    expect(attemptResidueTargets({ runtime: "codex", cwd })).toEqual({ guidanceFile: nodePath.join(cwd, "AGENTS.md"), skillsDir: nodePath.join(cwd, ".agents", "skills") });
-    expect(attemptResidueTargets({ runtime: "pi", cwd })).toEqual({ guidanceFile: nodePath.join(cwd, "AGENTS.md"), skillsDir: null });
+    expect(attemptResidueTargets({ runtime: "claude-code", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "CLAUDE.md")], skillsDir: nodePath.join(cwd, ".claude", "skills") });
+    expect(attemptResidueTargets({ runtime: "claude-code", cwd, claudeManagedBlockFile: "CLAUDE.local.md" }).guidanceFiles).toEqual([nodePath.join(cwd, "CLAUDE.local.md")]);
+    expect(attemptResidueTargets({ runtime: "codex", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "AGENTS.md")], skillsDir: nodePath.join(cwd, ".agents", "skills") });
+    expect(attemptResidueTargets({ runtime: "pi", cwd })).toEqual({ guidanceFiles: [nodePath.join(cwd, "AGENTS.md")], skillsDir: null });
   });
 
   it("deletes a guidance file and skills dir the attempt created", () => {
