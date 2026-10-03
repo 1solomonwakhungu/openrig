@@ -67,6 +67,13 @@ conversation. Kiro itself has `--resume-id <session id>`, but its session
 store and its behavior for an unknown id could not be observed (both need a
 signed-in account), so OpenRig does not use it. There is no fork.
 
+## Usage
+
+Not reported. Kiro seats show no token, context, or cost numbers in `rig ps`
+or the usage poller: the descriptor has no usage reader, because Kiro's
+session store could not be observed without a signed-in account (see
+[Verified versus derived](#verified-versus-derived)).
+
 ## Guidance and skills
 
 - Managed guidance blocks merge into `AGENTS.md` in the seat's working
