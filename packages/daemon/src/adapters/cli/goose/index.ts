@@ -16,7 +16,7 @@ import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
 import {
   GOOSE_BINARY, GOOSE_BUSY_PATTERNS, GOOSE_ERROR_PATTERNS, GOOSE_FLOOR_MODE, GOOSE_FULL_BYPASS_MODE, GOOSE_GATE_PATTERNS, GOOSE_GUIDANCE_FILE,
   GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS, GOOSE_RESUME_TYPE, GOOSE_RUNTIME_ID, GOOSE_SKILLS_SUBDIR,
-  buildGooseArgv, captureGooseSessionId, readGooseUsage, gooseLaunchEnv, gooseModeFor, gooseSessionPresence, gooseSessionsDbPath,
+  buildGooseArgv, captureGooseSessionId, readGooseTranscript, readGooseUsage, gooseLaunchEnv, gooseModeFor, gooseSessionPresence, gooseSessionsDbPath,
   validateGooseSessionId, verifyGooseVersionOutput,
 } from "./goose-cli.js";
 
@@ -89,6 +89,17 @@ export const GOOSE_DESCRIPTOR: RuntimeDescriptor = {
     deps: { exists: nodeReadFs.exists },
     sessionId: resumeToken,
   }),
+  // Native transcript (feature 5): the session's messages in goose's own
+  // database. The session is the resume token, else this launch's session
+  // (capture's attribution).
+  readTranscript: ({ sessionName, cwd, seatStateDir, homedir, resumeToken, launchStartedAt, since }) => {
+    const record = readSeatRecord(nodeReadFs, seatStateDir);
+    const dbPath = record.sessionsDb ?? gooseSessionsDbPath(process.env, homedir);
+    const deps = { exists: nodeReadFs.exists };
+    const sessionId = resumeToken?.trim()
+      || (cwd ? captureGooseSessionId({ dbPath, deps, seatName: sessionName, cwd, launchStartedAt, forkParent: record.forkParent }) : null);
+    return readGooseTranscript({ dbPath, deps, sessionId, since });
+  },
   // Each posture sets its own GOOSE_MODE, so a seat may select either.
   permissionModes: ["floor", "full_bypass"],
   // All of a user's goose sessions share one database, so any seat can fork

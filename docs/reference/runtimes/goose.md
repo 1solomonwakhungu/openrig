@@ -117,6 +117,15 @@ database (read-only): the session's running totals (`accumulated_input_tokens`,
 conversation was run to watch them change. A session with no turns yet
 reports nothing.
 
+## Transcript
+
+Once the native-transcript route lands (#42), `rig transcript` reads the
+seat's messages from goose's sessions database (`messages` table, goose
+1.53.0 format): user and assistant text, tool requests (name and a shortened
+argument list), and tool results or errors. Thinking and messages goose marks
+as not user-visible are left out, and the text is redacted. `--source pane`
+shows the pane capture instead.
+
 ## Per-seat permissions
 
 Goose declares both `floor` and `full_bypass`, so `rig seat set-permissions`

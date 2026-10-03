@@ -361,3 +361,87 @@ export function readGooseUsage(input: { dbPath: string; deps: GooseStoreDeps; se
 
 export const GOOSE_USAGE_SOURCE = "goose_sessions_db";
 
+// ── native transcript (feature 5) ───────────────────────────────────────────
+
+/** goose 1.53.0 messages table: role, content_json (MessageContentBlock[],
+ *  tagged by `type` in camelCase), created_timestamp (unix seconds), and
+ *  metadata_json ({ userVisible, agentVisible }). */
+export const GOOSE_TRANSCRIPT_SQL =
+  "SELECT role, content_json, created_timestamp, metadata_json FROM messages WHERE session_id = ? ORDER BY created_timestamp, id";
+export const GOOSE_TRANSCRIPT_SOURCE = "goose_messages_db";
+const TRANSCRIPT_PREVIEW_CHARS = 300;
+
+function gooseRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function gooseJson(text: unknown): unknown {
+  if (typeof text !== "string") return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function gooseClip(value: unknown): string {
+  let text: string;
+  try {
+    text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  } catch {
+    text = "";
+  }
+  return text.length > TRANSCRIPT_PREVIEW_CHARS ? `${text.slice(0, TRANSCRIPT_PREVIEW_CHARS)}...` : text;
+}
+
+/**
+ * A goose session's transcript from the messages table. Text blocks keep the
+ * message role; tool requests (`toolCall: { status, value: { name,
+ * arguments } }`) and responses (`toolResult: { status, value: { content,
+ * isError } }` or `{ status: "error", error }`) become tool entries; thinking
+ * and messages marked not user-visible are left out. Read-only; never throws.
+ */
+export function readGooseTranscript(input: { dbPath: string; deps: GooseStoreDeps; sessionId: string | null; since?: Date }): { source: string; entries: Array<{ role: "user" | "assistant" | "tool"; text: string; at?: string }> } | null {
+  if (!input.sessionId || !validateGooseSessionId(input.sessionId).ok) return null;
+  const rows = readRows(input.dbPath, input.deps, GOOSE_TRANSCRIPT_SQL, [input.sessionId.trim()]);
+  if (!rows) return null;
+  const floor = input.since?.getTime();
+  const entries: Array<{ role: "user" | "assistant" | "tool"; text: string; at?: string }> = [];
+  for (const row of rows) {
+    const role = row.role === "user" || row.role === "assistant" ? row.role : null;
+    if (!role) continue;
+    const metadata = gooseJson(row.metadata_json);
+    if (gooseRecord(metadata) && metadata.userVisible === false) continue;
+    const seconds = typeof row.created_timestamp === "number" ? row.created_timestamp : NaN;
+    const at = Number.isFinite(seconds) ? new Date(seconds * 1000).toISOString() : undefined;
+    if (floor !== undefined && at && Date.parse(at) < floor) continue;
+    const stamp = at ? { at } : {};
+    const blocks = gooseJson(row.content_json);
+    for (const block of Array.isArray(blocks) ? blocks : []) {
+      if (!gooseRecord(block)) continue;
+      if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+        entries.push({ role, text: block.text, ...stamp });
+      } else if (block.type === "toolRequest" && gooseRecord(block.toolCall)) {
+        const call = block.toolCall;
+        if (call.status === "success" && gooseRecord(call.value) && typeof call.value.name === "string") {
+          entries.push({ role: "tool", text: `${call.value.name}(${call.value.arguments === undefined ? "" : gooseClip(call.value.arguments)})`, ...stamp });
+        }
+      } else if (block.type === "toolResponse" && gooseRecord(block.toolResult)) {
+        const result = block.toolResult;
+        if (result.status === "error") {
+          entries.push({ role: "tool", text: `error: ${gooseClip(result.error)}`, ...stamp });
+        } else if (gooseRecord(result.value)) {
+          const content = Array.isArray(result.value.content) ? result.value.content : [];
+          const text = content
+            .filter((item): item is Record<string, unknown> => gooseRecord(item) && item.type === "text" && typeof item.text === "string")
+            .map((item) => item.text as string)
+            .join("\n");
+          const out = gooseClip(text || content);
+          if (out) entries.push({ role: "tool", text: `${result.value.isError === true ? "error: " : ""}${out}`, ...stamp });
+        }
+      }
+    }
+  }
+  return { source: GOOSE_TRANSCRIPT_SOURCE, entries };
+}
+

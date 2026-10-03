@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GOOSE_REGISTRATION, GOOSE_SEAT_FILE, GOOSE_SPEC } from "../src/adapters/cli/goose/index.js";
 import {
   GOOSE_BUSY_PATTERNS, GOOSE_ERROR_PATTERNS, GOOSE_GATE_PATTERNS, GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS,
-  GOOSE_USAGE_SOURCE, buildGooseArgv, captureGooseSessionId, readGooseUsage, gooseLaunchEnv, gooseSessionPresence, gooseSessionsDbPath, gooseTimestamp,
+  GOOSE_TRANSCRIPT_SOURCE, GOOSE_USAGE_SOURCE, buildGooseArgv, captureGooseSessionId, readGooseTranscript, readGooseUsage, gooseLaunchEnv, gooseSessionPresence, gooseSessionsDbPath, gooseTimestamp,
   parseGooseVersion, validateGooseSessionId, verifyGooseVersionOutput,
 } from "../src/adapters/cli/goose/goose-cli.js";
 import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
@@ -207,6 +207,62 @@ describe("captureGooseSessionId", () => {
     expect(gooseSessionPresence(db, ID, deps)).toBe("present");
     expect(gooseSessionPresence(db, MISSING_ID, deps)).toBe("missing");
     expect(gooseSessionPresence(`${db}.absent`, ID, deps)).toBe("missing");
+  });
+});
+
+describe("readGooseTranscript (feature 5)", () => {
+  let root: string | null = null;
+  afterEach(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); root = null; });
+  const deps = { exists: (p: string) => fs.existsSync(p) };
+
+  /** messages rows in goose 1.53.0's format (MessageContentBlock serde,
+   *  tool_result_serde), synthesized from source, not captured live. */
+  function dbWithMessages(): string {
+    root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-goose-tx-"));
+    const dbPath = nodePath.join(root, "sessions.db");
+    addSession(dbPath, { id: ID, name: "dev@rig", userSet: true, cwd: "/w", createdAt: "2026-10-03 03:38:34" });
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT, session_id TEXT NOT NULL, role TEXT NOT NULL,
+      content_json TEXT NOT NULL, created_timestamp INTEGER NOT NULL, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, tokens INTEGER, metadata_json TEXT)`);
+    const add = db.prepare("INSERT INTO messages (message_id, session_id, role, content_json, created_timestamp, metadata_json) VALUES (?, ?, ?, ?, ?, ?)");
+    const t = Date.parse("2026-10-03T03:40:00.000Z") / 1000;
+    const visible = JSON.stringify({ userVisible: true, agentVisible: true });
+    add.run("m1", ID, "user", JSON.stringify([{ type: "text", text: "Add a health route." }]), t, visible);
+    add.run("m2", ID, "assistant", JSON.stringify([
+      { type: "thinking", thinking: "hidden plan", signature: "s" },
+      { type: "text", text: "Adding GET /health." },
+      { type: "toolRequest", id: "c1", toolCall: { status: "success", value: { name: "developer__text_editor", arguments: { command: "write", path: "src/health.ts" } } } },
+    ]), t + 5, visible);
+    add.run("m3", ID, "user", JSON.stringify([
+      { type: "toolResponse", id: "c1", toolResult: { status: "success", value: { content: [{ type: "text", text: "Wrote src/health.ts" }], isError: false } } },
+      { type: "toolResponse", id: "c2", toolResult: { status: "error", error: "-32602: bad arguments" } },
+    ]), t + 6, visible);
+    add.run("m4", ID, "user", JSON.stringify([{ type: "text", text: "internal summary" }]), t + 7, JSON.stringify({ userVisible: false, agentVisible: true }));
+    add.run("m5", "20261003_8", "user", JSON.stringify([{ type: "text", text: "another session" }]), t + 8, visible);
+    db.close();
+    return dbPath;
+  }
+
+  it("maps text, tool requests and responses, and leaves thinking and hidden messages out", () => {
+    expect(readGooseTranscript({ dbPath: dbWithMessages(), deps, sessionId: ID })).toEqual({
+      source: GOOSE_TRANSCRIPT_SOURCE,
+      entries: [
+        { role: "user", text: "Add a health route.", at: "2026-10-03T03:40:00.000Z" },
+        { role: "assistant", text: "Adding GET /health.", at: "2026-10-03T03:40:05.000Z" },
+        { role: "tool", text: 'developer__text_editor({"command":"write","path":"src/health.ts"})', at: "2026-10-03T03:40:05.000Z" },
+        { role: "tool", text: "Wrote src/health.ts", at: "2026-10-03T03:40:06.000Z" },
+        { role: "tool", text: "error: -32602: bad arguments", at: "2026-10-03T03:40:06.000Z" },
+      ],
+    });
+  });
+
+  it("filters by since and is null without a valid session id or a database", () => {
+    const dbPath = dbWithMessages();
+    expect(readGooseTranscript({ dbPath, deps, sessionId: ID, since: new Date("2026-10-03T03:40:06.000Z") })?.entries).toHaveLength(2);
+    expect(readGooseTranscript({ dbPath, deps, sessionId: null })).toBeNull();
+    expect(readGooseTranscript({ dbPath, deps, sessionId: "x; drop" })).toBeNull();
+    expect(readGooseTranscript({ dbPath: `${dbPath}.absent`, deps, sessionId: ID })).toBeNull();
+    expect(typeof GOOSE_REGISTRATION.descriptor.readTranscript).toBe("function");
   });
 });
 
