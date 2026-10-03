@@ -1372,6 +1372,8 @@ export interface ExpansionPodFragment {
     codexConfigProfile?: string;
     /** Per-seat launch readiness window in ms (readiness_timeout_ms). */
     readinessTimeoutMs?: number;
+    /** Raw fallback_runtimes; the canonical RigSpec validator checks it. */
+    fallbackRuntimes?: unknown;
     /** OPR.0.4.8.3 Seam B: per-seat permission_policy REF — threaded through the
      *  expansion ingress exactly like role (never silently dropped). Typed UNKNOWN
      *  (R2 at 4ac243c3): the ingress preserves RAW presence — including null and other
