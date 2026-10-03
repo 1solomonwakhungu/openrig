@@ -55,6 +55,7 @@ import { providerCommand } from "./commands/provider.js";
 import { usageCommand } from "./commands/usage.js";
 import { healthCommand, type HealthDeps } from "./commands/health.js";
 import { doctorCommand } from "./commands/doctor.js";
+import { runtimesCommand } from "./commands/runtimes.js";
 import { expandCommand } from "./commands/expand.js";
 import { addMemberCommand } from "./commands/add.js";
 import { createCommand } from "./commands/create.js";
@@ -234,6 +235,7 @@ export function createProgram(depsOverride?: ProgramDeps): Command {
   program.addCommand(usageCommand());
   program.addCommand(healthCommand(depsOverride?.healthDeps));
   program.addCommand(doctorCommand());
+  program.addCommand(runtimesCommand());
   program.addCommand(expandCommand(depsOverride?.expandDeps));
   program.addCommand(addMemberCommand(depsOverride?.addDeps));
   program.addCommand(createCommand(depsOverride?.createDeps));

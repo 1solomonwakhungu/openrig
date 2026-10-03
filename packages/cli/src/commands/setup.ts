@@ -1,4 +1,6 @@
 import { Command } from "commander";
+import type { RuntimeInventoryEntry } from "@openrig/daemon/runtime-inventory";
+import { localRuntimeInventory } from "../runtime-inventory-local.js";
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, accessSync, constants, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -56,6 +58,8 @@ export interface SetupDeps {
   exists: (path: string) => boolean;
   mkdirp?: (path: string) => void;
   platform?: NodeJS.Platform;
+  /** Agent runtime inventory (`rig runtimes` data) listed after the steps. Absent = not listed. */
+  runtimeInventory?: () => Promise<RuntimeInventoryEntry[]>;
 }
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
@@ -123,6 +127,7 @@ export function defaultDeps(): SetupDeps {
     readFile: (p: string) => { try { return readFileSync(p, "utf-8"); } catch { return null; } },
     writeFile: (p: string, c: string) => writeFileSync(p, c, "utf-8"),
     exists: (p: string) => existsSync(p),
+    runtimeInventory: () => localRuntimeInventory(),
     mkdirp: (p: string) => mkdirSync(p, { recursive: true }),
   };
 }
@@ -728,6 +733,23 @@ export function goldenPathNextSteps(): string[] {
  * REGISTER RULE (pm-lead): factual + version-neutral — never "treacherous"/editorializing/
  * founder-internal wording. Recording is a thought, never a gate — `rig up` always works bare.
  */
+/** The registry's agent runtimes as setup lists them: what is installed and
+ *  signed in, so a mixed team can be planned. Claude Code and Codex keep their
+ *  own setup flow above. */
+export function runtimeChoiceLines(entries: readonly RuntimeInventoryEntry[]): string[] {
+  const agents = entries.filter((e) => e.kind === "agent");
+  if (agents.length === 0) return [];
+  const label = (e: RuntimeInventoryEntry) => {
+    if (!e.installed) return "not installed";
+    const signed = e.auth?.state === "signed_in" ? "signed in" : e.auth?.state === "missing" ? "not signed in" : "sign-in unknown";
+    return `installed${e.version ? ` ${e.version}` : ""}, ${signed}`;
+  };
+  return [
+    "Agent runtimes (any of these can be a seat's `runtime:`; details: rig runtimes):",
+    ...agents.map((e) => `  - ${e.id.padEnd(12)} ${label(e)}`),
+  ];
+}
+
 export function permissionPolicyMenuLines(): string[] {
   return [
     "Before team launch, your agent asks once (reuse an existing explicit choice):",
@@ -767,9 +789,10 @@ export function setupCommand(depsOverride?: SetupDeps): Command {
       const deps = depsOverride ?? defaultDeps();
       const doctorDeps = opts.dryRun ? undefined : buildDefaultDoctorDeps(deps);
       const result = await runSetup(deps, { dryRun: opts.dryRun, full: opts.full, policy: opts.policy, specPath: opts.spec, doctorDeps });
+      const runtimes = deps.runtimeInventory ? await deps.runtimeInventory().catch(() => null) : null;
 
       if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
+        console.log(JSON.stringify(runtimes ? { ...result, runtimes } : result, null, 2));
         if (!opts.dryRun && !result.ready) process.exitCode = 1;
         return;
       }
@@ -787,6 +810,14 @@ export function setupCommand(depsOverride?: SetupDeps): Command {
         console.log(`  [${icon}] ${step.id}: ${step.message}`);
         if (step.reason) console.log(`       Why: ${step.reason}`);
         if (step.fixHint) console.log(`       Fix: ${step.fixHint}`);
+      }
+
+      if (runtimes) {
+        const lines = runtimeChoiceLines(runtimes);
+        if (lines.length > 0) {
+          console.log("");
+          for (const line of lines) console.log(line);
+        }
       }
 
       // Surface the permission-policy choice (the 0.4.8 onboarding "menu" is calm-register narrative,

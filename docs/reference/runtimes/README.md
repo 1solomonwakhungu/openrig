@@ -28,6 +28,25 @@ One line per runtime, alphabetical by id:
 
 The internal `stub` runtime exists for OpenRig's own tests and is not listed.
 
+## Check what is installed: `rig runtimes`
+
+`rig runtimes` lists every runtime above with whether its CLI is installed (and its version), whether it is signed in, resume and fork support, and its guidance file, then says how to install or sign in where something is missing. `--json` prints the same rows for agents. `rig doctor` adds a warn-only line per installed runtime (a CLI that is installed but not signed in warns; a CLI that is not installed is only noted), and `rig setup` lists them after its steps.
+
+The checks are local only: the version probe is `<binary> --version` (as preflight runs it), and sign-in is read from environment variable names and each CLI's own files. OpenRig never logs in, never reads the OS keychain, and never prints a key. `--probe` additionally runs a CLI's documented read-only status command where one exists (today: `cursor-agent status`).
+
+| Runtime | Signed in when | Otherwise |
+|---|---|---|
+| `opencode`, `kilo` | a provider key (Kilo also `KILO_API_KEY`), or a non-empty `<XDG_DATA_HOME or ~/.local/share>/<cli>/auth.json` | missing (the CLI still runs on its free models) |
+| `gemini` | `security.auth.selectedType` is set in `.gemini/settings.json` (workspace, then `GEMINI_CLI_HOME` or `~/.gemini`) and its credential is set (`GEMINI_API_KEY`, or `GOOGLE_API_KEY` for Vertex AI) | missing; unknown for Google sign-in or Vertex application default credentials |
+| `qwen` | a provider in `~/.qwen/settings.json`, or a complete provider env set | missing (also for the discontinued Qwen OAuth tier) |
+| `copilot` | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` | unknown (a `copilot login` session is in the keychain) |
+| `cursor` | `CURSOR_API_KEY`, or `cursor-agent status` under `--probe` | unknown |
+| `cline` | `CLINE_API_KEY`, or a non-empty `<CLINE_DATA_DIR or ~/.cline/data>/settings/providers.json` | missing |
+| `aider` | a provider key in the env, or a `*_API_KEY=` line in `.env` (cwd or home) or `~/.aider/oauth-keys.env` | missing |
+| `grok` | `XAI_API_KEY`, or `<GROK_HOME or ~/.grok>/auth.json` | missing |
+| `antigravity` | `GEMINI_API_KEY` with `modelProvider: "gemini"` in `~/.gemini/antigravity-cli/settings.json` | unknown (Google sign-in is in the OS keyring) |
+| `claude-code`, `codex`, `pi` | not checked | unknown |
+
 Why these third-party CLIs were chosen as adapter targets:
 [`ai-coding-cli-selection.md`](ai-coding-cli-selection.md).
 

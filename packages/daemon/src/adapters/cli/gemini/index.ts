@@ -13,6 +13,7 @@ import { checkGeminiResumeTarget, findGeminiSessionFile, geminiSessionIsResumabl
 import { readGeminiUsage } from "../gemini-family/usage.js";
 import { readSessionText } from "../gemini-family/runtime.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
+import { geminiAuthStatus } from "../auth-status.js";
 
 /**
  * Launch env that keeps gemini's env-triggered first-run dialogs off seat
@@ -43,6 +44,8 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   kind: "agent",
   binary: "gemini",
   installHint: "npm install -g @google/gemini-cli",
+  authStatus: geminiAuthStatus,
+  docsPath: "docs/reference/runtimes/gemini.md",
   // @google/gemini-cli engines: node >= 20.
   verify: nodeEngineFloorVerify("Gemini CLI", 20),
   resumeType: "gemini_session_id",

@@ -17,6 +17,7 @@ import {
 } from "../gemini-family/session-store.js";
 import { readQwenUsage } from "../gemini-family/usage.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify, readSessionText } from "../gemini-family/runtime.js";
+import { qwenAuthStatus } from "../auth-status.js";
 
 /** <QWEN_HOME or ~/.qwen> */
 function qwenHome(store: SessionStoreContext): string {
@@ -72,6 +73,8 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   kind: "agent",
   binary: "qwen",
   installHint: "npm install -g @qwen-code/qwen-code@latest",
+  authStatus: qwenAuthStatus,
+  docsPath: "docs/reference/runtimes/qwen.md",
   // @qwen-code/qwen-code engines: node >= 22.
   verify: nodeEngineFloorVerify("Qwen Code", 22),
   resumeType: "qwen_session_id",

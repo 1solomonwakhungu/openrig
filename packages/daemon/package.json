@@ -24,6 +24,10 @@
       "types": "./dist/gateway-protocol-surface.d.ts",
       "import": "./dist/gateway-protocol-surface.js"
     },
+    "./runtime-inventory": {
+      "types": "./dist/runtime-inventory-surface.d.ts",
+      "import": "./dist/runtime-inventory-surface.js"
+    },
     "./spec-conformance": {
       "types": "./dist/spec-conformance-surface.d.ts",
       "import": "./dist/spec-conformance-surface.js"
