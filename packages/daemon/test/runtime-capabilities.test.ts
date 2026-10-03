@@ -11,7 +11,7 @@ import {
   type RuntimeAuthContext, type RuntimeModelShape, type RuntimeUsageInput,
 } from "../src/domain/runtime-capabilities.js";
 import { LAUNCH_RECORD_FILE } from "../src/domain/runtime-capture.js";
-import { getRuntimeDescriptor, listRuntimeDescriptors, type RuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor, type RuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import type { RuntimeAdapter } from "../src/domain/runtime-adapter.js";
 import { ACTIVITY_STATUS_LINES, TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { EXAMPLE_CLI_DESCRIPTOR, EXAMPLE_CLI_SPEC } from "./helpers/example-cli-runtime.js";
@@ -21,8 +21,12 @@ const SEAT: RuntimeUsageInput = { sessionName: "dev@rig", cwd: "/w", seatStateDi
 const descriptor = (extra: Partial<RuntimeDescriptor>): RuntimeDescriptor => ({ ...EXAMPLE_CLI_DESCRIPTOR, ...extra });
 
 describe("capability hooks on existing runtimes", () => {
-  it("changes no existing runtime: no built-in declares a capability hook yet", () => {
-    for (const d of listRuntimeDescriptors()) {
+  // Built-ins only: feature PRs add hooks to the CLI registrations.
+  it("changes no existing runtime: no built-in declares a capability hook", () => {
+    for (const id of BUILTIN_RUNTIME_IDS) {
+      const d = getRuntimeDescriptor(id);
+      expect(d, id).toBeDefined();
+      if (!d) continue;
       expect([d.readUsage, d.authStatus, d.modelShape, d.docsPath, d.readTranscript].every((hook) => hook === undefined), d.id).toBe(true);
     }
   });
