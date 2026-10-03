@@ -3,11 +3,12 @@
 // against the live sign-in capture and a screen synthesized from binary
 // strings. No real `kiro-cli`.
 
-import { readFileSync } from "node:fs";
+import fs, { readFileSync } from "node:fs";
+import { checkModelShape } from "../src/domain/runtime-capabilities.js";
 import nodePath from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  KIRO_DESCRIPTOR, KIRO_NOT_READY_RE, KIRO_READY_RE, KIRO_REGISTRATION, KIRO_SPEC,
+  KIRO_DESCRIPTOR, KIRO_MODEL_SHAPE, KIRO_NOT_READY_RE, KIRO_READY_RE, KIRO_REGISTRATION, KIRO_SPEC, kiroAuthStatus,
   buildKiroArgv, parseKiroVersion, verifyKiroVersionOutput,
 } from "../src/adapters/cli/kiro/index.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
@@ -76,6 +77,27 @@ describe("strict readiness (fails toward attention_required)", () => {
     const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ recovery: "attention_required" });
+  });
+});
+
+describe("capabilities (features 6 and 7)", () => {
+  const ctx = (env: NodeJS.ProcessEnv) => ({ homedir: "/h", env, fs: { exists: () => true, readFile: () => "{}" } });
+
+  it("signed in with KIRO_API_KEY (by name only); otherwise unknown, never a guess", () => {
+    const key = "kiro-test-FAKEKEY-0123456789";
+    const signed = kiroAuthStatus(ctx({ KIRO_API_KEY: key }));
+    expect(signed).toEqual({ state: "signed_in", source: "env KIRO_API_KEY" });
+    expect(JSON.stringify(signed)).not.toContain("FAKEKEY");
+    expect(kiroAuthStatus(ctx({ KIRO_API_KEY: "  " }))).toMatchObject({ state: "unknown", hint: expect.stringContaining("kiro-cli login") });
+    expect(kiroAuthStatus(ctx({}))).toMatchObject({ state: "unknown" });
+  });
+
+  it("model shape: kiro ids and auto fit; a provider/model id does not", () => {
+    expect(checkModelShape(KIRO_MODEL_SHAPE, KIRO_MODEL_SHAPE.example)).toEqual({ ok: true });
+    expect(checkModelShape(KIRO_MODEL_SHAPE, "auto")).toEqual({ ok: true });
+    expect(checkModelShape(KIRO_MODEL_SHAPE, "anthropic/claude-sonnet-4.5")).toMatchObject({ ok: false });
+    expect(KIRO_DESCRIPTOR.docsPath).toBe("docs/reference/runtimes/kiro.md");
+    expect(fs.existsSync(nodePath.join(__dirname, "..", "..", "..", KIRO_DESCRIPTOR.docsPath!))).toBe(true);
   });
 });
 

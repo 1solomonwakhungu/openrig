@@ -24,6 +24,11 @@ launch reports `attention_required` with the code `login_required` and the
 pane text as evidence. OpenRig never presses Enter there, and every launch
 sets `BROWSER=true` so no browser tab opens on your desktop.
 
+`rig runtimes` and `rig doctor` report a kiro seat as signed in only when
+`KIRO_API_KEY` is set (checked by name, never by value). A browser sign-in is
+stored in kiro-cli's own database, which these checks do not open, so without
+the key the status is "unknown" with a hint.
+
 ## Rig spec
 
 ```yaml
@@ -35,6 +40,10 @@ members:
     model: claude-sonnet-4.5   # optional; passed as --model
     cwd: "."
 ```
+
+`model` is a Kiro model id as `kiro-cli chat --list-models` prints it (for
+example `claude-sonnet-4.5`, no provider prefix) or `auto`. Preflight warns,
+never refuses, when a model does not have that shape.
 
 ## Launch
 
