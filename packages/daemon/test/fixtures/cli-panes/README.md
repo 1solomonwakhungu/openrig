@@ -32,3 +32,5 @@ a same-length placeholder so wrapping is unchanged.
 | `goose-80-no-provider.txt` | Live: no provider configured, then the shell |
 | `goose-80-no-key.txt` | Live: provider set without its key, then the shell |
 | `goose-80-resume-missing.txt` | Live: `--resume --session-id <unknown id>` error, then the shell |
+| `kiro-80-login.txt` | Live: kiro-cli 2.27.1, unauthenticated `kiro-cli chat` sign-in prompt (the command line's scratch path replaced with a same-length placeholder) |
+| `kiro-80-idle-synth.txt` | Synthesized from kiro-cli-chat strings (`Ask a question or describe a task`); layout illustrative, not captured |

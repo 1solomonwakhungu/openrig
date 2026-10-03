@@ -13,6 +13,7 @@ import { GEMINI_REGISTRATION } from "./gemini/index.js";
 import { GOOSE_REGISTRATION } from "./goose/index.js";
 import { GROK_REGISTRATION } from "./grok/index.js";
 import { KILO_REGISTRATION } from "./kilo/index.js";
+import { KIRO_REGISTRATION } from "./kiro/index.js";
 import { OPENCODE_REGISTRATION } from "./opencode/index.js";
 import { QWEN_REGISTRATION } from "./qwen/index.js";
 
@@ -26,6 +27,7 @@ export const CLI_RUNTIME_REGISTRATIONS: readonly CliRuntimeRegistration[] = [
   GOOSE_REGISTRATION,
   GROK_REGISTRATION,
   KILO_REGISTRATION,
+  KIRO_REGISTRATION,
   OPENCODE_REGISTRATION,
   QWEN_REGISTRATION,
 ];
