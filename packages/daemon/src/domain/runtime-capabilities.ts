@@ -36,7 +36,22 @@ export interface RuntimeSeatReadInput {
 
 export type RuntimeUsageInput = RuntimeSeatReadInput;
 
-/** One reading of a seat's usage. Every metric is optional: absent = unknown. */
+/** Where a snapshot's costUsd came from. */
+export type RuntimeUsageCostSource = "cli_reported" | "estimated";
+
+/**
+ * One reading of a seat's usage. Every metric is optional: absent = unknown.
+ *
+ * Semantics every reader and consumer shares:
+ *   - token counts and costUsd are cumulative totals for the CLI session the
+ *     seat is on (the one resumeToken names, else the current launch's
+ *     session), never per turn: a consumer REPLACES its previous snapshot
+ *     with the newer one and never sums successive snapshots;
+ *   - contextUsedTokens is the current context fill (what the next request
+ *     carries), not a running total, so it can go down after compaction;
+ *   - model and contextWindowTokens come from the CLI's own record or
+ *     screen for this session, never from a table OpenRig keeps.
+ */
 export interface RuntimeUsageSnapshot {
   inputTokens?: number;
   outputTokens?: number;
@@ -44,10 +59,17 @@ export interface RuntimeUsageSnapshot {
   cacheWriteTokens?: number;
   /** Reasoning or thinking tokens, when the CLI records them separately. */
   reasoningTokens?: number;
+  /** Session total in US dollars. Set together with costSource. */
   costUsd?: number;
+  /** "cli_reported" when the CLI itself recorded or printed the cost;
+   *  "estimated" when the reader computed it (e.g. tokens times a price), so
+   *  displays label it as an estimate. Required whenever costUsd is set. */
+  costSource?: RuntimeUsageCostSource;
+  /** Current context fill, not cumulative. */
   contextUsedTokens?: number;
-  /** Only when the CLI reports its context window. */
+  /** Only when the CLI reports its context window for this session. */
   contextWindowTokens?: number;
+  /** The model the CLI says this session uses. */
   model?: string;
   /** ISO time from the CLI's own record when it has one, else the read time. */
   observedAt: string;
@@ -201,8 +223,17 @@ function logged(descriptor: RuntimeDescriptor, hook: string, sessionName: string
   return reason;
 }
 
+/** A cost without its provenance is dropped, so no display can show an
+ *  unlabeled estimate as a reported figure. */
+function withCostProvenance(snapshot: RuntimeUsageSnapshot): RuntimeUsageSnapshot {
+  if (snapshot.costUsd === undefined || snapshot.costSource) return snapshot;
+  const { costUsd: _dropped, ...rest } = snapshot;
+  return rest;
+}
+
 /** Read a seat's usage. Null when the runtime has no reader, has no data, the
- *  reader throws, or it misses the deadline (both logged). */
+ *  reader throws, or it misses the deadline (both logged). A costUsd without
+ *  costSource is dropped. */
 export async function runDescriptorUsageRead(
   descriptor: RuntimeDescriptor,
   input: RuntimeUsageInput,
@@ -211,7 +242,8 @@ export async function runDescriptorUsageRead(
   const hook = descriptor.readUsage;
   if (!hook) return null;
   try {
-    return (await withDeadline(() => hook(withLaunchTime(input)), opts.timeoutMs ?? CAPABILITY_TIMEOUTS_MS.usage)) ?? null;
+    const snapshot = await withDeadline(() => hook(withLaunchTime(input)), opts.timeoutMs ?? CAPABILITY_TIMEOUTS_MS.usage);
+    return snapshot ? withCostProvenance(snapshot) : null;
   } catch (err) {
     logged(descriptor, "readUsage", input.sessionName, err);
     return null;

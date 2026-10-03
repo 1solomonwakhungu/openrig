@@ -32,6 +32,7 @@ describe("capability hook types (the contract feature PRs implement)", () => {
     expectTypeOf<RuntimeUsageSnapshot["costUsd"]>().toEqualTypeOf<number | undefined>();
     expectTypeOf<RuntimeUsageSnapshot["reasoningTokens"]>().toEqualTypeOf<number | undefined>();
     expectTypeOf<RuntimeUsageSnapshot["approximate"]>().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<RuntimeUsageSnapshot["costSource"]>().toEqualTypeOf<"cli_reported" | "estimated" | undefined>();
   });
 
 });

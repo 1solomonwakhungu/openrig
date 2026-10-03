@@ -439,7 +439,7 @@ the seat's `launch.json`). No built-in runtime declares a hook yet, so
 
 | Hook | Where | Shape | Runner | Core consumer (feature PR) |
 |---|---|---|---|---|
-| `readUsage` | descriptor | `(input) => RuntimeUsageSnapshot \| null`; every metric optional (including `reasoningTokens`), plus `observedAt`, `source`, and `approximate` for CLIs that only report rounded counts | `runDescriptorUsageRead` | usage poller in `context-monitor` / `usage-samples-store`, cost in `rig ps` (features 1, 4) |
+| `readUsage` | descriptor | `(input) => RuntimeUsageSnapshot \| null`; every metric optional (including `reasoningTokens`), plus `observedAt`, `source`, and `approximate` for CLIs that only report rounded counts. Token counts and `costUsd` are cumulative totals for the seat's current CLI session (consumers replace the previous snapshot, never sum); `contextUsedTokens` is the current context fill; `model` and `contextWindowTokens` come from the CLI's own record. `costUsd` needs `costSource` (`"cli_reported"` or `"estimated"`); the runner drops a cost without it | `runDescriptorUsageRead` | usage poller in `context-monitor` / `usage-samples-store`, cost in `rig ps` (features 1, 4) |
 | `authStatus` | descriptor | `(ctx) => { state: "signed_in" \| "missing" \| "unknown"; source?; hint?; detail? }`; ctx has read-only, size-capped `fs` and, only under `rig runtimes --probe`, a read-only `probe.exec` | `runDescriptorAuthStatus` | `rig runtimes` and the `rig doctor` runtimes section (feature 6) |
 | `modelShape` | descriptor | `{ pattern; example; note?; aliases? }` | `checkModelShape` (pure) | warn-only preflight model advisory (feature 7) |
 | `docsPath` | descriptor | repo-relative docs page | n/a | `rig runtimes` docs link (feature 6) |

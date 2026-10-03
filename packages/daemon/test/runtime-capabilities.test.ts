@@ -43,6 +43,15 @@ describe("runners never throw", () => {
     warn.mockRestore();
   });
 
+  it("usage: keeps a cost only with its provenance", async () => {
+    const base = { inputTokens: 10, observedAt: "2026-10-03T03:00:00.000Z", source: "example_json" };
+    for (const costSource of ["cli_reported", "estimated"] as const) {
+      expect(await runDescriptorUsageRead(descriptor({ readUsage: () => ({ ...base, costUsd: 0.42, costSource }) }), SEAT))
+        .toEqual({ ...base, costUsd: 0.42, costSource });
+    }
+    expect(await runDescriptorUsageRead(descriptor({ readUsage: () => ({ ...base, costUsd: 0.42 }) }), SEAT)).toEqual(base);
+  });
+
   it("usage: fills launchStartedAt from the seat's launch.json and homedir when omitted", async () => {
     root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-cap-"));
     fs.writeFileSync(nodePath.join(root, LAUNCH_RECORD_FILE), JSON.stringify({ launchStartedAt: "2026-10-03T02:00:00.000Z" }));
