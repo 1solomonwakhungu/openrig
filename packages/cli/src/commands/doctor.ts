@@ -16,6 +16,8 @@ import { buildTmuxControlFailure, probeTmuxControl } from "../tmux-health.js";
 import { parse as parseYaml } from "yaml";
 import { compareSpecToLive, topologyFromRigSpec, topologyFromLiveLogicalIds } from "@openrig/daemon/spec-conformance";
 import { classifyNodeVersion } from "../node-support.js";
+import { runtimeDoctorStatus, type RuntimeInventoryEntry } from "@openrig/daemon/runtime-inventory";
+import { localRuntimeInventory } from "../runtime-inventory-local.js";
 
 interface DoctorCheck {
   name: string;
@@ -47,6 +49,8 @@ export interface DoctorDeps {
   specPath?: string;
   /** Live seat ids (`<pod>.<member>`) for the spec's rig; null when the topology cannot be read. */
   fetchLiveLogicalIds?: (rigName: string) => Promise<string[] | null>;
+  /** Agent runtime inventory (`rig runtimes` data). Absent = no runtimes section. */
+  runtimeInventory?: () => Promise<RuntimeInventoryEntry[]>;
 }
 
 const DEFAULT_PORT = 7433;
@@ -62,7 +66,42 @@ function defaultCheckPort(port: number, host: string): Promise<boolean> {
   });
 }
 
-export function runDoctorChecks(deps: DoctorDeps): { checks: DoctorCheck[]; portCheck: Promise<DoctorCheck>; asyncChecks: Promise<DoctorCheck>[] } {
+/** Warn-only runtime checks: one per installed runtime (pass when signed in or
+ *  not checkable, warn when sign-in is missing), plus one skipped line naming
+ *  the runtimes that are not installed. Never "fail": a missing optional CLI is
+ *  not an unhealthy install. */
+export async function buildRuntimeChecks(inventory: () => Promise<RuntimeInventoryEntry[]>): Promise<DoctorCheck[]> {
+  const entries = await inventory().catch(() => null);
+  if (!entries) return [{ name: "runtimes", status: "skipped", message: "Could not list agent runtimes" }];
+  const checks: DoctorCheck[] = [];
+  const missing: string[] = [];
+  for (const entry of entries) {
+    if (entry.installed === null) continue;
+    if (!entry.installed) {
+      missing.push(entry.id);
+      continue;
+    }
+    const verdict = runtimeDoctorStatus(entry);
+    checks.push({
+      name: `runtime:${entry.id}`,
+      status: verdict.status,
+      message: verdict.message,
+      ...(entry.auth?.state === "missing" && entry.docsPath ? { fix: `See ${entry.docsPath}` } : {}),
+    });
+  }
+  if (missing.length > 0) {
+    checks.push({ name: "runtimes", status: "skipped", message: `Not installed: ${missing.join(", ")} (see \`rig runtimes\` for install hints)` });
+  }
+  return checks;
+}
+
+export function runDoctorChecks(deps: DoctorDeps): {
+  checks: DoctorCheck[];
+  portCheck: Promise<DoctorCheck>;
+  asyncChecks: Promise<DoctorCheck>[];
+  /** The runtimes section; empty when no runtimeInventory dep is given. */
+  runtimeChecks: Promise<DoctorCheck[]>;
+} {
   const checks: DoctorCheck[] = [];
   const platform = deps.platform ?? process.platform;
 
@@ -265,7 +304,8 @@ export function runDoctorChecks(deps: DoctorDeps): { checks: DoctorCheck[]; port
 
   asyncChecks.push(buildSpecConformanceCheck(deps));
 
-  return { checks, portCheck, asyncChecks };
+  const runtimeChecks = deps.runtimeInventory ? buildRuntimeChecks(deps.runtimeInventory) : Promise.resolve([]);
+  return { checks, portCheck, asyncChecks, runtimeChecks };
 }
 
 /**
@@ -403,6 +443,7 @@ export function doctorCommand(depsOverride?: DoctorDeps): Command {
         specPath: opts.spec ? path.resolve(opts.spec) : undefined,
         // Returns null on ANY failure to read the live side. The conformance check treats null as
         // "unknown" and skips — an unreachable daemon must never read as a matching topology.
+        runtimeInventory: () => localRuntimeInventory(),
         fetchLiveLogicalIds: async (rigName: string): Promise<string[] | null> => {
           try {
             const cfg = new ConfigStore().resolve();
@@ -422,9 +463,9 @@ export function doctorCommand(depsOverride?: DoctorDeps): Command {
         },
       };
 
-      const { checks, asyncChecks } = runDoctorChecks(deps);
+      const { checks, asyncChecks, runtimeChecks } = runDoctorChecks(deps);
       const resolvedAsync = await Promise.all(asyncChecks);
-      const allChecks = [...checks, ...resolvedAsync];
+      const allChecks = [...checks, ...resolvedAsync, ...(await runtimeChecks)];
       const healthy = allChecks.every((c) => c.status !== "fail");
 
       if (opts.json) {

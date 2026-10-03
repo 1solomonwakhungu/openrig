@@ -16,6 +16,7 @@ import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
+import { copilotAuthStatus } from "../auth-status.js";
 import {
   COPILOT_BINARY, COPILOT_ERROR_PATTERNS, COPILOT_GATE_PATTERNS, COPILOT_GUIDANCE_FILE, COPILOT_PROCESS_MATCH, COPILOT_READY_PATTERNS,
   COPILOT_RESUME_TYPE, COPILOT_RUNTIME_ID, COPILOT_SKILLS_SUBDIR, buildCopilotArgv, captureCopilotSessionId,
@@ -61,6 +62,8 @@ export const COPILOT_DESCRIPTOR: RuntimeDescriptor = {
   kind: "agent",
   binary: COPILOT_BINARY,
   installHint: "npm install -g @github/copilot (or brew install --cask copilot-cli)",
+  authStatus: copilotAuthStatus,
+  docsPath: "docs/reference/runtimes/copilot.md",
   verify: async ({ exec }) => {
     try {
       return verifyCopilotVersionOutput(await exec(`${COPILOT_BINARY} --version`));

@@ -22,6 +22,7 @@ import type { AppliedLaunchObservation } from "../../../domain/permission-drift.
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
+import { grokAuthStatus } from "../auth-status.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,6 +64,8 @@ export const GROK_DESCRIPTOR: RuntimeDescriptor = {
   kind: "agent",
   binary: "grok",
   installHint: "curl -fsSL https://x.ai/cli/install.sh | bash",
+  authStatus: grokAuthStatus,
+  docsPath: "docs/reference/runtimes/grok.md",
   resumeType: "grok_session_id",
   validateResumeToken: validateGrokSessionId,
   // Late capture (adoption, refresher, restore): the id this seat's last launch

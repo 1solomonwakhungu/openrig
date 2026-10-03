@@ -10,6 +10,7 @@
       "@openrig/daemon/local-reading": ["../daemon/dist/local-reading-surface.d.ts"],
       "@openrig/daemon/crash-cart": ["../daemon/dist/crash-cart-surface.d.ts"],
       "@openrig/daemon/gateway-human-registry": ["../daemon/dist/gateway-human-registry-surface.d.ts"],
+      "@openrig/daemon/runtime-inventory": ["../daemon/dist/runtime-inventory-surface.d.ts"],
       "@openrig/daemon/spec-conformance": [
         "../daemon/dist/spec-conformance-surface.d.ts"
       ],

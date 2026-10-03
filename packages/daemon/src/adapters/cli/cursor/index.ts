@@ -16,6 +16,7 @@ import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
+import { cursorAuthStatus } from "../auth-status.js";
 import {
   CURSOR_BINARY, CURSOR_GATE_PATTERNS, CURSOR_GUIDANCE_FILE, CURSOR_READY_PATTERNS, CURSOR_RESUME_TYPE,
   CURSOR_RUNTIME_ID, CURSOR_SKILLS_SUBDIR, buildCursorArgv, cursorChatsDirForCwd, cursorConfigDir,
@@ -63,6 +64,8 @@ export const CURSOR_DESCRIPTOR: RuntimeDescriptor = {
   kind: "agent",
   binary: CURSOR_BINARY,
   installHint: "curl https://cursor.com/install -fsS | bash (it replaces ~/.local/bin/agent; see docs/reference/runtimes/cursor.md)",
+  authStatus: cursorAuthStatus,
+  docsPath: "docs/reference/runtimes/cursor.md",
   verify: async ({ exec }) => {
     try {
       return verifyCursorVersionOutput(await exec(`${CURSOR_BINARY} --version`));

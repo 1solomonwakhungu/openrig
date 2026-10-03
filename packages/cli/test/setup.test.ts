@@ -950,3 +950,44 @@ describe("rig setup permission-policy menu copy (frozen)", () => {
     }
   });
 });
+
+describe("rig setup lists the registry runtimes", () => {
+  it("--json adds the runtime rows when an inventory is available, and the text output lists them", async () => {
+    const runtimes = [{
+      id: "opencode", displayName: "OpenCode", kind: "agent" as const, binary: "opencode", installed: true, version: "1.18.33",
+      auth: { state: "signed_in" as const, source: "env K" }, resume: true, fork: false, guidanceFile: "AGENTS.md", docsPath: null, installHint: null,
+    }];
+    const deps = makeDeps({ runtimeInventory: async () => runtimes });
+    const program = new Command();
+    program.addCommand(setupCommand(deps));
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    const origExit = process.exitCode;
+    try {
+      await program.parseAsync(["node", "rig", "setup", "--dry-run", "--json"]);
+      expect(JSON.parse(logs.join("\n")).runtimes).toEqual(runtimes);
+      logs.length = 0;
+      await program.parseAsync(["node", "rig", "setup", "--dry-run"]);
+      expect(logs.join("\n")).toMatch(/opencode\s+installed 1\.18\.33, signed in/);
+    } finally {
+      console.log = orig;
+      process.exitCode = origExit;
+    }
+  });
+
+  it("without an inventory (the existing tests' deps) nothing changes", async () => {
+    const program = new Command();
+    program.addCommand(setupCommand(makeDeps()));
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => { logs.push(a.join(" ")); };
+    try {
+      await program.parseAsync(["node", "rig", "setup", "--dry-run", "--json"]);
+    } finally {
+      console.log = orig;
+    }
+    expect(JSON.parse(logs.join("\n")).runtimes).toBeUndefined();
+  });
+});
+
