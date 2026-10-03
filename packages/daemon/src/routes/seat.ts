@@ -70,7 +70,7 @@ seatRoutes.post("/retire-held-message/:seatRef/:id", async c => {
 
 seatRoutes.get("/status/:seatRef", (c) => {
   const rigRepo = c.get("rigRepo" as never) as RigRepository;
-  const service = new SeatStatusService({ rigRepo });
+  const service = new SeatStatusService({ rigRepo, stateRoot: c.get("runtimeStateRoot" as never) as string | undefined });
   const result = service.getStatus(decodeURIComponent(c.req.param("seatRef")!));
 
   if (result.ok) {
@@ -94,6 +94,7 @@ seatRoutes.post("/handover/:seatRef", async (c) => {
   const body: Record<string, unknown> = await c.req.json().catch(() => ({}));
   const rigRepo = c.get("rigRepo" as never) as RigRepository;
   const service = new SeatHandoverService({
+    runtimeStateRoot: c.get("runtimeStateRoot" as never) as string | undefined,
     db: rigRepo.db,
     rigRepo,
     sessionRegistry: c.get("sessionRegistry" as never) as SessionRegistry,
@@ -313,6 +314,7 @@ seatRoutes.post("/switch-client/:seatRef", async (c) => {
   const service = new SeatSwitchClientService({
     rigRepo,
     tmuxAdapter: c.get("tmuxAdapter" as never) as TmuxAdapter,
+    runtimeStateRoot: c.get("runtimeStateRoot" as never) as string | undefined,
   });
 
   const rawWindow = body["toWindow"];

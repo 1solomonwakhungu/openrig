@@ -116,6 +116,8 @@ interface BindingOwnerRow {
 }
 
 interface SeatHandoverServiceDeps {
+  /** Per-seat runtime state root for seat status trust answers (default <OPENRIG_HOME>/state). */
+  runtimeStateRoot?: string;
   db: Database.Database;
   rigRepo: RigRepository;
   sessionRegistry: SessionRegistry;
@@ -234,8 +236,8 @@ export class SeatHandoverService {
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.appliedLaunchObservations = new AppliedLaunchObservationStore(deps.db);
     this.now = deps.now ?? (() => new Date());
-    this.statusService = new SeatStatusService({ rigRepo: deps.rigRepo });
-    this.planner = new SeatHandoverPlanner({ rigRepo: deps.rigRepo });
+    this.statusService = new SeatStatusService({ rigRepo: deps.rigRepo, stateRoot: deps.runtimeStateRoot });
+    this.planner = new SeatHandoverPlanner({ rigRepo: deps.rigRepo, runtimeStateRoot: deps.runtimeStateRoot });
     this.successorLauncher = new SuccessorSessionLauncher(deps.tmuxAdapter, deps.discoveryRepo, {
       sessionEnv: deps.sessionEnv,
       newId: deps.newSuccessorId,

@@ -7,7 +7,7 @@ import os from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import { createFullTestDb } from "./helpers/test-app.js";
+import { createFullTestDb, createTestApp } from "./helpers/test-app.js";
 import { RigRepository } from "../src/domain/rig-repository.js";
 import { SessionRegistry } from "../src/domain/session-registry.js";
 import { SeatStatusService } from "../src/domain/seat-status-service.js";
@@ -101,5 +101,24 @@ describe("seat status trust answers", () => {
     expect(whoami.resolve({ sessionName: SESSION, compact: true })?.trustAnswers).toEqual([
       expect.objectContaining({ code: "trust_gate", summary: "OpenRig trusted /work/repo for this session (copilot)" }),
     ]);
+  });
+
+  it("app routes for seat status and whoami read the app's state root, which defaults to a temp dir", async () => {
+    const { app, rigRepo: repo, sessionRegistry, runtimeStateRoot } = createTestApp(db);
+    expect(nodePath.resolve(runtimeStateRoot).startsWith(nodePath.resolve(os.tmpdir()))).toBe(true);
+    const rig = repo.createRig("app-rig");
+    const node = repo.addNode(rig.id, "dev.impl", { runtime: "copilot", cwd: "/work/repo" });
+    sessionRegistry.registerSession(node.id, "dev-impl@app-rig");
+    const status = async () => (await (await app.request(`/api/seat/status/${encodeURIComponent("dev-impl@app-rig")}`)).json()) as { trust_answers: unknown[] };
+    const whoami = async () => (await (await app.request(`/api/whoami?sessionName=${encodeURIComponent("dev-impl@app-rig")}&compact=1`)).json()) as { trustAnswers?: unknown[] };
+    expect((await status()).trust_answers).toEqual([]);
+    expect(await whoami()).not.toHaveProperty("trustAnswers");
+    const dir = seatStateDirFor(runtimeStateRoot, "copilot", "dev-impl@app-rig");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, LAUNCH_RECORD_FILE), JSON.stringify({ sessionName: "dev-impl@app-rig", cwd: "/work/repo", gateAnswers: [ANSWER] }));
+    const summary = "OpenRig trusted /work/repo for this session (copilot)";
+    expect((await status()).trust_answers).toEqual([expect.objectContaining({ summary })]);
+    expect((await whoami()).trustAnswers).toEqual([expect.objectContaining({ summary })]);
+    fs.rmSync(runtimeStateRoot, { recursive: true, force: true });
   });
 });
