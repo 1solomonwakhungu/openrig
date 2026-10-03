@@ -117,8 +117,6 @@ export const PI_PROVIDER_ENV_VARS: Record<string, string> = {
   "kimi-coding": "KIMI_API_KEY",
 };
 
-/** Explicit OMP chat-provider credential names. Only the declared provider's
- *  key can cross into the child; arbitrary *_KEY variables are never forwarded. */
 /** OMP's own output when it starts with no usable model (no provider key in
  *  its environment and no models.yml): "No models available. Use /login or
  *  set an API key environment variable. ..." (seen in a no-credentials
@@ -130,6 +128,8 @@ export const OMP_NO_CREDENTIALS_RE = /No models available\. Use \/login or set a
 export const OMP_SIGN_IN_HINT =
   "OMP has no model credentials for this seat. Sign it in with HOME=<seat-root> PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login, or set the model provider's API key (for example ANTHROPIC_API_KEY) in the OpenRig daemon environment. Default OMP credentials are not shared.";
 
+/** Explicit OMP chat-provider credential names. Only the declared provider's
+ *  key can cross into the child; arbitrary *_KEY variables are never forwarded. */
 export const OMP_PROVIDER_ENV_VARS: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",

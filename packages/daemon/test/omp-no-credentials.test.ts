@@ -5,7 +5,7 @@
 // adapter must surface it as attention_required with attentionCode
 // login_required, the code runtime fallback (fallback_runtimes) acts on.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
@@ -69,6 +69,37 @@ describe("OMP runner: exit with no model credentials", () => {
     expect(state?.exited?.code).toBe(1);
     expect(state?.exited?.reason).toBeUndefined();
   }, 40_000);
+
+  it("records the exit promptly even when a background child keeps OMP's stderr open", async () => {
+    root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-omp-grandchild-"));
+    const bin = nodePath.join(root, "bin");
+    fs.mkdirSync(bin);
+    const pidFile = nodePath.join(root, "sleeper.pid");
+    // Like an LSP or MCP server OMP started: inherits OMP's stdio and outlives it.
+    fs.writeFileSync(nodePath.join(bin, "omp"), `#!/bin/sh\nsleep 30 &\necho $! > '${pidFile}'\n${NO_CREDENTIALS_STDERR.map((line) => `printf '%s\\n' '${line}' >&2`).join("\n")}\nexit 1\n`, { mode: 0o755 });
+    const stateRoot = nodePath.join(root, "state", "omp");
+    const statePath = piSeatPaths(stateRoot, "dev@rig").runnerStatePath;
+    const runner = spawn(process.execPath, [
+      "--import", "tsx", RUNNER,
+      "--session-name", "dev@rig", "--state-root", stateRoot, "--cwd", root,
+      "--launch-id", "launch-1", "--runtime", "omp", "--approval-mode", "always-ask",
+    ], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, TMPDIR: os.tmpdir() }, stdio: ["pipe", "ignore", "ignore"] });
+    try {
+      const started = Date.now();
+      let exited: { code: number | null; reason?: string } | undefined;
+      while (Date.now() - started < 8_000 && !exited) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (fs.existsSync(statePath)) exited = (JSON.parse(fs.readFileSync(statePath, "utf8")) as { exited?: typeof exited }).exited;
+      }
+      // Recorded within the grace period, long before the 30s sleeper ends;
+      // the notice was read in time, so the reason is still login_required.
+      expect(exited).toMatchObject({ code: 1, reason: "login_required" });
+      expect(Date.now() - started).toBeLessThan(8_000);
+    } finally {
+      runner.kill("SIGKILL");
+      try { process.kill(Number(fs.readFileSync(pidFile, "utf8").trim()), "SIGKILL"); } catch { /* already gone */ }
+    }
+  }, 20_000);
 
   it("matches OMP's notice only", () => {
     expect(OMP_NO_CREDENTIALS_RE.test(NO_CREDENTIALS_STDERR[0]!)).toBe(true);

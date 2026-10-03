@@ -895,6 +895,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   // OMP prints its no-credentials notice on stderr and exits; remember it so
   // the exit is reported as a sign-in problem, not a launch failure.
   let noCredentials = false;
+  /** How long after OMP's own exit to wait for its stderr to drain. */
+  const OMP_EXIT_GRACE_MS = 1_000;
   readline.createInterface({ input: child.stderr }).on("line", (line) => {
     if (runtime === "omp" && OMP_NO_CREDENTIALS_RE.test(line)) noCredentials = true;
     if (line.trim()) process.stdout.write(`[${runtime}:err] ${line}\n`);
@@ -939,9 +941,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     console.error(`[omp-runner] ERROR failed to spawn omp: ${err.message}`);
     recordExit(null);
   });
-  // "close" (not "exit"): it fires after the child's stdio is drained, so the
-  // no-credentials notice on stderr is always seen before the exit is recorded.
+  // "close" fires after the child's stdio is drained, so the no-credentials
+  // notice on stderr is seen before the exit is recorded. A grandchild that
+  // inherited OMP's stdio (an LSP or MCP server) can hold "close" open
+  // indefinitely, so "exit" also records the exit after a short grace period;
+  // recordExit runs once, whichever comes first.
   child.on("close", recordExit);
+  child.on("exit", (code) => { setTimeout(() => recordExit(code), OMP_EXIT_GRACE_MS).unref(); });
 }
 
 // Compiled-entry guard: run main() only when executed directly (not imported
