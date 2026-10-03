@@ -363,8 +363,9 @@ tmux pane, driven by a `TuiCliRuntimeSpec`:
   OpenRig identity variables plus the `allow` list; pane variables pass only
   when set (`${NAME+"NAME=$NAME"}`).
 - `prepareLaunch(ctx)` (optional) provisions before typing on fresh, fork, and
-  resume (restore resumes through the same path). Failures are logged and never
-  block the launch. Owner files are edited only through `ctx.mergeOwnerConfig`
+  resume (restore resumes through the same path); `ctx.mode` names which, and
+  a fork carries `ctx.forkSource` (goose records the parent so capture can find
+  the copy). Failures are logged and never block the launch. Owner files are edited only through `ctx.mergeOwnerConfig`
   (`adapters/cli/owner-config.ts`): merge-only (add to a list, set an absent
   key), skip an unparseable file, YAML edited through the `yaml` Document API
   so comments and layout survive, a symlinked file written at its real target,

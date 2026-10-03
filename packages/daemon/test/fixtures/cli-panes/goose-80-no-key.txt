@@ -1,0 +1,21 @@
+$ GOOSE_TELEMETRY_OFF=1 GOOSE_DISABLE_KEYRING=1 GOOSE_PROVIDER=anthropic GOOSE_MODEL=claude-sonnet-4-5 goose session --name 'dev@rig'
+
+  error: Error Configuration value not found: ANTHROPIC_API_KEY.
+Please check your system keychain and run 'goose configure' again.
+If your system is unable to use the keyring, please try setting secret key(s) via environment variables.
+For more info, see: https://goose-docs.ai/docs/troubleshooting/#keychainkeyring-errors
+
+$ 
+
+
+
+
+
+
+
+
+
+
+
+
+

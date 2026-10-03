@@ -159,6 +159,8 @@ export interface TuiCliPrepareContext {
   mode: "fresh" | "resume" | "fork";
   resumeToken?: string;
   sessionToken?: string;
+  /** The fork parent on a fork launch. */
+  forkSource?: ForkSource;
   /** Owner-state-safe config edit (owner-config.ts); changes are logged and
    *  recorded in the seat's launch.json. Use this for every owner file edit. */
   mergeOwnerConfig(filePath: string, format: OwnerConfigFormat, edit: (editor: OwnerConfigEditor) => void): OwnerConfigMergeResult;
@@ -421,7 +423,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       }
     }
 
-    const ownerConfigChanges = await this.prepare({ binding, seatStateDir, mode, resumeToken, sessionToken });
+    const ownerConfigChanges = await this.prepare({ binding, seatStateDir, mode, resumeToken, sessionToken, forkSource: opts.forkSource });
 
     const input: TuiCliLaunchInput = {
       binding,
@@ -610,6 +612,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     mode: LaunchRecord["mode"];
     resumeToken?: string;
     sessionToken?: string;
+    forkSource?: ForkSource;
   }): Promise<OwnerConfigChange[]> {
     const changes: OwnerConfigChange[] = [];
     if (!this.spec.prepareLaunch) return changes;

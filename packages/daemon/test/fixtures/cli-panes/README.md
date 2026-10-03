@@ -26,3 +26,9 @@ a same-length placeholder so wrapping is unchanged.
 | `copilot-80-resume-missing.txt` | Live: `--resume=<unknown id>` error, then the shell |
 | `cursor-80-login.txt` | Live: unauthenticated start |
 | `cursor-80-idle-synth.txt`, `cursor-80-followup-synth.txt`, `cursor-80-resumed-synth.txt`, `cursor-80-trust-synth.txt` | Synthesized from bundle strings at 80 columns; layout illustrative |
+| `goose-80-ready.txt` | Live: goose 1.53.0, `goose session --name`, local provider pointed at a closed port (no key) |
+| `goose-80-telemetry.txt` | Live: first run, the usage-data question |
+| `goose-80-resumed.txt` | Live: `--resume --session-id` from another directory, the switch-back question |
+| `goose-80-no-provider.txt` | Live: no provider configured, then the shell |
+| `goose-80-no-key.txt` | Live: provider set without its key, then the shell |
+| `goose-80-resume-missing.txt` | Live: `--resume --session-id <unknown id>` error, then the shell |

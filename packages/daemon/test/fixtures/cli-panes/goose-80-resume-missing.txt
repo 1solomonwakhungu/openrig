@@ -1,0 +1,23 @@
+$ GOOSE_TELEMETRY_OFF=1 GOOSE_PROVIDER=ollama OLLAMA_HOST=http://127.0.0.1:9 GOOSE_MODEL=qwen3 goose session --resume --session-id 20261003_99
+
+  error: Cannot resume session 20261003_99 - no such session exists
+
+$ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
