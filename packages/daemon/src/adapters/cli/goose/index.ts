@@ -92,13 +92,13 @@ export const GOOSE_DESCRIPTOR: RuntimeDescriptor = {
   // Native transcript (feature 5): the session's messages in goose's own
   // database. The session is the resume token, else this launch's session
   // (capture's attribution).
-  readTranscript: ({ sessionName, cwd, seatStateDir, homedir, resumeToken, launchStartedAt, since }) => {
+  readTranscript: ({ sessionName, cwd, seatStateDir, homedir, resumeToken, launchStartedAt, since, maxEntries }) => {
     const record = readSeatRecord(nodeReadFs, seatStateDir);
     const dbPath = record.sessionsDb ?? gooseSessionsDbPath(process.env, homedir);
     const deps = { exists: nodeReadFs.exists };
     const sessionId = resumeToken?.trim()
       || (cwd ? captureGooseSessionId({ dbPath, deps, seatName: sessionName, cwd, launchStartedAt, forkParent: record.forkParent }) : null);
-    return readGooseTranscript({ dbPath, deps, sessionId, since });
+    return readGooseTranscript({ dbPath, deps, sessionId, since, maxMessages: maxEntries });
   },
   // Each posture sets its own GOOSE_MODE, so a seat may select either.
   permissionModes: ["floor", "full_bypass"],

@@ -259,6 +259,9 @@ describe("readGooseTranscript (feature 5)", () => {
   it("filters by since and is null without a valid session id or a database", () => {
     const dbPath = dbWithMessages();
     expect(readGooseTranscript({ dbPath, deps, sessionId: ID, since: new Date("2026-10-03T03:40:06.000Z") })?.entries).toHaveLength(2);
+    // The bound is in the SQL: the newest messages, in conversation order.
+    expect(readGooseTranscript({ dbPath, deps, sessionId: ID, maxMessages: 2 })?.entries.map((e) => e.text))
+      .toEqual(["Wrote src/health.ts", "error: -32602: bad arguments"]);
     expect(readGooseTranscript({ dbPath, deps, sessionId: null })).toBeNull();
     expect(readGooseTranscript({ dbPath, deps, sessionId: "x; drop" })).toBeNull();
     expect(readGooseTranscript({ dbPath: `${dbPath}.absent`, deps, sessionId: ID })).toBeNull();

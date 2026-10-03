@@ -366,8 +366,12 @@ export const GOOSE_USAGE_SOURCE = "goose_sessions_db";
 /** goose 1.53.0 messages table: role, content_json (MessageContentBlock[],
  *  tagged by `type` in camelCase), created_timestamp (unix seconds), and
  *  metadata_json ({ userVisible, agentVisible }). */
+/** The newest `?` messages, newest first: the SQL bounds the read on the
+ *  request path, and the reader reverses them into conversation order. */
 export const GOOSE_TRANSCRIPT_SQL =
-  "SELECT role, content_json, created_timestamp, metadata_json FROM messages WHERE session_id = ? ORDER BY created_timestamp, id";
+  "SELECT role, content_json, created_timestamp, metadata_json FROM messages WHERE session_id = ? ORDER BY created_timestamp DESC, id DESC LIMIT ?";
+/** Messages read when the caller names no bound (the route passes its own). */
+export const GOOSE_TRANSCRIPT_DEFAULT_MESSAGES = 5_000;
 export const GOOSE_TRANSCRIPT_SOURCE = "goose_messages_db";
 const TRANSCRIPT_PREVIEW_CHARS = 300;
 
@@ -401,10 +405,11 @@ function gooseClip(value: unknown): string {
  * isError } }` or `{ status: "error", error }`) become tool entries; thinking
  * and messages marked not user-visible are left out. Read-only; never throws.
  */
-export function readGooseTranscript(input: { dbPath: string; deps: GooseStoreDeps; sessionId: string | null; since?: Date }): { source: string; entries: Array<{ role: "user" | "assistant" | "tool"; text: string; at?: string }> } | null {
+export function readGooseTranscript(input: { dbPath: string; deps: GooseStoreDeps; sessionId: string | null; since?: Date; maxMessages?: number }): { source: string; entries: Array<{ role: "user" | "assistant" | "tool"; text: string; at?: string }> } | null {
   if (!input.sessionId || !validateGooseSessionId(input.sessionId).ok) return null;
-  const rows = readRows(input.dbPath, input.deps, GOOSE_TRANSCRIPT_SQL, [input.sessionId.trim()]);
-  if (!rows) return null;
+  const newestFirst = readRows(input.dbPath, input.deps, GOOSE_TRANSCRIPT_SQL, [input.sessionId.trim(), input.maxMessages ?? GOOSE_TRANSCRIPT_DEFAULT_MESSAGES]);
+  if (!newestFirst) return null;
+  const rows = newestFirst.reverse();
   const floor = input.since?.getTime();
   const entries: Array<{ role: "user" | "assistant" | "tool"; text: string; at?: string }> = [];
   for (const row of rows) {
