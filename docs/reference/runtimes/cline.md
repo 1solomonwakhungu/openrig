@@ -148,6 +148,10 @@ cannot be tied to one seat by the TUI's pid. The match is therefore guarded:
 
 Usage (`rig ps`): tokens, cache tokens, cost, and model from the session record's `metadata.aggregateUsage` (the session plus agents it spawned); cline records no context size or window, so CTX stays `??`.
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. cline records no context size, so seats never alert. cline compacts on its own (`--compaction agentic|basic|off`, default `agentic`).
+
 ## Known limits
 
 - No per-seat model (see "Model selection"). All cline seats on a host share

@@ -69,6 +69,10 @@ Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or
 
 Usage: not reported yet. grok keeps a usage ledger in memory (`xai-chat-state/src/usage.rs`), but whether it is persisted to disk is not verified, so the runtime declares no `readUsage`.
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. No usage is read yet, so seats never alert.
+
 ## Known limits
 
 - `--trust` persists folder trust in grok's own `trusted_folders.toml`.

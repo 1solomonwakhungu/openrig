@@ -46,6 +46,10 @@ Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never
 
 Usage (`rig ps`): token, cache, reasoning, and cost totals from the seat database's `session` row (the opencode schema), and the context in use from the latest assistant message; no context window is recorded.
 
+## Context alerts
+
+Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. kilo records no context window, so seats never alert. kilo compacts a session itself near the model's limit (the opencode `compaction.auto` behavior).
+
 ## Known limits
 
 - The same limits as OpenCode.
