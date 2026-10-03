@@ -47,11 +47,13 @@ members:
 Both postures also pass `--no-auto-update` (see Updates).
 
 Posture comes from the member or rig `permission_policy` (for example
-`builtin:yolo` selects `full_bypass`). `rig seat set-permissions` is currently
-limited to `claude-code` and `codex`. With `floor`, a `defaultPermissionMode`
+`builtin:yolo` selects `full_bypass`). To choose a posture for one seat, run
+`rig seat set-permissions <seat> --mode floor|full_bypass --reason <text>`; it
+applies on the seat's next launch, resume, or handover, and `--mode inherit`
+returns the seat to its policy. With `floor`, a `defaultPermissionMode`
 you set in Copilot's own settings still applies; OpenRig does not override it.
 
-Under `full_bypass` OpenRig records `yolo` as the seat's applied-launch observation (axis `permission`); when the seat has a permission policy, permission drift compares the posture it implies with the policy's posture and reports `aligned` or `drift`. The floor passes no permission flag, so its observation is `unknown` (Copilot's own settings govern) and never compared. This checks the launch arguments OpenRig emitted, not Copilot's own enforcement.
+Under `full_bypass` OpenRig records `yolo` as the seat's applied-launch observation (axis `permission`); when the seat has a `rig seat set-permissions` choice or a permission policy, permission drift compares the posture it implies with that choice (else the policy's posture) and reports `aligned` or `drift`. The floor passes no permission flag, so its observation is `unknown` (Copilot's own settings govern) and never compared. This checks the launch arguments OpenRig emitted, not Copilot's own enforcement.
 
 ## Folder trust
 

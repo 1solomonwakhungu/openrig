@@ -407,7 +407,10 @@ it without changing that inherited policy. `floor` selects the existing normal
 launch path (including a Codex named profile when configured); it does not
 rewrite a native profile or force its approval settings.
 
-Codex and Claude accept `floor` and `full_bypass`. Additional Claude native modes,
+Codex, Claude, and every CLI runtime under `docs/reference/runtimes/` (GitHub
+Copilot, Cursor, Gemini, Qwen, OpenCode, Kilo, Cline, Aider, Grok, Antigravity)
+accept `floor` and `full_bypass`; each runtime page lists the launch flags they
+select. Pi does not (its resource trust is separate). Additional Claude native modes,
 including `auto`, require support advertised by the managed executable's help.
 OpenRig resolves the first executable on its managed launch PATH at the seat's
 absolute working directory, then uses that exact path for discovery and launch.

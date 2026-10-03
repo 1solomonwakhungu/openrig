@@ -85,6 +85,8 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   // Maps the recorded approval mode back to a posture for permission drift.
   permissionPostureFor: geminiFamilyPermissionPosture(QWEN_DIALECT),
   supportsFork: true,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   // Qwen reads QWEN.md and AGENTS.md; QWEN.md keeps OpenRig blocks apart from
   // Codex/Pi seats sharing the cwd AGENTS.md.
   guidanceFile: "QWEN.md",

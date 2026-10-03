@@ -138,6 +138,11 @@ flag or setting that disables this, so under full_bypass:
   `yes_always_decided_in_pane`).
 - With any other model, `--yes-always` is passed as usual.
 
+The same applies when a seat's posture comes from `rig seat set-permissions
+<seat> --mode full_bypass`: the selection makes the seat full_bypass, but
+`--yes-always` is still withheld while OpenRouter onboarding could fire (no
+`model:`), as described above.
+
 When the offer does appear, it waits in the pane as a `login_required` gate for
 the operator. Declare `model:` and the provider key in the seat env to get
 `--yes-always`.

@@ -85,6 +85,8 @@ export const CURSOR_DESCRIPTOR: RuntimeDescriptor = {
     });
   },
   supportsFork: false,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   guidanceFile: CURSOR_GUIDANCE_FILE,
   skillsDir: ({ cwd }) => nodePath.join(cwd, ...CURSOR_SKILLS_SUBDIR),
   // The `cursor-agent` wrapper execs its bundled node under its own name

@@ -130,6 +130,8 @@ export const ANTIGRAVITY_DESCRIPTOR: RuntimeDescriptor = {
     return id;
   },
   supportsFork: false,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   // agy reads workspace AGENTS.md and GEMINI.md; AGENTS.md is shared with Codex.
   guidanceFile: "AGENTS.md",
   // Workspace skills.

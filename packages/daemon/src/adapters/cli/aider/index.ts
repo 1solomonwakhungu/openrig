@@ -31,6 +31,8 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   captureResumeToken: ({ seatStateDir }) =>
     captureAiderChatHistory({ fs: createNodeFsOps(), seatStateDir }) ?? null,
   supportsFork: false,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   guidanceFile: AIDER_GUIDANCE_FILE,
   // No skillsDir: aider has no skills location (honest skip).
   // The pane runs the Python interpreter (`Python` on macOS) with the aider

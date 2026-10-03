@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import type Database from "better-sqlite3";
 import { AppliedLaunchObservationStore } from "./applied-launch-observation-store.js";
 import { RigRepository } from "./rig-repository.js";
+import { NativePermissionStore } from "./native-permission-store.js";
 import type { ResolvedLaunchPosture } from "../adapters/yolo-mode.js";
 import {
   diagnoseRuntimePosture,
@@ -133,7 +134,7 @@ export class PermissionDriftObserver implements PermissionDriftReader {
       applied: this.observations.readCurrent(nodeId),
       fs: this.fs,
       now: this.now,
-      expectedPosture: this.policyPosture(nodeId, node.rig_id),
+      expectedPosture: this.selectedPosture(nodeId, node.runtime) ?? this.policyPosture(nodeId, node.rig_id),
     });
   }
 
@@ -142,6 +143,19 @@ export class PermissionDriftObserver implements PermissionDriftReader {
    *  no policy is attached. The env-driven YOLO default is deliberately not
    *  inferred here: fresh launches and restores apply it differently, so a
    *  guess could report false drift. */
+  /** A per-seat `rig seat set-permissions` choice of floor or full_bypass for
+   *  the seat's current runtime: launches apply it over the policy posture
+   *  (native-permission-store.ts apply), so drift compares against it too. */
+  private selectedPosture(nodeId: string, runtime: string | null): ResolvedLaunchPosture | null {
+    try {
+      const selection = new NativePermissionStore(this.input.db).read(nodeId);
+      if (!selection || selection.runtime !== runtime) return null;
+      return selection.mode === "floor" || selection.mode === "full_bypass" ? selection.mode : null;
+    } catch {
+      return null; // an unreadable selection leaves the policy posture in charge
+    }
+  }
+
   private policyPosture(nodeId: string, rigId: string | null): ResolvedLaunchPosture | null {
     try {
       const node = this.rigRepo.getNodePolicyProvenance(nodeId);
