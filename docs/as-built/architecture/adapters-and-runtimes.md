@@ -419,6 +419,32 @@ Tests use the hermetic harness `packages/daemon/test/helpers/tui-cli-adapter-har
 test-only `example-cli` fixture (`test/helpers/example-cli-runtime.ts`) proves
 both and is never registered in production.
 
+## Capability hooks
+
+Optional, read-only hooks that a runtime implements and core consumes, added
+before the features that use them (`packages/daemon/src/domain/runtime-capabilities.ts`).
+Every hook reads local files and environment only: no network, no login, no
+keychain, no writes. Core calls a hook only through its runner, which never
+throws: a throw becomes the hook's unknown value (`null`, or `state: "unknown"`
+with a `detail`) and a logged reason that never includes a secret value. Seat
+hooks receive `RuntimeSeatReadInput` (`sessionName`, `cwd`, `seatStateDir`,
+`homedir`, `resumeToken`, and `launchStartedAt`, which the runner fills from
+the seat's `launch.json`). No built-in runtime declares a hook yet, so
+`claude-code`, `codex`, `pi`, and `terminal` behave exactly as before.
+
+| Hook | Where | Shape | Runner | Core consumer (feature PR) |
+|---|---|---|---|---|
+| `readUsage` | descriptor | `(input) => RuntimeUsageSnapshot \| null`; every metric optional, plus `observedAt` and `source` | `runDescriptorUsageRead` | usage poller in `context-monitor` / `usage-samples-store`, cost in `rig ps` (features 1, 4) |
+| `authStatus` | descriptor | `(ctx) => { state: "signed_in" \| "missing" \| "unknown"; source?; hint?; detail? }`; ctx has read-only, size-capped `fs` and, only under `rig runtimes --probe`, a read-only `probe.exec` | `runDescriptorAuthStatus` | `rig runtimes` and the `rig doctor` runtimes section (feature 6) |
+| `modelShape` | descriptor | `{ pattern; example; note?; aliases? }` | `checkModelShape` (pure) | warn-only preflight model advisory (feature 7) |
+| `docsPath` | descriptor | repo-relative docs page | n/a | `rig runtimes` docs link (feature 6) |
+| `readTranscript` | descriptor | `(input) => { source; entries: { role; text; at? }[]; truncated? } \| null` | `runDescriptorTranscriptRead` (keeps the newest `maxEntries`) | `rig transcript` fallback when the pane transcript is thin, after transcript redaction (feature 5) |
+| `busyPatterns` | `TuiCliRuntimeSpec` | the CLI's busy markers | n/a | read by `classifyActivity` |
+| `classifyActivity` | `RuntimeAdapter` (optional), implemented once in `TuiCliRuntimeAdapter` | `(binding) => "working" \| "idle" \| "needs_input" \| null`: pane at a shell is null, then gate is needs_input, busy is working, ready is idle, otherwise null so a wrong guess never suppresses a wake | n/a | activity taxonomy and `rig ps` for registry runtimes; claude-code, codex, and pi keep their own sources (feature 2) |
+
+Per-seat permission modes (`permissionModes`) are added with their consumer in
+the feature-3 PR, not here.
+
 ## 7. Adding a runtime adapter
 
 1. Create `packages/daemon/src/adapters/cli/<id>/index.ts` exporting a

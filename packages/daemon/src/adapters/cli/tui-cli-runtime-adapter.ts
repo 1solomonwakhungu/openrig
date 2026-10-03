@@ -37,6 +37,7 @@ import type { ProjectionEntry, ProjectionPlan } from "../../domain/projection-pl
 import type { AppliedLaunchObservation } from "../../domain/permission-drift.js";
 import { mergeManagedBlock } from "../../domain/managed-blocks.js";
 import type { RuntimeDescriptor } from "../../domain/runtime-registry.js";
+import type { RuntimeActivityState } from "../../domain/runtime-capabilities.js";
 import {
   LAUNCH_RECORD_FILE,
   runDescriptorTokenCapture,
@@ -199,6 +200,9 @@ export interface TuiCliRuntimeSpec {
   validateResumeTarget?(ctx: TuiCliResumeTargetContext): TuiCliResumeTargetResult | Promise<TuiCliResumeTargetResult>;
   /** Any match (with the CLI holding the foreground) means ready. */
   readyPatterns: readonly RegExp[];
+  /** The CLI's busy marker (e.g. "esc to interrupt"); classifyActivity reads
+   *  a match as working. Absent = activity never reads as working. */
+  busyPatterns?: readonly RegExp[];
   /** Interactive gates that need an operator (trust, login, update, ...). */
   gatePatterns?: readonly TuiCliGatePattern[];
   /** CLI errors. They fire while the TUI runs and, on new pane lines, after it
@@ -495,6 +499,24 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
         return { ready: false, reason: `the pane is back at a shell (${this.runtime} process gone)`, code: "runtime_exited" };
       case "pending": return { ready: false, reason: `${this.runtime} has not reported ready yet`, code: "awaiting_runtime" };
     }
+  }
+
+  /**
+   * Activity from the pane (F1, feature 2), using the same joined capture and
+   * shell-foreground guard as readiness. In order: pane at a shell => null; a
+   * gate on screen => needs_input; a busy marker => working; a ready marker =>
+   * idle; anything else => null, so callers fall back to their generic source
+   * and a wrong guess never suppresses a wake.
+   */
+  async classifyActivity(binding: NodeBinding): Promise<RuntimeActivityState | null> {
+    if (!binding.tmuxSession) return null;
+    const paneCommand = ((await this.tmux.getPaneCommand(binding.tmuxSession)) ?? "").trim().replace(/^-/, "");
+    if (SHELL_COMMANDS.has(paneCommand)) return null;
+    const content = (await this.tmux.capturePaneContent(binding.tmuxSession, PANE_CAPTURE_LINES, JOINED)) ?? "";
+    if ((this.spec.gatePatterns ?? []).some((gate) => gate.pattern.test(content))) return "needs_input";
+    if ((this.spec.busyPatterns ?? []).some((pattern) => pattern.test(content))) return "working";
+    if (this.spec.readyPatterns.some((pattern) => pattern.test(content))) return "idle";
+    return null;
   }
 
   // ── RuntimeResumeAdapter ───────────────────────────────────────────────────
