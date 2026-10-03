@@ -5,12 +5,13 @@ import { migrate } from "../src/db/migrate.js";
 import { RigRepository } from "../src/domain/rig-repository.js";
 import { SessionRegistry } from "../src/domain/session-registry.js";
 import { EventBus } from "../src/domain/event-bus.js";
-import { RigTeardownOrchestrator } from "../src/domain/rig-teardown.js";
+import { RigTeardownOrchestrator, legacyGuidanceCleanupFile } from "../src/domain/rig-teardown.js";
 import type { TmuxAdapter } from "../src/adapters/tmux.js";
 import type { SnapshotCapture } from "../src/domain/snapshot-capture.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { ALL_MIGRATIONS } from "../src/db/all-migrations.js";
 import { registerRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { EXAMPLE_CLI_DESCRIPTOR } from "./helpers/example-cli-runtime.js";
@@ -332,6 +333,30 @@ describe("RigTeardownOrchestrator", () => {
     } finally {
       unregister();
     }
+  });
+
+  it("cline subdirectory seat: strips blocks from the workspace-root AGENTS.md and the legacy cwd AGENTS.md", async () => {
+    const repo = fs.realpathSync(fs.mkdtempSync(path.join(tmpDir, "cline-repo-")));
+    const cwd = path.join(repo, "services", "api");
+    fs.mkdirSync(cwd, { recursive: true });
+    execFileSync("git", ["-C", repo, "init", "-q"], { stdio: "ignore" });
+    const block = ["<!-- BEGIN OpenRig MANAGED BLOCK: role -->", "managed", "<!-- END OpenRig MANAGED BLOCK: role -->"].join("\n");
+    const rootFile = path.join(repo, "AGENTS.md");
+    const legacyFile = path.join(cwd, "AGENTS.md");
+    fs.writeFileSync(rootFile, ["# Repo agents", block].join("\n\n"));
+    // Written by a launch from before cline guidance moved to the workspace root.
+    fs.writeFileSync(legacyFile, ["# Service notes", block].join("\n\n"));
+    expect(legacyGuidanceCleanupFile("cline", cwd)).toBe(legacyFile);
+    expect(legacyGuidanceCleanupFile("cline", repo)).toBeNull();
+    expect(legacyGuidanceCleanupFile("codex", cwd)).toBeNull();
+    const { rigId } = seedRigWithNode({ runtime: "cline", cwd, sessionStatus: "exited" });
+
+    await buildTeardown().teardown(rigId);
+
+    expect(fs.readFileSync(rootFile, "utf-8")).toContain("# Repo agents");
+    expect(fs.readFileSync(rootFile, "utf-8")).not.toContain("OpenRig MANAGED BLOCK");
+    expect(fs.readFileSync(legacyFile, "utf-8")).toContain("# Service notes");
+    expect(fs.readFileSync(legacyFile, "utf-8")).not.toContain("OpenRig MANAGED BLOCK");
   });
 
   // T14: Per-node cleanup is atomic (status + binding together)

@@ -9,6 +9,7 @@
 // bus emission — never pane scraping (BR-1). TUI-native Pi is a SEPARATE
 // future contract, never a hidden mode here (BR-2).
 
+import { logGuidanceSkip, resolveGuidanceTarget, type GuidanceDestination } from "../domain/guidance-target.js";
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TmuxAdapter } from "./tmux.js";
@@ -147,7 +148,7 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
             // replace Pi's default system prompt). Pi reads AGENTS.md from
             // the managed cwd as a project context file.
             const targetPath = nodePath.join(binding.cwd, "AGENTS.md");
-            const merged = this.mergeGuidance(targetPath, file.path, content);
+            const merged = this.mergeGuidance(targetPath, file.path, content, this.piGuidanceDestination(binding));
             if (!merged) continue; // rig-role skip: do not count as delivered
             break;
           }
@@ -401,7 +402,7 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     if (entry.category === "guidance" && entry.mergeStrategy === "managed_block") {
       const targetPath = nodePath.join(binding.cwd, "AGENTS.md");
       const content = this.fs.readFile(entry.absolutePath);
-      return this.mergeGuidance(targetPath, entry.effectiveId, content);
+      return this.mergeGuidance(targetPath, entry.effectiveId, content, this.piGuidanceDestination(binding));
     }
 
     if (entry.category === "skill") {
@@ -430,7 +431,17 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     return false;
   }
 
-  private mergeGuidance(targetPath: string, blockId: string, content: string): boolean {
+  /** guidance.tracked_file redirect for pi: the seat's own agent dir AGENTS.md, which pi
+   *  loads first and additively (resource-loader.ts) via PI_CODING_AGENT_DIR. It lives in
+   *  OpenRig's seat state, never in the repo, and needs no project trust. */
+  private piGuidanceDestination(binding: NodeBinding): GuidanceDestination {
+    const redirectPath = binding.tmuxSession
+      ? nodePath.join(piSeatPaths(this.stateRoot, binding.tmuxSession).agentDir, "AGENTS.md")
+      : null;
+    return { policy: binding.guidanceTrackedFile, redirectPath };
+  }
+
+  private mergeGuidance(targetPath: string, blockId: string, content: string, destination?: GuidanceDestination): boolean {
     // Mirrors the Claude/Codex adapters: per-seat `rig-role` content collides
     // across pod-mates when merged into a shared cwd file; it is delivered via
     // send_text instead. See ADR-0006.
@@ -440,9 +451,17 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
       );
       return false;
     }
-    mergeManagedBlock(this.fs, targetPath, blockId, content, {
+    // guidance.tracked_file: a git-tracked guidance file may be skipped or
+    // redirected to the runtime's untracked alternate (guidance-target.ts).
+    const target = resolveGuidanceTarget({ targetPath, policy: destination?.policy, redirectPath: destination?.redirectPath });
+    if (target.kind === "skip") {
+      logGuidanceSkip(target, blockId);
+      return false;
+    }
+    mergeManagedBlock(this.fs, target.path, blockId, content, {
       replaceBlockIds: blockId === "openrig-start.md" ? ["using-openrig.md"] : [],
     });
     return true;
   }
 }
+

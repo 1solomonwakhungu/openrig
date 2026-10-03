@@ -647,6 +647,10 @@ export class PodRigInstantiator {
         if (rigSpec.managedBlocks?.["claude-code"]) {
           this.deps.rigRepo.setRigClaudeManagedBlockFile(materializedRigId, rigSpec.managedBlocks["claude-code"]);
         }
+        // guidance.tracked_file is rig-row state too (both persist sites).
+        if (rigSpec.guidance?.trackedFile) {
+          this.deps.rigRepo.setRigGuidanceTrackedFile(materializedRigId, rigSpec.guidance.trackedFile);
+        }
 
         // OPR.0.4.8.3 Seam B: persist the rig-level permission_policy REF (raw, like role) —
         // this is ONE of TWO rig-persist sites (materializeValidatedSpec + instantiate); missing
@@ -1276,6 +1280,9 @@ export class PodRigInstantiator {
       // #25: the second rig-persist site (see materializeValidatedSpec).
       if (rigSpec.managedBlocks?.["claude-code"]) {
         this.deps.rigRepo.setRigClaudeManagedBlockFile(rigId, rigSpec.managedBlocks["claude-code"]);
+      }
+      if (rigSpec.guidance?.trackedFile) {
+        this.deps.rigRepo.setRigGuidanceTrackedFile(rigId, rigSpec.guidance.trackedFile);
       }
       // OPR.0.4.8.3 Seam B: the SECOND rig-persist site (bootstrap instantiate path) —
       // both sites must write or the rig ref silently drops on one instantiate path.

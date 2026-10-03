@@ -1,3 +1,4 @@
+import { TRACKED_GUIDANCE_POLICIES, isTrackedGuidancePolicy, type TrackedGuidancePolicy } from "./guidance-target.js";
 import type {
   LegacyRigSpec,
   LegacyRigSpecNode,
@@ -46,7 +47,7 @@ const VALID_WAIT_TARGET_CONDITIONS = new Set(["healthy"]);
 const VALID_WORKSPACE_KINDS = new Set<string>(WORKSPACE_KINDS as readonly string[]);
 
 const RIG_KEYS = new Set([
-  "version", "name", "summary", "culture_file", "permission_policy", "managed_blocks", "docs",
+  "version", "name", "summary", "culture_file", "permission_policy", "managed_blocks", "guidance", "docs",
   "startup", "services", "workspace", "pods", "edges",
 ]);
 const POD_KEYS = new Set(["id", "label", "summary", "continuity_policy", "startup", "members", "edges"]);
@@ -77,6 +78,22 @@ function validateManagedBlocks(raw: unknown): string[] {
       errors.push(`managed_blocks.${key}: unsupported runtime "${key}"; only "claude-code" is configurable`);
     } else if (!(CLAUDE_MANAGED_BLOCK_FILES as readonly unknown[]).includes(value)) {
       errors.push(`managed_blocks.claude-code: must be one of ${CLAUDE_MANAGED_BLOCK_FILES.join(", ")} (got ${JSON.stringify(value)})`);
+    }
+  }
+  return errors;
+}
+
+/** guidance: { tracked_file: managed_block | skip | redirect } (see guidance-target.ts). */
+function validateGuidance(raw: unknown): string[] {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return ["guidance: must be a mapping such as { tracked_file: skip }"];
+  }
+  const errors: string[] = [];
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key !== "tracked_file") {
+      errors.push(`guidance.${key}: unknown key; only "tracked_file" is supported`);
+    } else if (!isTrackedGuidancePolicy(value)) {
+      errors.push(`guidance.tracked_file: must be one of ${TRACKED_GUIDANCE_POLICIES.join(", ")} (got ${JSON.stringify(value)})`);
     }
   }
   return errors;
@@ -184,6 +201,9 @@ export class RigSpecSchema {
     if (obj["managed_blocks"] !== undefined) {
       errors.push(...validateManagedBlocks(obj["managed_blocks"]));
     }
+    if (obj["guidance"] !== undefined) {
+      errors.push(...validateGuidance(obj["guidance"]));
+    }
 
     // pods: required array
     if (!obj["pods"] || !Array.isArray(obj["pods"])) {
@@ -253,6 +273,9 @@ export class RigSpecSchema {
       cultureFile: raw["culture_file"] as string | undefined,
       permissionPolicy: raw["permission_policy"] as string | undefined,
       managedBlocks: raw["managed_blocks"] as RigSpec["managedBlocks"],
+      ...(raw["guidance"] && typeof raw["guidance"] === "object"
+        ? { guidance: { trackedFile: (raw["guidance"] as Record<string, unknown>)["tracked_file"] as TrackedGuidancePolicy | undefined } }
+        : {}),
       docs,
       startup: raw["startup"] ? normalizeStartupBlock(raw["startup"]) : undefined,
       services: raw["services"] ? normalizeServicesBlock(raw["services"], raw["name"] as string) : undefined,

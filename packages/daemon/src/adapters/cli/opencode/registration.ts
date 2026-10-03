@@ -7,6 +7,7 @@
 
 import { activityMarkers } from "../activity-markers.js";
 import fs from "node:fs";
+import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeRegistration } from "../types.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
@@ -71,6 +72,11 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
     permissionModes: ["floor", "full_bypass"],
     guidanceFile: OPENCODE_FAMILY_GUIDANCE_FILE,
     skillsDir: ({ cwd }) => opencodeFamilySkillsDir(variant, cwd),
+    // guidance.tracked_file redirect: kilo merges every .kilo/rules/*.md into its instructions
+    // (kilocode rules-migrator.ts). OpenCode has no auto-loaded alternate, so no redirect.
+    ...(variant.id === "kilo"
+      ? { trackedGuidanceRedirect: ({ cwd }: { cwd: string }) => nodePath.join(cwd, ".kilo", "rules", "openrig.md") }
+      : {}),
     paneCommands: variant.paneCommands,
     processMatch: variant.processMatch,
     // LSP servers and MCP servers run as child processes of the TUI.

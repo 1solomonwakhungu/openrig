@@ -176,11 +176,54 @@ edges:
 | `culture_file` | string | no | — | Relative path to a rig-wide culture/constitution file. Must be a safe relative path (no `..`, no absolute). |
 | `permission_policy` | string | no | — | Permission policy attached to the rig. Either a built-in (`builtin:locked`, `builtin:standard`, `builtin:open`, `builtin:yolo`) or a safe relative path to a custom policy file (resolved from this spec's directory; no `..`, no absolute). Absent leaves the default floor. A member may set its own `permission_policy`, which takes precedence over the rig-level one. See "Attaching a permission policy" below. |
 | `managed_blocks` | map | no | `CLAUDE.md` | File that receives OpenRig's managed instruction blocks for Claude Code members. Only the `claude-code` key is accepted, with `CLAUDE.md` or `CLAUDE.local.md`. Codex members always use `AGENTS.md`. See "Choosing the Claude instruction file" below. |
+| `guidance` | map | no | `tracked_file: managed_block` | What OpenRig's managed guidance does when a runtime's guidance file (CLAUDE.md, AGENTS.md, GEMINI.md, ...) is tracked by git in the seat's cwd. `tracked_file`: `managed_block` (merge as before), `skip` (leave the tracked file alone), or `redirect` (write to an untracked file the CLI also loads). See "Leaving a tracked guidance file alone" below. |
 | `docs` | Doc[] | no | — | Documentation files that should travel with the rig. Included in rig bundles. Each entry has a `path` field (safe relative path). The engine does not consume these — they are for humans and agents setting up the environment before launch. |
 | `startup` | StartupBlock | no | — | Rig-level startup files and actions. Applied to all members via the startup layering model. |
 | `services` | ServicesBlock | no | — | Optional managed services (Docker Compose). When present, services boot before any agent launches. |
 | `pods` | Pod[] | yes | — | At least one pod required. Each pod is a bounded context containing members and pod-local edges. |
 | `edges` | CrossPodEdge[] | no | `[]` | Cross-pod edges connecting members in different pods. Must use fully-qualified `pod.member` IDs. |
+
+### Leaving a tracked guidance file alone
+
+OpenRig merges managed guidance blocks into each runtime's guidance file in the
+seat's working directory. When a repository commits that file (a shared
+`AGENTS.md`, for example), those merges show up as local changes. Choose what
+happens instead:
+
+```yaml
+guidance:
+  tracked_file: redirect   # managed_block (default) | skip | redirect
+```
+
+- `managed_block` (the default) merges into the file as before, tracked or not.
+  OpenRig does not run git for this setting.
+- `skip` leaves a tracked file untouched. The seat then gets no merged guidance
+  from that file; per-seat startup text sent to the pane is unaffected.
+- `redirect` writes the blocks to an untracked file the CLI loads on its own,
+  in addition to the tracked one. If the runtime has no such file, or that file
+  is tracked too, OpenRig skips instead of touching a tracked file.
+
+An untracked or missing guidance file is always merged, whatever the setting.
+`rig down` removes OpenRig's blocks from exactly the file delivery wrote: a
+tracked file under `skip` or `redirect` is never edited, and a redirect file is
+cleaned.
+
+Redirect targets (each verified in the CLI's source unless noted):
+
+| Runtime | Redirect target |
+|---|---|
+| `claude-code` | `CLAUDE.local.md` in the cwd |
+| `qwen` | `<git root>/.qwen/QWEN.local.md` (Qwen Code reads it only inside a repository) |
+| `kilo` | `.kilo/rules/openrig.md` in the cwd |
+| `cline` | `<git root>/.cline/rules/openrig.md` (the cwd outside a repository) |
+| `grok` | `.grok/rules/openrig.md` in the cwd. Grok skips gitignored rule files, so exclude it with `.git/info/exclude` rather than `.gitignore` |
+| `pi` | the seat's own agent directory (`AGENTS.md` under OpenRig's Pi seat state), outside the repository |
+| `omp` | the seat's own agent directory, as for `pi` (the runner sets it as Oh My Pi's `PI_CODING_AGENT_DIR`; whether Oh My Pi loads `AGENTS.md` from it is not verified) |
+| `codex`, `gemini`, `opencode`, `copilot`, `cursor`, `antigravity`, `aider`, `goose` | none: `redirect` behaves as `skip` (Codex's `AGENTS.override.md` hides `AGENTS.md`; the others need configuration, or are not verified) |
+
+A redirect file shows as untracked in `git status` until you ignore it. Add it
+to `.git/info/exclude` (local to your clone) or `.gitignore`; for `grok`, use
+`.git/info/exclude`, because Grok does not load a gitignored rule file.
 
 ### Attaching a permission policy
 

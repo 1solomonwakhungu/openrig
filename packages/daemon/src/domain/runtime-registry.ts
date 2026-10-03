@@ -111,7 +111,7 @@ export interface RuntimeDescriptor {
    *  flags. Absent = per-seat selection is unsupported. claude-code and codex
    *  keep their own selection paths (native-permission-selection.ts). */
   readonly permissionModes?: readonly ResolvedLaunchPosture[];
-  /** Guidance file (relative to the seat cwd) that receives managed blocks. */
+  /** Guidance file that receives managed blocks, relative to guidanceRoot (the seat cwd by default). */
   readonly guidanceFile?: string;
   /** Whether rig teardown strips managed blocks from `guidanceFile`.
    *  Default true when guidanceFile is set. */
@@ -140,6 +140,14 @@ export interface RuntimeDescriptor {
   /** Reap the pane's process tree on stop (the CLI can outlive kill-session).
    *  PID-scoped, snapshot before the kill (process-tree-reaper.ts). Default false. */
   readonly reapProcessTreeOnStop?: boolean;
+  /** guidance.tracked_file redirect: an untracked file the CLI loads automatically,
+   *  in addition to guidanceFile, that receives managed blocks when guidanceFile
+   *  is tracked by git. Absent = redirect is an honest skip for this runtime. */
+  readonly trackedGuidanceRedirect?: (ctx: { cwd: string }) => string | null;
+  /** The directory guidanceFile lives in, for CLIs that read guidance from somewhere
+   *  other than the seat cwd (cline: the git top level). Absent = the seat cwd. Delivery,
+   *  guidance.tracked_file, and teardown all use the resolved path. */
+  readonly guidanceRoot?: (ctx: { cwd: string }) => string;
   /** Registry runtimes that record a permission-axis applied-launch observation
    *  (TuiCliRuntimeSpec.observeLaunch): map the observed launch value back to
    *  the OpenRig posture that emits it, or null for a value this runtime never

@@ -1,3 +1,4 @@
+import { isTrackedGuidancePolicy, type TrackedGuidancePolicy } from "./guidance-target.js";
 import type Database from "better-sqlite3";
 import { resolveActiveOccupantRow } from "./active-occupant.js";
 import { resolve } from "node:path";
@@ -214,6 +215,20 @@ export class RigRepository {
     if (!this.hasRigColumn("claude_managed_block_file")) return;
     this.db.prepare("UPDATE rigs SET claude_managed_block_file = ?, updated_at = ? WHERE id = ?")
       .run(file ?? null, new Date().toISOString(), rigId);
+  }
+
+  /** The rig's guidance.tracked_file policy (migration 501), or null for managed_block. */
+  setRigGuidanceTrackedFile(rigId: string, policy: TrackedGuidancePolicy | null): void {
+    if (!this.hasRigColumn("guidance_tracked_file")) return;
+    this.db.prepare("UPDATE rigs SET guidance_tracked_file = ?, updated_at = ? WHERE id = ?")
+      .run(policy ?? null, new Date().toISOString(), rigId);
+  }
+
+  getRigGuidanceTrackedFile(rigId: string): TrackedGuidancePolicy | null {
+    if (!this.hasRigColumn("guidance_tracked_file")) return null;
+    const row = this.db.prepare("SELECT guidance_tracked_file FROM rigs WHERE id = ?")
+      .get(rigId) as { guidance_tracked_file: string | null } | undefined;
+    return isTrackedGuidancePolicy(row?.guidance_tracked_file) ? row!.guidance_tracked_file as TrackedGuidancePolicy : null;
   }
 
   /** #25 — the rig's selected Claude managed-block file, or null when it uses the default. */

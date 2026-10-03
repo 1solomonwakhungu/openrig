@@ -1,3 +1,4 @@
+import { CLAUDE_TRACKED_GUIDANCE_REDIRECT, guidanceTeardownTargets } from "./guidance-target.js";
 import type Database from "better-sqlite3";
 import type { RigRepository } from "./rig-repository.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -225,19 +226,42 @@ export class RigTeardownOrchestrator {
     if (!targetPath) {
       return;
     }
-    removeManagedBlocksFromFile({
-      exists: (path) => fs.existsSync(path),
-      readFile: (path) => fs.readFileSync(path, "utf-8"),
-      writeFile: (path, content) => fs.writeFileSync(path, content, "utf-8"),
-      deleteFile: (path) => fs.unlinkSync(path),
-    }, targetPath);
+    // guidance.tracked_file: clean exactly what delivery could have written
+    // (a tracked file under skip/redirect is left alone; a redirect alternate is cleaned).
+    const redirectPath = runtime === "claude-code"
+      ? nodePath.join(cwd, CLAUDE_TRACKED_GUIDANCE_REDIRECT)
+      : getRuntimeDescriptor(runtime)?.trackedGuidanceRedirect?.({ cwd }) ?? null;
+    const policy = this.deps.rigRepo.getRigGuidanceTrackedFile(rigId);
+    const paths = guidanceTeardownTargets({ targetPath, policy, redirectPath });
+    // Launches before the runtime declared a guidanceRoot wrote into the seat
+    // cwd; strip their blocks too so they are not orphaned in the repository.
+    const legacyPath = runtime === "claude-code" ? null : legacyGuidanceCleanupFile(runtime, cwd);
+    if (legacyPath) paths.push(...guidanceTeardownTargets({ targetPath: legacyPath, policy }));
+    for (const path of paths) {
+      removeManagedBlocksFromFile({
+        exists: (p) => fs.existsSync(p),
+        readFile: (p) => fs.readFileSync(p, "utf-8"),
+        writeFile: (p, content) => fs.writeFileSync(p, content, "utf-8"),
+        deleteFile: (p) => fs.unlinkSync(p),
+      }, path);
+    }
   }
 }
 
 /** The registry-declared guidance file teardown strips for a runtime, or null
  *  when the runtime has none or opts out (cleanupGuidanceOnTeardown: false). */
-function registeredGuidanceCleanupFile(runtime: string, cwd: string): string | null {
+export function registeredGuidanceCleanupFile(runtime: string, cwd: string): string | null {
   const descriptor = getRuntimeDescriptor(runtime);
   if (!descriptor?.guidanceFile || descriptor.cleanupGuidanceOnTeardown === false) return null;
-  return nodePath.join(cwd, descriptor.guidanceFile);
+  // Symmetric with delivery: the same guidanceRoot the adapter wrote under.
+  return nodePath.join(descriptor.guidanceRoot?.({ cwd }) ?? cwd, descriptor.guidanceFile);
+}
+
+/** The seat-cwd guidance file a runtime wrote before it declared a guidanceRoot,
+ *  or null when the root is the cwd (the regular cleanup already covers it). */
+export function legacyGuidanceCleanupFile(runtime: string, cwd: string): string | null {
+  const descriptor = getRuntimeDescriptor(runtime);
+  if (!descriptor?.guidanceRoot || !descriptor.guidanceFile || descriptor.cleanupGuidanceOnTeardown === false) return null;
+  const legacy = nodePath.join(cwd, descriptor.guidanceFile);
+  return legacy === registeredGuidanceCleanupFile(runtime, cwd) ? null : legacy;
 }
