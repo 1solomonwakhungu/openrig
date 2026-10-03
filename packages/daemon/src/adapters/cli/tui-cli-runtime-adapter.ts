@@ -834,7 +834,11 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   }
 
   private guidancePath(binding: NodeBinding): string | null {
-    return this.descriptor.guidanceFile ? nodePath.join(binding.cwd, this.descriptor.guidanceFile) : null;
+    if (!this.descriptor.guidanceFile) return null;
+    // A CLI that reads its guidance from somewhere other than the seat cwd (cline: the
+    // git top level) declares guidanceRoot so the blocks land where it reads them.
+    const root = this.descriptor.guidanceRoot?.({ cwd: binding.cwd }) ?? binding.cwd;
+    return nodePath.join(root, this.descriptor.guidanceFile);
   }
 
   private skillsDir(binding: NodeBinding): string | null {

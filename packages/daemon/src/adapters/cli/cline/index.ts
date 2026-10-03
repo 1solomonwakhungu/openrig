@@ -56,6 +56,12 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   permissionModes: ["floor", "full_bypass"],
   guidanceFile: CLINE_GUIDANCE_FILE,
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".cline", "skills"),
+  // Cline reads AGENTS.md and its rules from the workspace root: the git top level of the
+  // cwd, else the cwd (cli-v3.0.65 apps/cli/src/utils/helpers.ts resolveWorkspaceRoot, used
+  // for rules at main.ts; AGENTS.md at sdk/packages/shared/src/storage/paths.ts
+  // resolveRulesConfigSearchPaths). A seat in a repo subdirectory therefore gets its blocks
+  // at the repo root, where cline actually reads them.
+  guidanceRoot: ({ cwd }) => guidanceTargetDeps.toplevel(cwd) ?? cwd,
   // guidance.tracked_file redirect: a distinct rule file in .cline/rules, which cline loads
   // wholesale from the git top level (the cwd outside a repository), keyed by file name.
   trackedGuidanceRedirect: ({ cwd }) => nodePath.join(guidanceTargetDeps.toplevel(cwd) ?? cwd, ".cline", "rules", "openrig.md"),

@@ -138,9 +138,14 @@ cannot be tied to one seat by the TUI's pid. The match is therefore guarded:
 
 ## Guidance and skills
 
-- Guidance: managed blocks merge into `AGENTS.md` in the seat cwd, the first
-  workspace rules file Cline reads. `rig-role` content is delivered per seat
-  instead, and teardown strips the managed blocks.
+- Guidance: managed blocks merge into `AGENTS.md` at Cline's workspace root:
+  the git top level of the seat cwd, or the cwd outside a repository. That is
+  where Cline looks for `AGENTS.md` and its rules (cli-v3.0.65
+  `resolveWorkspaceRoot`), so a seat whose cwd is a repository subdirectory
+  gets its blocks at the repository root. `rig-role` content is delivered per
+  seat instead, and teardown strips the managed blocks from the same file.
+  Verified from source; which file a live session loads is not observable
+  without signing in.
 - Skills: projected into `<cwd>/.cline/skills/<skill>/`, one of Cline's
   workspace skill locations (alongside `.clinerules/skills` and `.agents/skills`).
 

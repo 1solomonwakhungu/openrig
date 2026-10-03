@@ -244,8 +244,9 @@ export class RigTeardownOrchestrator {
 
 /** The registry-declared guidance file teardown strips for a runtime, or null
  *  when the runtime has none or opts out (cleanupGuidanceOnTeardown: false). */
-function registeredGuidanceCleanupFile(runtime: string, cwd: string): string | null {
+export function registeredGuidanceCleanupFile(runtime: string, cwd: string): string | null {
   const descriptor = getRuntimeDescriptor(runtime);
   if (!descriptor?.guidanceFile || descriptor.cleanupGuidanceOnTeardown === false) return null;
-  return nodePath.join(cwd, descriptor.guidanceFile);
+  // Symmetric with delivery: the same guidanceRoot the adapter wrote under.
+  return nodePath.join(descriptor.guidanceRoot?.({ cwd }) ?? cwd, descriptor.guidanceFile);
 }
