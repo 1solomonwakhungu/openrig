@@ -156,8 +156,8 @@ describe("opencode / kilo (seat session database, v1.18.33 schema)", () => {
 });
 
 describe("registered readers", () => {
-  it("cline, opencode, kilo, gemini, and qwen declare readTranscript; antigravity does not (its store is unverified)", () => {
-    for (const id of ["cline", "opencode", "kilo", "gemini", "qwen"]) expect(typeof getRuntimeDescriptor(id)?.readTranscript, id).toBe("function");
+  it("cline, opencode, kilo, gemini, qwen, and goose declare readTranscript; antigravity does not (its store is unverified)", () => {
+    for (const id of ["cline", "opencode", "kilo", "gemini", "qwen", "goose"]) expect(typeof getRuntimeDescriptor(id)?.readTranscript, id).toBe("function");
     expect(getRuntimeDescriptor("antigravity")?.readTranscript).toBeUndefined();
   });
 
