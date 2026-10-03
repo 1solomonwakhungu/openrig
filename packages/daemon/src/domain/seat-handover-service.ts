@@ -442,9 +442,8 @@ export class SeatHandoverService {
       ?? "floor"; // R2 terminal: absence = the locked floor on the continuity edge too
     let permissionOverride: ReturnType<typeof permissionBindingOverride>;
     try {
-      const selection = new NativePermissionStore(this.db).read(node.id);
-      if (selection && selection.runtime !== node.runtime) throw new Error("Seat runtime changed since permission selection; explicitly select again or inherit.");
-      permissionOverride = permissionBindingOverride(selection);
+      // A seat on a fallback runtime carries its selection per overrideFor.
+      permissionOverride = new NativePermissionStore(this.db).overrideFor(node.id, node.runtime ?? "").override;
     } catch (error) { return { ok: false, code: "successor_create_failed", message: `Permission selection: ${(error as Error).message}`,
       guidance: "No successor was created. Inspect the seat permission selection before a separately authorized retry." }; }
     // The successor must carry its own generation from its first byte. This reservation writes no

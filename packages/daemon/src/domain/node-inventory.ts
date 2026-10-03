@@ -31,6 +31,7 @@ interface InventoryRow {
   pod_namespace: string | null;
   role: string | null;
   runtime: string | null;
+  declared_runtime: string | null;
   model: string | null;
   codex_config_profile: string | null;
   agent_ref: string | null;
@@ -462,6 +463,11 @@ function runInventoryRowQuery(db: Database.Database, whereClause: string, orderC
   const codexConfigProfileSelect = hasCodexConfigProfile
     ? "n.codex_config_profile"
     : "NULL";
+  // Runtime fallback (migration 502); NULL on older DBs.
+  const declaredRuntimeSelect = db.prepare("PRAGMA table_info(nodes)").all()
+    .some((row) => (row as { name?: string }).name === "declared_runtime")
+    ? "n.declared_runtime"
+    : "NULL";
   const stmt = db.prepare(`
     SELECT
       n.id as node_id,
@@ -474,6 +480,7 @@ function runInventoryRowQuery(db: Database.Database, whereClause: string, orderC
       n.runtime,
       n.model,
       ${codexConfigProfileSelect} as codex_config_profile,
+      ${declaredRuntimeSelect} as declared_runtime,
       n.agent_ref,
       n.profile,
       n.cwd,
@@ -586,6 +593,7 @@ function buildInventoryEntry(
     attachmentType: (row.binding_attachment_type as NodeInventoryEntry["attachmentType"]) ?? null,
     nodeKind: deriveNodeKind(row.runtime),
     runtime: row.runtime,
+    declaredRuntime: row.declared_runtime ?? null,
     sessionStatus: row.session_status,
     startupStatus: row.startup_status as NodeInventoryEntry["startupStatus"],
     restoreOutcome,

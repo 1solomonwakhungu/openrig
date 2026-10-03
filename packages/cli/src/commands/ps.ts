@@ -53,6 +53,8 @@ interface NodeEntry {
   canonicalSessionName: string | null;
   nodeKind: "agent" | "infrastructure";
   runtime: string | null;
+  /** Set when a fallback runtime (`runtime`) runs instead of the spec's runtime. */
+  declaredRuntime?: string | null;
   model: string | null;
   sessionStatus: string | null;
   startupStatus: "pending" | "ready" | "attention_required" | "failed" | null;
@@ -641,6 +643,7 @@ export function compactNodeProjection(nodes: NodeEntry[]): Array<Record<string, 
       // runtime is complete fleet-wide; model is a DECLARATION, absent on 13 of
       // 15 claude-code seats — see formatDeclaredModel for the render rule.
       runtime: n.runtime ?? null,
+      ...(n.declaredRuntime ? { declaredRuntime: n.declaredRuntime } : {}),
       model: n.model ?? null,
       // lifecycle + session/startup state.
       sessionStatus: n.sessionStatus,
@@ -1227,7 +1230,7 @@ async function handleNodes(
         pod,
         member,
         n.canonicalSessionName ?? "—",
-        n.runtime ?? "—",
+        formatRuntime(n) ?? "—",
         formatDeclaredModel(n.model),
         n.sessionStatus ?? "—",
         n.startupStatus ?? "—",
@@ -1243,6 +1246,8 @@ async function handleNodes(
       ));
     }
   }
+  // Runtime fallback is said out loud, in the compact and full views alike.
+  for (const notice of fallbackRuntimeNotices(humanList as NodeEntry[])) console.log(notice);
   if (humanTruncated) {
     const remaining = filtered.length - HUMAN_NODE_BUDGET;
     console.log(`... and ${remaining} more node${remaining === 1 ? "" : "s"} (truncated at ${HUMAN_NODE_BUDGET}).`);
@@ -1251,6 +1256,19 @@ async function handleNodes(
     const remaining = filtered.length - (limit ?? 0);
     console.log(`... and ${remaining} more node${remaining === 1 ? "" : "s"} (--limit ${limit}).`);
   }
+}
+
+/** RUNTIME cell: a fallback runtime carries a trailing "*" (explained below the table). */
+export function formatRuntime(n: Pick<NodeEntry, "runtime" | "declaredRuntime">): string | null {
+  if (!n.runtime) return null;
+  return n.declaredRuntime && n.declaredRuntime !== n.runtime ? `${n.runtime}*` : n.runtime;
+}
+
+/** One line per seat running on a fallback runtime instead of its declared one. */
+export function fallbackRuntimeNotices(nodes: Array<Pick<NodeEntry, "runtime" | "declaredRuntime" | "canonicalSessionName" | "logicalId">>): string[] {
+  return nodes
+    .filter((n) => n.declaredRuntime && n.runtime && n.declaredRuntime !== n.runtime)
+    .map((n) => `! ${n.canonicalSessionName ?? n.logicalId} runs on fallback runtime "${n.runtime}" (declared "${n.declaredRuntime}")`);
 }
 
 function formatActivity(n: Pick<NodeEntry, "agentActivity" | "activityState">): string {

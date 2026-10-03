@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import nodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFullTestDb, createTestApp, mockTmuxAdapter } from "./helpers/test-app.js";
 import { SeatLifecycleService } from "../src/domain/seat-lifecycle-service.js";
@@ -9,7 +12,7 @@ const member = { id: "pi", agent_ref: "local:agent", profile: "default", runtime
 const closers: Array<() => void> = [];
 afterEach(() => { for (const close of closers.splice(0)) close(); });
 
-async function failedAdd() {
+async function failedAdd(addMember: Record<string, unknown> = member) {
   const db = createFullTestDb();
   closers.push(() => db.close());
   const files: Record<string, string> = {
@@ -35,7 +38,7 @@ async function failedAdd() {
   const rig = setup.rigRepo.createRig("first-start");
   const seeded = await setup.rigExpansionService.expand({ rigId: rig.id, pod: { id: "dev", label: "Dev", members: [{ id: "sibling", agentRef: "builtin:terminal", profile: "none", runtime: "terminal", cwd: root }], edges: [] } });
   expect(seeded.ok).toBe(true);
-  const added = await setup.podInstantiator.addMemberToPod(rig.id, "dev", member, root);
+  const added = await setup.podInstantiator.addMemberToPod(rig.id, "dev", addMember, root);
   expect(added).toMatchObject({ ok: true, result: { node: { status: "failed", logicalId: "dev.pi" } } });
   const node = setup.rigRepo.getRig(rig.id)!.nodes.find(n => n.logicalId === "dev.pi")!;
   expect(db.prepare("SELECT * FROM node_startup_context WHERE node_id = ?").get(node.id)).toBeUndefined();
@@ -50,7 +53,7 @@ async function failedAdd() {
   const clean = await lifecycle.cleanSeat({ seatRef: "dev-pi@first-start", reason: "Projection failed before native launch; shell has exited" });
   expect(clean.ok).toBe(true);
   projectionBlocked = false;
-  const request = (retryMember: Record<string, unknown> = member) => setup.app.request(`/api/rigs/${rig.id}/nodes/dev.pi/launch`, {
+  const request = (retryMember: Record<string, unknown> = addMember) => setup.app.request(`/api/rigs/${rig.id}/nodes/dev.pi/launch`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ retryStartupFrom: { member: retryMember, rigRoot: root } }),
   });
@@ -58,6 +61,26 @@ async function failedAdd() {
 }
 
 describe("explicit first-start retry after projection failure", () => {
+  it("compares the declared runtime when the seat last recorded a fallback runtime", async () => {
+    // A PATH holding a pi executable, so the declared runtime is tried first.
+    const bin = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-retry-bin-"));
+    fs.writeFileSync(nodePath.join(bin, "pi"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    vi.stubEnv("PATH", bin);
+    try {
+      const f = await failedAdd({ ...member, fallback_runtimes: ["codex"] });
+      // An interrupted fallback chain can leave the fallback recorded as the running runtime.
+      f.rigRepo.setNodeRunningRuntime(f.node.id, "codex");
+      const res = await f.request();
+      const body = await res.json();
+      expect({ status: res.status, body }, JSON.stringify(body)).toMatchObject({ status: 201, body: { ok: true, status: "launched" } });
+      expect(f.adapter.launchHarness).toHaveBeenCalledTimes(1);
+      expect(f.rigRepo.getRig(f.rig.id)!.nodes.find(n => n.id === f.node.id)).toMatchObject({ runtime: "pi", declaredRuntime: null });
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
   it("reprojects and delivers required startup on the same node without touching its sibling or history", async () => {
     const f = await failedAdd();
     const before = f.rigRepo.getRig(f.rig.id)!;

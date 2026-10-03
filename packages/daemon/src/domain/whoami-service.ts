@@ -20,6 +20,8 @@ export interface WhoamiResult {
     memberLabel: string | null;
     sessionName: string | null;
     runtime: string;
+    /** Set when a fallback runtime (`runtime`) runs instead of the spec's runtime. */
+    declaredRuntime?: string;
     cwd: string | null;
     agentRef: string | null;
     profile: string | null;
@@ -96,6 +98,7 @@ export class WhoamiAmbiguousError extends Error {
 }
 
 interface NodeRow {
+  declared_runtime?: string | null;
   id: string;
   rig_id: string;
   logical_id: string;
@@ -242,6 +245,7 @@ export class WhoamiService {
       memberLabel: nodeRow.label,
       sessionName: currentSessionName,
       runtime: nodeRow.runtime ?? "unknown",
+      ...(nodeRow.declared_runtime ? { declaredRuntime: nodeRow.declared_runtime } : {}),
       cwd: nodeRow.cwd,
       agentRef: nodeRow.agent_ref,
       profile: nodeRow.profile,

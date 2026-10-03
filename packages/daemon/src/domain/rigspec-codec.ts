@@ -159,6 +159,7 @@ export class RigSpecCodec {
         if (m.codexConfigProfile) member["codex_config_profile"] = m.codexConfigProfile;
         if (m.model) member["model"] = m.model;
         if (m.readinessTimeoutMs !== undefined) member["readiness_timeout_ms"] = m.readinessTimeoutMs;
+        if (m.fallbackRuntimes?.length) member["fallback_runtimes"] = [...m.fallbackRuntimes];
         // OPR.0.4.6.FAC1: role round-trips through spec serialization.
         if (m.role) member["role"] = m.role;
         // OPR.0.4.8.3 Seam B: per-seat permission_policy ref round-trips through spec serialization.

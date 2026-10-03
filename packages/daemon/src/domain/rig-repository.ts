@@ -125,6 +125,8 @@ interface NodeOptions {
   codexConfigProfile?: string;
   /** Per-seat launch readiness window in ms (rig spec readiness_timeout_ms). */
   readinessTimeoutMs?: number;
+  /** The member's fallback_runtimes, in order. */
+  fallbackRuntimes?: string[];
   /** OPR.0.4.8.3 Seam B: per-seat permission_policy REF (builtin:<name> or spec-relative path). */
   permissionPolicy?: string;
   cwd?: string;
@@ -453,10 +455,28 @@ export class RigRepository {
       this.db.prepare("UPDATE nodes SET readiness_timeout_ms = ? WHERE id = ?")
         .run(opts.readinessTimeoutMs, id);
     }
+    if (opts?.fallbackRuntimes?.length && this.hasNodeColumn("fallback_runtimes")) {
+      this.db.prepare("UPDATE nodes SET fallback_runtimes = ? WHERE id = ?")
+        .run(JSON.stringify(opts.fallbackRuntimes), id);
+    }
 
     return this.rowToNode(
       this.db.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as NodeRow
     );
+  }
+
+  /** Runtime fallback: record that `runtime` actually runs this seat. nodes.runtime
+   *  moves to it (restore, pane identity, and inventory read nodes.runtime), and
+   *  declared_runtime keeps the spec's runtime; running the declared runtime again
+   *  clears declared_runtime. No-op on pre-502 DBs. */
+  setNodeRunningRuntime(nodeId: string, runtime: string): void {
+    if (!this.hasNodeColumn("declared_runtime")) return;
+    const row = this.db.prepare("SELECT runtime, declared_runtime FROM nodes WHERE id = ?")
+      .get(nodeId) as { runtime: string | null; declared_runtime: string | null } | undefined;
+    if (!row) return;
+    const declared = row.declared_runtime ?? row.runtime;
+    this.db.prepare("UPDATE nodes SET runtime = ?, declared_runtime = ? WHERE id = ?")
+      .run(runtime, runtime === declared ? null : declared, nodeId);
   }
 
   /** S5 (OPR.0.5.4.7) — the first supported nodes.model write (the inventory was insert-only;
@@ -683,6 +703,8 @@ export class RigRepository {
       model: row.model,
       codexConfigProfile: row.codex_config_profile ?? null,
       readinessTimeoutMs: row.readiness_timeout_ms ?? null,
+      declaredRuntime: row.declared_runtime ?? null,
+      fallbackRuntimes: parseRuntimeList(row.fallback_runtimes),
       permissionPolicy: row.permission_policy ?? null,
       cwd: row.cwd,
       surfaceHint: row.surface_hint ?? null,
@@ -772,6 +794,8 @@ interface NodeRow {
   model: string | null;
   codex_config_profile?: string | null;
   readiness_timeout_ms?: number | null;
+  declared_runtime?: string | null;
+  fallback_runtimes?: string | null;
   permission_policy?: string | null;
   cwd: string | null;
   surface_hint: string | null;
@@ -826,4 +850,14 @@ interface RigServicesRow {
   latest_receipt_json: string | null;
   created_at: string;
   updated_at: string;
+}
+
+function parseRuntimeList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
 }

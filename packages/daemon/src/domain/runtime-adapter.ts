@@ -83,6 +83,8 @@ export const ATTENTION_REQUIRED_READINESS_CODES = new Set([
   // A CLI began updating the operator's install through a package manager
   // OpenRig does not contain (gemini/qwen): the operator should check it.
   "self_update",
+  // The runtime's CLI binary is not installed (or not on PATH).
+  "runtime_missing",
 ]);
 
 export function isAttentionRequiredReadinessCode(code: string | undefined): boolean {
@@ -98,7 +100,10 @@ export type HarnessLaunchResult =
   // `evidence` carries the last-N pane lines for `attention_required` outcomes
   // so the failure can flow honest evidence through to RestoreNodeResult's
   // attentionEvidence field. Omitted for non-attention recoveries.
-  | { ok: false; error: string; recovery?: HarnessLaunchRecovery; evidence?: string };
+  // `attentionCode` names why an attention_required launch stopped (a readiness
+  // code such as login_required, or runtime_missing for an absent binary), so
+  // callers such as runtime fallback can act on it without parsing text.
+  | { ok: false; error: string; recovery?: HarnessLaunchRecovery; evidence?: string; attentionCode?: string };
 
 // -- Shared concrete-hint resolver --
 

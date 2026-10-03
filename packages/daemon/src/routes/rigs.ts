@@ -167,6 +167,12 @@ function normalizeExpansionPodFragment(raw: Record<string, unknown>): ExpansionP
           : "readiness_timeout_ms" in m
             ? { readinessTimeoutMs: m["readiness_timeout_ms"] as number }
             : {}),
+        // Same for fallback_runtimes: carried raw, validated by the canonical RigSpec validator.
+        ...("fallbackRuntimes" in m
+          ? { fallbackRuntimes: m["fallbackRuntimes"] }
+          : "fallback_runtimes" in m
+            ? { fallbackRuntimes: m["fallback_runtimes"] }
+            : {}),
         // R2 (4ac243c3): PRESERVE raw presence — a present-invalid value (null, number,
         // object, …) must reach the canonical RigSpec validator as-is and reject there;
         // only a truly ABSENT key stays absent. No route-local validation, no coercion.
