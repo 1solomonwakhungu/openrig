@@ -183,14 +183,18 @@ export function copilotAuthStatus(ctx: RuntimeAuthContext): RuntimeAuthStatus {
 
 // ── Cursor CLI ──────────────────────────────────────────────────────────────
 
-/** CURSOR_API_KEY, else `cursor-agent status` under --probe (the documented
- *  account check), else "unknown". */
+/** CURSOR_API_KEY, else `cursor-agent --disable-auto-update status` under
+ *  --probe (the documented account check; without the flag the CLI's
+ *  background updater can reinstall and re-link the owner's install about 2 s
+ *  after start), else "unknown". Verified live on 2026.10.01: a signed-out
+ *  account prints "Not logged in" and exits 0. */
 export async function cursorAuthStatus(ctx: RuntimeAuthContext): Promise<RuntimeAuthStatus> {
   if (firstSetEnv(ctx, ["CURSOR_API_KEY"])) return signedIn("env CURSOR_API_KEY");
   const hint = "run `cursor-agent login`, or set CURSOR_API_KEY";
   if (ctx.probe) {
-    const result = await ctx.probe.exec(["cursor-agent", "status"], 10_000);
+    const result = await ctx.probe.exec(["cursor-agent", "--disable-auto-update", "status"], 10_000);
     if (result) {
+      // Checked first: "Not logged in" also contains "logged in".
       if (/not (logged|signed) in|login required/i.test(result.stdout)) {
         return { state: "missing", source: "cursor-agent status", hint };
       }

@@ -150,14 +150,16 @@ describe("cursor", () => {
     const run = (code: number, stdout: string) => cursorAuthStatus(ctx({ probe: { exec: async () => ({ code, stdout }) } }));
     expect((await run(0, "Logged in as someone@example.com")).state).toBe("signed_in");
     expect((await run(1, "Not logged in")).state).toBe("missing");
+    // Live output of cursor-agent 2026.10.01 for a signed-out account: exit 0.
+    expect((await run(0, "Not logged in\n")).state).toBe("missing");
     expect((await run(0, "")).state).toBe("unknown");
     expect((await cursorAuthStatus(ctx({ probe: { exec: async () => null } }))).state).toBe("unknown");
   });
 
-  it("the probe command is exactly the documented status command", async () => {
+  it("the probe command is the documented status command with self-update off", async () => {
     const exec = vi.fn(async () => ({ code: 0, stdout: "Logged in" }));
     await cursorAuthStatus(ctx({ probe: { exec } }));
-    expect(exec).toHaveBeenCalledWith(["cursor-agent", "status"], expect.any(Number));
+    expect(exec).toHaveBeenCalledWith(["cursor-agent", "--disable-auto-update", "status"], expect.any(Number));
   });
 });
 
