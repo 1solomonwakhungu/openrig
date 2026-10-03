@@ -43,6 +43,8 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
     return found.ok ? found.sessionId : null;
   },
   supportsFork: false,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   guidanceFile: CLINE_GUIDANCE_FILE,
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".cline", "skills"),
   // The pane runs `node .../cline/bin/cline` (script path), which spawns the

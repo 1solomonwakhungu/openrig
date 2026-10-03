@@ -100,6 +100,12 @@ export interface RuntimeDescriptor {
     deps: ResumeTokenCaptureDeps,
   ) => Promise<RuntimeTokenCaptureResult> | RuntimeTokenCaptureResult;
   readonly supportsFork: boolean;
+  /** Launch postures an operator may select for one seat with
+   *  `rig seat set-permissions` (applied on the seat's next launch, resume, or
+   *  handover). Declare only postures the adapter maps to distinct launch
+   *  flags. Absent = per-seat selection is unsupported. claude-code and codex
+   *  keep their own selection paths (native-permission-selection.ts). */
+  readonly permissionModes?: readonly ResolvedLaunchPosture[];
   /** Guidance file (relative to the seat cwd) that receives managed blocks. */
   readonly guidanceFile?: string;
   /** Whether rig teardown strips managed blocks from `guidanceFile`.
@@ -280,6 +286,10 @@ function add(descriptor: RuntimeDescriptor): void {
   }
   if (descriptor.resumeType && !descriptor.validateResumeToken) {
     throw new Error(`Runtime "${descriptor.id}" declares resumeType without validateResumeToken`);
+  }
+  const badMode = descriptor.permissionModes?.find((mode) => mode !== "floor" && mode !== "full_bypass");
+  if (badMode !== undefined || (descriptor.permissionModes && descriptor.kind !== "agent")) {
+    throw new Error(`Runtime "${descriptor.id}" declares invalid permissionModes (agent runtimes only; floor or full_bypass)`);
   }
   registry.set(descriptor.id, descriptor);
 }

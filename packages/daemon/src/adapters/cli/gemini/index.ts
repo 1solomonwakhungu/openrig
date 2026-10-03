@@ -52,6 +52,8 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   // Maps the recorded approval mode back to a posture for permission drift.
   permissionPostureFor: geminiFamilyPermissionPosture(GEMINI_DIALECT),
   supportsFork: false,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   // Gemini reads GEMINI.md by default, not AGENTS.md.
   guidanceFile: "GEMINI.md",
   // Project skills; read because managed launches pass --skip-trust.

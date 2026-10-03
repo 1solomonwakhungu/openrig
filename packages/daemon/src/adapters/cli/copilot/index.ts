@@ -81,6 +81,8 @@ export const COPILOT_DESCRIPTOR: RuntimeDescriptor = {
     });
   },
   supportsFork: false,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   guidanceFile: COPILOT_GUIDANCE_FILE,
   skillsDir: ({ cwd }) => nodePath.join(cwd, ...COPILOT_SKILLS_SUBDIR),
   // Standalone installs run as `copilot`; the npm install shows `node`, so

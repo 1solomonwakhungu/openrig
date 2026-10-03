@@ -1,7 +1,18 @@
-/** Native permission choices are future-launch settings, not work posture. */
+import { getRuntimeDescriptor } from "./runtime-registry.js";
+
+/** Native permission choices are future-launch settings, not work posture.
+ *  `runtime` is claude-code, codex, or a registry runtime that declares
+ *  `permissionModes`. */
 export interface NativePermissionSelection {
-  runtime: "codex" | "claude-code";
+  runtime: string;
   mode: string;
+}
+
+/** Postures a registry runtime accepts per seat. Empty for claude-code and
+ *  codex (their own paths below) and for runtimes that declare none. */
+export function registryPermissionModes(runtime: string): readonly string[] {
+  if (runtime === "codex" || runtime === "claude-code") return [];
+  return getRuntimeDescriptor(runtime)?.permissionModes ?? [];
 }
 
 /** Missing managed-launch wiring must never fall back to daemon-local help. */
@@ -15,7 +26,14 @@ export function validateNativePermissionSelection(
   supportedClaudeModes: readonly string[] | null = null,
 ): NativePermissionSelection {
   if (runtime !== "codex" && runtime !== "claude-code") {
-    throw new Error(`Per-seat permission mode is unsupported for runtime '${runtime}'. Pi resource trust is separate.`);
+    const modes = registryPermissionModes(runtime);
+    if (modes.length === 0) {
+      throw new Error(`Per-seat permission mode is unsupported for runtime '${runtime}'. Pi resource trust is separate.`);
+    }
+    if (!modes.includes(mode)) {
+      throw new Error(`${runtime} permission mode must be ${modes.join(" or ")} (or inherit to clear the selection).`);
+    }
+    return { runtime, mode };
   }
   if (mode === "floor" || mode === "full_bypass") return { runtime, mode };
   if (runtime === "codex") throw new Error("Codex permission mode must be floor or full_bypass (or inherit to clear the selection).");

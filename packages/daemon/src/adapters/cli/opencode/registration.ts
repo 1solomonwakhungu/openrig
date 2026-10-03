@@ -49,6 +49,8 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
     // Each seat has its own session database, so a parent session from
     // another seat is not visible to `--fork`.
     supportsFork: false,
+    // Each posture maps to distinct launch flags, so a seat may select either.
+    permissionModes: ["floor", "full_bypass"],
     guidanceFile: OPENCODE_FAMILY_GUIDANCE_FILE,
     skillsDir: ({ cwd }) => opencodeFamilySkillsDir(variant, cwd),
     paneCommands: variant.paneCommands,

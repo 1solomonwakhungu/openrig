@@ -318,9 +318,18 @@ Registry-driven sites:
   mark). The TUI already falls back to the id prefix in tables and the neutral
   `?` mark in topology, so it needs no per-runtime entry.
 
+Per-seat permission selection (`native-permission-selection.ts`,
+`rig seat set-permissions`) is registry-driven for CLI runtimes: a descriptor
+that declares `permissionModes` (every registered CLI runtime declares
+`["floor", "full_bypass"]`) accepts those postures per seat, stored in
+`node_permission_selections` (migration 100 dropped the old claude/codex
+`runtime` CHECK) and applied as `binding.launchPosture` on the next launch,
+restore resume, or handover. Permission drift uses the selected posture as the
+expected one before the policy posture. Claude native modes and Codex keep their
+own paths; Pi and runtimes without `permissionModes` refuse.
+
 Deliberately claude/codex-only sites keep their own logic and degrade to the
-generic tmux path for any other runtime: native permission selection
-(`native-permission-selection.ts`), native process lineage
+generic tmux path for any other runtime: native process lineage
 (`native-process-lineage.ts`), the native resume probe
 (`native-resume-probe.ts`, which returns `inconclusive` /
 `unsupported_runtime`), provider telemetry and the context monitor (claude,

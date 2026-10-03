@@ -82,6 +82,8 @@ export const GROK_DESCRIPTOR: RuntimeDescriptor = {
   // not apply.
   captureIsSessionScoped: true,
   supportsFork: true,
+  // Each posture maps to distinct launch flags, so a seat may select either.
+  permissionModes: ["floor", "full_bypass"],
   // grok reads AGENTS.md (also AGENT.md, CLAUDE.md) from cwd up to the repo root.
   guidanceFile: "AGENTS.md",
   // Project skills (loaded once the folder is trusted).
