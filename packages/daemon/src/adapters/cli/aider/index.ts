@@ -17,6 +17,7 @@ import {
 import { AIDER_ERROR_PATTERNS, AIDER_GATE_PATTERNS, AIDER_READY_PATTERNS } from "./patterns.js";
 import { readAiderUsage } from "./usage.js";
 import { aiderAuthStatus } from "../auth-status.js";
+import { AIDER_MODEL_SHAPE } from "../model-shapes.js";
 
 export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   id: AIDER_RUNTIME_ID,
@@ -26,6 +27,7 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   installHint: AIDER_INSTALL_HINT,
   authStatus: aiderAuthStatus,
   docsPath: "docs/reference/runtimes/aider.md",
+  modelShape: AIDER_MODEL_SHAPE,
   resumeType: AIDER_RESUME_TYPE,
   validateResumeToken: validateAiderChatHistoryToken,
   // The history file minted for the seat's latest fresh launch (launch.json

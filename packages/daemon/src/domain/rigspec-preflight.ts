@@ -129,6 +129,7 @@ import { resolveNodeConfig, type ResolutionContext } from "./profile-resolver.js
 import { getOpenRigInstallCwdError, resolveLaunchCwd } from "./cwd-resolution.js";
 import nodePath from "node:path";
 import { validateClaudeActivityHookDelivery, CLAUDE_ACTIVITY_HOOKS_RESOURCE_TYPE } from "./claude-activity-hooks.js";
+import { modelShapeAdvisories } from "./model-shape-advisory.js";
 import {
   resolvePermissionPolicyAttachment,
   resolvePermissionPolicyRefValue,
@@ -412,6 +413,9 @@ export async function preflightValidatedSpec(rigSpec: PodRigSpec, preflightCtx: 
   // SEMANTIC FENCE: this order is PRESENTATION ONLY. Any consumer that treats the first warning as
   // higher-priority is a FINDING, not an ordering input — the pin freezes presentation, never semantics.
   warnings.push(...permissionPolicyDiscoveryWarnings(rigSpec, preflightCtx));
+  // Feature 7: warn-only model-name advisory, appended last so every earlier
+  // warning keeps its position. Never an error.
+  warnings.push(...modelShapeAdvisories(rigSpec));
   return { ready: errors.length === 0, errors, warnings };
 }
 

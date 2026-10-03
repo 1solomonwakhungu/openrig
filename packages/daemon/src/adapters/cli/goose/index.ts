@@ -15,6 +15,7 @@ import type { AppliedLaunchObservation } from "../../../domain/permission-drift.
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
 import { gooseAuthStatus } from "../auth-status.js";
+import { GOOSE_MODEL_SHAPE } from "../model-shapes.js";
 import {
   GOOSE_BINARY, GOOSE_ERROR_PATTERNS, GOOSE_FLOOR_MODE, GOOSE_FULL_BYPASS_MODE, GOOSE_GATE_PATTERNS, GOOSE_GUIDANCE_FILE,
   GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS, GOOSE_RESUME_TYPE, GOOSE_RUNTIME_ID, GOOSE_SKILLS_SUBDIR,
@@ -63,6 +64,7 @@ export const GOOSE_DESCRIPTOR: RuntimeDescriptor = {
   installHint: "brew install block-goose-cli (or download a release from https://github.com/aaif-goose/goose/releases)",
   authStatus: gooseAuthStatus,
   docsPath: "docs/reference/runtimes/goose.md",
+  modelShape: GOOSE_MODEL_SHAPE,
   verify: async ({ exec }) => {
     try {
       return verifyGooseVersionOutput(await exec(`${GOOSE_BINARY} --version`));
