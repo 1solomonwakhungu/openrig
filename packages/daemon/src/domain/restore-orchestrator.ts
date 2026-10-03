@@ -15,6 +15,7 @@ import type { TmuxAdapter } from "../adapters/tmux.js";
 import type { ClaudeResumeAdapter } from "../adapters/claude-resume.js";
 import type { CodexResumeAdapter } from "../adapters/codex-resume.js";
 import type { PiResumeAdapter } from "../adapters/pi-resume.js";
+import type { OmpResumeAdapter } from "../adapters/omp-resume.js";
 import type { TranscriptStore } from "./transcript-store.js";
 import type { RuntimeResumeAdapter } from "./runtime-adapter.js";
 import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor, runtimeSeatStateDir } from "./runtime-registry.js";
@@ -142,6 +143,8 @@ interface RestoreOrchestratorDeps {
   /** OPR.0.4.6.PI1 FR-6 — optional so older wiring/tests keep working; a Pi
    *  resume without the adapter falls through to the honest no-adapter error. */
   piResume?: PiResumeAdapter;
+  /** OMP's resume adapter (the Pi runner with OMP's CLI); optional like piResume. */
+  ompResume?: OmpResumeAdapter;
   /** Registered runtimes' resume adapters (adapters/cli/index.ts), consulted
    *  after the built-in claude/codex/pi adapters. */
   resumeAdapters?: readonly RuntimeResumeAdapter[];
@@ -167,6 +170,7 @@ export class RestoreOrchestrator {
   private claudeResume: ClaudeResumeAdapter;
   private codexResume: CodexResumeAdapter;
   private piResume: PiResumeAdapter | null;
+  private ompResume: OmpResumeAdapter | null;
   private registeredResumeAdapters: readonly RuntimeResumeAdapter[];
   private runtimeStateRoot: string | undefined;
   private homedir: string | undefined;
@@ -209,10 +213,11 @@ export class RestoreOrchestrator {
     this.claudeResume = deps.claudeResume;
     this.codexResume = deps.codexResume;
     this.piResume = deps.piResume ?? null;
+    this.ompResume = deps.ompResume ?? null;
     this.registeredResumeAdapters = deps.resumeAdapters ?? [];
     this.runtimeStateRoot = deps.runtimeStateRoot;
     this.homedir = deps.homedir;
-    const runtimes = new Set(["claude-code", "codex", "pi"]);
+    const runtimes = new Set(["claude-code", "codex", "pi", "omp"]);
     for (const adapter of this.registeredResumeAdapters) {
       if (runtimes.has(adapter.runtime)) {
         throw new Error(`RestoreOrchestrator: duplicate resume adapter for runtime "${adapter.runtime}"`);
@@ -1695,7 +1700,7 @@ export class RestoreOrchestrator {
   > {
     const launchGeneration = this.sessionRegistry.currentOccupantTenure(nodeId)?.generationUuid;
     const adapters = [
-      ...builtinResumeAdapters(this.claudeResume, this.codexResume, this.piResume ?? null),
+      ...builtinResumeAdapters(this.claudeResume, this.codexResume, this.piResume ?? null, this.ompResume),
       ...(this.registeredResumeAdapters ?? []),
     ];
     const adapter = adapters.find((candidate) => candidate.canResume(resumeType, resumeToken));
@@ -1732,6 +1737,7 @@ export class RestoreOrchestrator {
       }
       return { kind: "failed", message: result.message };
     }
+
 
     return { kind: "failed", message: "No resume adapter available for this runtime/token combination." };
   }
@@ -1928,6 +1934,7 @@ function builtinResumeAdapters(
   claude: ClaudeResumeAdapter,
   codex: CodexResumeAdapter,
   pi: PiResumeAdapter | null,
+  omp: OmpResumeAdapter | null = null,
 ): RuntimeResumeAdapter[] {
   const adapters: RuntimeResumeAdapter[] = [
     {
@@ -1946,6 +1953,13 @@ function builtinResumeAdapters(
       runtime: "pi",
       canResume: (type, token) => pi.canResume(type, token),
       resume: (r) => pi.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.model, r.resolvedPosture),
+    });
+  }
+  if (omp) {
+    adapters.push({
+      runtime: "omp",
+      canResume: (type, token) => omp.canResume(type, token),
+      resume: (r) => omp.resume(r.sessionName, r.resumeType, r.resumeToken, r.cwd, r.model, r.resolvedPosture),
     });
   }
   return adapters;

@@ -438,7 +438,10 @@ export function createTestApp(
     // and pass it here explicitly.
     permissionDriftObserver: opts?.permissionDriftObserver ?? { diagnose: () => null },
     runtimeStateRoot,
-    runtimeAdapters: opts?.wireRuntimeAdapters ? adapters : undefined,
+    // Caller-supplied adapters always reach route handlers; the always-ready
+    // instantiator stubs only when explicitly wired, since they would make
+    // restore routes report resumes.
+    runtimeAdapters: opts?.wireRuntimeAdapters ? adapters : opts?.adapters as Record<string, RuntimeAdapter> | undefined,
   });
   return {
     runtimeStateRoot,

@@ -20,6 +20,7 @@ export interface BuiltinRuntimeAdapters {
   claudeCode: RuntimeAdapter;
   codex: RuntimeAdapter;
   pi: RuntimeAdapter;
+  omp: RuntimeAdapter;
   stub: RuntimeAdapter;
   terminal: RuntimeAdapter;
 }
@@ -36,6 +37,7 @@ export function buildRuntimeAdapters(
     "claude-code": builtins.claudeCode,
     codex: builtins.codex,
     pi: builtins.pi,
+    omp: builtins.omp,
     stub: builtins.stub,
     terminal: builtins.terminal,
   };
