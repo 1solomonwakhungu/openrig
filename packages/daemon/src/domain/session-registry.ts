@@ -310,6 +310,16 @@ export class SessionRegistry {
     }
   }
 
+  /** Test durable identity without returning the stored credential or changing
+   *  its provenance (upstream #40). An equal protected token needs no
+   *  lower-ranked write. */
+  resumeTokenMatches(sessionId: string, type: string, token: string): boolean {
+    if (!type.trim() || !token.trim()) return false;
+    return Boolean(this.db.prepare(
+      "SELECT 1 FROM sessions WHERE id = ? AND resume_type = ? AND resume_token = ?",
+    ).get(sessionId, type, token));
+  }
+
   // OPR.0.4.0.22 — resume-token provenance precedence. A deliberate
   // operator/attested set is authoritative and OUTRANKS the runtime hook, the
   // adoption-boundary capture, and the pane scrape (hook > adoption > scrape).
