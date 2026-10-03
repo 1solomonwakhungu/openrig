@@ -1,0 +1,6 @@
+{"uuid": "u1", "parentUuid": null, "sessionId": "s1", "timestamp": "2026-10-03T03:00:10.000Z", "type": "user", "message": {"role": "user", "parts": [{"text": "Add a health route."}]}}
+{"uuid": "a1", "parentUuid": "u1", "sessionId": "s1", "timestamp": "2026-10-03T03:00:20.000Z", "type": "assistant", "model": "qwen3-coder-plus", "message": {"role": "model", "parts": [{"text": "private reasoning", "thought": true}, {"text": "Adding GET /health."}, {"functionCall": {"name": "write_file", "args": {"file_path": "src/health.ts"}}}]}, "usageMetadata": {"promptTokenCount": 4100, "candidatesTokenCount": 210}}
+{"uuid": "t1", "parentUuid": "a1", "sessionId": "s1", "timestamp": "2026-10-03T03:00:25.000Z", "type": "tool_result", "message": {"role": "user", "parts": [{"functionResponse": {"id": "c1", "name": "write_file", "response": {"output": "Wrote src/health.ts"}}}]}}
+{"uuid": "y1", "parentUuid": "t1", "sessionId": "s1", "timestamp": "2026-10-03T03:00:26.000Z", "type": "system", "subtype": "chat_compression", "systemPayload": {}}
+{"uuid": "a2", "parentUuid": "y1", "sessionId": "s1", "timestamp": "2026-10-03T03:00:40.000Z", "type": "assistant", "model": "qwen3-coder-plus", "message": {"role": "model", "parts": [{"text": "Done."}]}}
+{"uuid":"torn"

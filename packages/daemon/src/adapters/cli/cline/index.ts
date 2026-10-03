@@ -17,6 +17,7 @@ import {
 import { checkClineResumeTarget, clineLaunchEnv, clineSessionsDir, findClineSessionForLaunch } from "./sessions.js";
 import { CLINE_ERROR_PATTERNS, CLINE_GATE_PATTERNS, CLINE_READY_PATTERNS } from "./patterns.js";
 import { readClineUsage } from "./usage.js";
+import { readClineTranscript } from "./transcript.js";
 import { clineSeatHubEnv, prepareClineSeatHub, recordClineVersion, type ClineHubFs, type ClineSeatHubDeps } from "./hub.js";
 import { clineAuthStatus } from "../auth-status.js";
 import { CLINE_MODEL_SHAPE } from "../model-shapes.js";
@@ -55,6 +56,16 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
     fs: createNodeFsOps(),
     sessionsDir: clineSessionsDir(clineLaunchEnv(), homedir),
     sessionId: resumeToken,
+  }),
+  // Native transcript (feature 5): cline draws on the alternate screen, so
+  // `rig transcript` reads the session's messages record instead of the pane.
+  readTranscript: ({ cwd, launchStartedAt, homedir, resumeToken, since }) => readClineTranscript({
+    fs: createNodeFsOps(),
+    sessionsDir: clineSessionsDir(clineLaunchEnv(), homedir),
+    resumeToken,
+    cwd,
+    launchStartedAt,
+    since,
   }),
   supportsFork: false,
   // Each posture maps to distinct launch flags, so a seat may select either.

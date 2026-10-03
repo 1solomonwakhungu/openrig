@@ -418,3 +418,107 @@ describe("transcript routes", () => {
     expect(body.error).toContain("ambiguous");
   });
 });
+
+// Feature 5: the CLI's own transcript record for runtimes whose pane is thin.
+describe("transcript routes: native transcript source", () => {
+  let db: Database.Database;
+  let rigRepo: RigRepository;
+  let sessionRegistry: SessionRegistry;
+  let tmpDir: string;
+  let unregister: (() => void) | null = null;
+  const FAKE_KEY = "sk-test-FAKEKEY0123456789abcdefFAKE";
+  const reads: Array<{ resumeToken: string | null; cwd: string | null }> = [];
+
+  beforeEach(async () => {
+    db = setupDb();
+    rigRepo = new RigRepository(db);
+    sessionRegistry = new SessionRegistry(db);
+    tmpDir = mkdtempSync(join(tmpdir(), "transcript-native-"));
+    reads.length = 0;
+    const { registerRuntimeDescriptor } = await import("../src/domain/runtime-registry.js");
+    unregister = registerRuntimeDescriptor({
+      id: "native-fixture", displayName: "Native fixture", kind: "agent", supportsFork: false,
+      readTranscript: ({ resumeToken, cwd }) => {
+        reads.push({ resumeToken, cwd });
+        return {
+          source: "fixture_record",
+          entries: [
+            { role: "user", text: "deploy it", at: "2026-10-03T03:00:00.000Z" },
+            { role: "assistant", text: `using key ${FAKE_KEY}\nsecond line` },
+            { role: "tool", text: "deploy() ok" },
+          ],
+        };
+      },
+    });
+  });
+
+  afterEach(() => {
+    unregister?.();
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function seed(runtime: string, paneContent: string | null) {
+    const rig = rigRepo.createRig("my-rig");
+    const node = rigRepo.addNode(rig.id, "dev-impl", { role: "worker", runtime, cwd: "/work/api" });
+    const session = sessionRegistry.registerSession(node.id, "dev-impl@my-rig");
+    sessionRegistry.updateStatus(session.id, "running");
+    db.prepare("UPDATE sessions SET resume_token = ? WHERE id = ?").run("tok-1", session.id);
+    const store = new TranscriptStore({ transcriptsRoot: tmpDir, enabled: true });
+    if (paneContent !== null) {
+      store.ensureTranscriptDir("my-rig");
+      writeFileSync(store.getTranscriptPath("my-rig", "dev-impl@my-rig"), paneContent);
+    }
+    return createApp({ db, rigRepo, sessionRegistry, transcriptStore: store });
+  }
+
+  it("auto prefers the native record, renders entries, and redacts it (tail)", async () => {
+    const app = seed("native-fixture", "thin pane\n");
+    const res = await app.request("/api/transcripts/dev-impl@my-rig/tail?lines=10");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ source: "native", nativeSource: "fixture_record", nativeEntries: 3, nativeTruncated: false });
+    expect(body.content).toBe(
+      "[2026-10-03T03:00:00.000Z] user ▸ deploy it\nassistant ▸ using key [REDACTED]\nsecond line\ntool ▸ deploy() ok",
+    );
+    expect(JSON.stringify(body)).not.toContain("FAKEKEY");
+    expect(reads).toEqual([{ resumeToken: "tok-1", cwd: "/work/api" }]);
+  });
+
+  it("tail counts rendered lines; grep and full read the same redacted text", async () => {
+    const app = seed("native-fixture", null);
+    expect((await (await app.request("/api/transcripts/dev-impl@my-rig/tail?lines=2")).json()).content).toBe("second line\ntool ▸ deploy() ok");
+    const grep = await (await app.request("/api/transcripts/dev-impl@my-rig/grep?pattern=key")).json();
+    expect(grep).toMatchObject({ source: "native", matches: ["assistant ▸ using key [REDACTED]"] });
+    const full = await (await app.request("/api/transcripts/dev-impl@my-rig/full")).json();
+    expect(full.source).toBe("native");
+    expect(full.content).not.toContain("FAKEKEY");
+  });
+
+  it("source=pane keeps the pane capture, unchanged", async () => {
+    const app = seed("native-fixture", "pane line\n");
+    const body = await (await app.request("/api/transcripts/dev-impl@my-rig/tail?lines=10&source=pane")).json();
+    expect(body.source).toBe("pane");
+    expect(body.content).toContain("pane line");
+    expect(reads).toEqual([]);
+  });
+
+  it("a runtime without a native reader keeps the pane path; source=native says so", async () => {
+    const app = seed("claude-code", "claude line\n");
+    const auto = await (await app.request("/api/transcripts/dev-impl@my-rig/tail?lines=10")).json();
+    expect(auto).toMatchObject({ source: "pane" });
+    expect(auto.content).toContain("claude line");
+    const res = await app.request("/api/transcripts/dev-impl@my-rig/tail?source=native");
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toMatch(/No native transcript for 'dev-impl@my-rig' \(claude-code\)/);
+  });
+
+  it("rejects an unknown source", async () => {
+    const app = seed("native-fixture", null);
+    for (const route of ["tail", "grep?pattern=x&", "full"]) {
+      const sep = route.includes("?") ? "" : "?";
+      const res = await app.request(`/api/transcripts/dev-impl@my-rig/${route}${sep}source=screen`);
+      expect(res.status, route).toBe(400);
+    }
+  });
+});

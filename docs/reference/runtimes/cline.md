@@ -175,8 +175,17 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
 - A launch where `cline` is not on the pane's PATH fails fast with
   `attention_required`.
 - Cline draws its TUI on the terminal alternate screen (verified), which leaves
-  no tmux scrollback, so `rig transcript` for a cline seat stays thin. Launch
-  readiness reads the whole alternate screen once cline holds the foreground.
+  no tmux scrollback, so the pane capture of a cline seat stays thin.
+  `rig transcript` therefore reads cline's own session record
+  (`<sessions dir>/<id>/<id>.messages.json`) by default: user and assistant
+  text, tool calls (name and a shortened input), and tool results, with
+  thinking left out and the text redacted. The session is the seat's resume
+  token, else the one session its current launch created. `--source pane`
+  still shows the pane capture. Cline's TUI library honors
+  `OTUI_USE_ALTERNATE_SCREEN=false` (a main-screen mode); OpenRig does not set
+  it, because whether it leaves usable scrollback could not be checked
+  without a signed-in conversation. Launch readiness reads the whole alternate
+  screen once cline holds the foreground.
   First paint took over 7 seconds in the verification run; the launch waits up
   to 30.
 - The busy (model working) footer has not been verified with a live provider.

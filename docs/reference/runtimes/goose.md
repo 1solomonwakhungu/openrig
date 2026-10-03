@@ -119,8 +119,7 @@ reports nothing.
 
 ## Transcript
 
-Once the native-transcript route lands (#42), `rig transcript` reads the
-seat's messages from goose's sessions database (`messages` table, goose
+`rig transcript` reads the seat's messages from goose's sessions database (`messages` table, goose
 1.53.0 format): user and assistant text, tool requests (name and a shortened
 argument list), and tool results or errors. Thinking and messages goose marks
 as not user-visible are left out, and the text is redacted. `--source pane`

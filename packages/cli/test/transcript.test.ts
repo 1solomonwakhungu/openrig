@@ -53,13 +53,19 @@ function runningDeps(port: number): StatusDeps {
 }
 
 describe("Transcript CLI", () => {
+  const requests: string[] = [];
   let server: http.Server;
   let port: number;
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       const url = decodeURIComponent(req.url ?? "");
-      if (url.startsWith("/api/transcripts/dev-impl@my-rig/tail")) {
+      if (url.startsWith("/api/transcripts/dev-cline@my-rig/tail")) {
+        requests.push(url);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ session: "dev-cline@my-rig", lines: 10, content: "user ▸ hi\nassistant ▸ hello", source: "native", nativeSource: "cline_messages_json", nativeEntries: 2, nativeTruncated: true }));
+      } else if (url.startsWith("/api/transcripts/dev-impl@my-rig/tail")) {
+        requests.push(url);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ session: "dev-impl@my-rig", lines: 10, content: "line1\nline2\nline3\n" }));
       } else if (url.startsWith("/api/transcripts/dev-impl@thick-rig/tail")) {
@@ -154,5 +160,39 @@ describe("Transcript CLI", () => {
     const output = logs.join("\n");
     // grep mode: should show matched lines, not tail content
     expect(output).toContain("decision made");
+  });
+
+  it("--source native and pane pass through; the default request is unchanged", async () => {
+    requests.length = 0;
+    await captureLogs(async () => {
+      await makeCmd().parseAsync(["node", "rig", "transcript", "dev-impl@my-rig", "--tail", "10"]);
+      await makeCmd().parseAsync(["node", "rig", "transcript", "dev-impl@my-rig", "--tail", "10", "--source", "pane"]);
+      await makeCmd().parseAsync(["node", "rig", "transcript", "dev-impl@my-rig", "--tail", "10", "--source", "auto"]);
+    });
+    expect(requests).toEqual([
+      "/api/transcripts/dev-impl@my-rig/tail?lines=10",
+      "/api/transcripts/dev-impl@my-rig/tail?lines=10&source=pane",
+      "/api/transcripts/dev-impl@my-rig/tail?lines=10",
+    ]);
+  });
+
+  it("a native transcript prints its content and a stderr note, not the thin-renderer hint", async () => {
+    const { logs } = await captureLogs(async () => {
+      await makeCmd().parseAsync(["node", "rig", "transcript", "dev-cline@my-rig", "--source", "native"]);
+    });
+    const output = logs.join("\n");
+    expect(output).toContain("assistant ▸ hello");
+    expect(output).toContain("note: from the CLI's own session record (cline_messages_json), not the pane capture. Older entries were left out.");
+    expect(output).not.toContain("fullscreen renderer");
+  });
+
+  it("rejects an unknown --source before calling the daemon", async () => {
+    requests.length = 0;
+    const { logs, exitCode } = await captureLogs(async () => {
+      await makeCmd().parseAsync(["node", "rig", "transcript", "dev-impl@my-rig", "--source", "screen"]);
+    });
+    expect(logs.join("\n")).toContain("--source must be auto, pane, or native");
+    expect(exitCode).toBe(1);
+    expect(requests).toEqual([]);
   });
 });

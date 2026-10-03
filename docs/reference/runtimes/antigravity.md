@@ -73,6 +73,14 @@ Usage: not reported. Antigravity CLI is closed source with no verified on-disk u
 
 Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. No usage is read, so seats never alert.
 
+## Transcript
+
+No native transcript: agy keeps each conversation in a
+`conversations/<uuid>.db` file whose format could not be read or verified
+(agy authenticates through the OS keyring, so it was never run here).
+`rig transcript` shows the pane capture, which is thin because agy draws on
+the alternate screen.
+
 ## Known limits
 
 - The trust prompt has no known pre-trust flag; a seat in an untrusted project stops at `trust_gate` until someone answers it once.

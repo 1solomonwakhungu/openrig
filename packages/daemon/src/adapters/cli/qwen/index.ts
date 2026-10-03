@@ -17,6 +17,7 @@ import {
   captureQwenForkChild, checkQwenResumeTarget, findQwenSessionFile, type SessionStoreContext,
 } from "../gemini-family/session-store.js";
 import { readQwenUsage } from "../gemini-family/usage.js";
+import { readQwenTranscript, readSessionTranscript } from "../gemini-family/transcript.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify, readSessionText } from "../gemini-family/runtime.js";
 import { qwenAuthStatus } from "../auth-status.js";
 import { QWEN_MODEL_SHAPE } from "../model-shapes.js";
@@ -96,6 +97,13 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   readUsage: ({ resumeToken, cwd, homedir }) => {
     if (!resumeToken || !cwd) return null;
     return readQwenUsage(readSessionText((ctx) => findQwenSessionFile(ctx, resumeToken.trim()), { cwd, homedir }));
+  },
+  // Native transcript (feature 5): the TUI redraws its frames in place, so the
+  // pane capture is a poor record; `rig transcript` reads the same session
+  // file as usage.
+  readTranscript: ({ resumeToken, cwd, homedir, since }) => {
+    if (!resumeToken || !cwd) return null;
+    return readSessionTranscript("qwen", (ctx) => findQwenSessionFile(ctx, resumeToken.trim()), { cwd, homedir }, (text) => readQwenTranscript(text, since));
   },
   supportsFork: true,
   // Each posture maps to distinct launch flags, so a seat may select either.

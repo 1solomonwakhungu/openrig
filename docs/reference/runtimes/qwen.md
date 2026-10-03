@@ -111,6 +111,14 @@ Usage (`rig ps`): `usageMetadata` from the conversation file, plus `contextWindo
 
 Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. qwen reports its context window (`contextWindowSize`), so qwen seats get context-pressure alerts. qwen also compacts on its own (`chatCompression` settings).
 
+## Transcript
+
+`rig transcript` reads the seat's conversation file (`<id>.jsonl`, format of
+qwen 0.24.7): user and assistant text, function calls (name and a shortened
+argument list), and function responses. Thought parts and system records are
+left out, and the text is redacted. `--source pane` shows the pane capture
+instead.
+
 ## Known limits
 
 - Tracked guidance file: with `guidance: { tracked_file: redirect }` on the rig, a git-tracked `QWEN.md` is left alone and OpenRig's blocks go to `<git root>/.qwen/QWEN.local.md` (see rig-spec.md, "Leaving a tracked guidance file alone").

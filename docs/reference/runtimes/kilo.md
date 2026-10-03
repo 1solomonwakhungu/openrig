@@ -50,6 +50,14 @@ Usage (`rig ps`): token, cache, reasoning, and cost totals from the seat databas
 
 Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. kilo records no context window, so seats never alert. kilo compacts a session itself near the model's limit (the opencode `compaction.auto` behavior).
 
+## Transcript
+
+`rig transcript` reads the session's messages from the seat's own database
+(`message` and `part` tables, the opencode 1.18.33 schema Kilo shares): user and assistant text and tool
+calls with their output or error. Reasoning and synthetic text are left out,
+and the text is redacted. The session is the seat's resume token, else its
+current session. `--source pane` shows the pane capture instead.
+
 ## Known limits
 
 - Tracked guidance file: with `guidance: { tracked_file: redirect }` on the rig, a git-tracked `AGENTS.md` is left alone and OpenRig's blocks go to `.kilo/rules/openrig.md` (see rig-spec.md).

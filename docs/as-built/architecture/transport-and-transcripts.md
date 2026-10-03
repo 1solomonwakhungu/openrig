@@ -168,7 +168,17 @@ work; the only net-new is the CLI transport branch.
 3. `TranscriptStore` owns path convention, ANSI stripping on read, boundary
    markers, `readTail`, `grep`.
 4. `rig transcript <session> --tail N / --grep "pattern"` provides
-   agent-facing access.
+   agent-facing access. For runtimes whose full-screen TUI leaves the pane
+   capture thin, the descriptor's `readTranscript` hook (F1) reads the CLI's
+   own session record instead (feature 5, `domain/native-transcript.ts`): the
+   routes' `source` query (`auto` default, `pane`, `native`) picks it, entries
+   render as `[time] role ▸ text` lines, and the text always passes transcript
+   redaction. Reads are bounded on the request path: session files are
+   stat-checked and read asynchronously only up to 32 MiB (over the cap the
+   read returns nothing and logs why; `source=pane` still works), database
+   readers fetch only the newest 5000 parts in SQL, and the F1 runner's
+   deadline applies. Pane responses now carry `source: "pane"`; their content is
+   unchanged.
 5. On restore: a boundary marker is written before re-launch; pipe-pane
    reconnects to the same file (append). (Restore-side detail in
    `lifecycle-snapshot-restore.md` §3.)

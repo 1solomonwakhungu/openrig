@@ -132,6 +132,14 @@ Usage (`rig ps`): per-reply `tokens` from the session file (input, output, cache
 
 Context-pressure alerts use the same `context.pressure` health detector and operator thresholds as claude and codex (`health.context_pressure.warning_percent` and `critical_percent`, default 95 and 99). They need a context percentage, which exists only when the CLI reports its context window. OpenRig never compacts a CLI seat: it does not type into a live CLI. gemini records no context window, so gemini seats show the context in use but no percentage and never alert. gemini compresses its own chat history at a configurable share of the window (`contextPercentageThreshold`).
 
+## Transcript
+
+`rig transcript` reads the seat's session file (the same JSONL as resume and
+usage, format of gemini 0.61.0): user and model text, tool calls (name and a
+shortened argument list) with their results, and info, warning, and error
+notices. Thoughts are left out, rewinds are applied, and the text is
+redacted. `--source pane` shows the pane capture instead.
+
 ## Known limits
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../gemini`), never from the process name alone.
