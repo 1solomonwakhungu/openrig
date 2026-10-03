@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "session_id": "1790702191676_lovnf",
+  "source": "cli",
+  "pid": 21424,
+  "started_at": "2026-09-29T17:16:31.680Z",
+  "status": "idle",
+  "interactive": true,
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-5",
+  "cwd": "/work/project",
+  "metadata": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5",
+    "interactive": true,
+    "mode": "act",
+    "title": "say hi",
+    "totalCost": 0.0482,
+    "aggregatedAgentsCost": 0.0101,
+    "usage": { "inputTokens": 1200, "outputTokens": 340, "cacheReadTokens": 8000, "cacheWriteTokens": 2100, "totalCost": 0.0381 },
+    "aggregateUsage": { "inputTokens": 1500, "outputTokens": 410, "cacheReadTokens": 9000, "cacheWriteTokens": 2500, "totalCost": 0.0482 }
+  }
+}

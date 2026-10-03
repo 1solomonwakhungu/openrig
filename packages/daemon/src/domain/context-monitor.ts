@@ -8,6 +8,56 @@ import {
 } from "./runtime-adapter.js";
 import type { UsageSamplesStore, ProviderWindowSampleInput } from "./usage-samples-store.js";
 import type { ContextUsage } from "./types.js";
+import os from "node:os";
+import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor } from "./runtime-registry.js";
+import { runDescriptorUsageRead } from "./runtime-capabilities.js";
+import { seatStateDirFor } from "./runtime-capture.js";
+import type { RuntimeUsageReading, RuntimeUsageStore } from "./runtime-usage-store.js";
+
+/** Feature 1: what the registry-runtime usage pass needs (attachRegistryUsage). */
+export interface RegistryUsageDeps {
+  /** <OPENRIG_HOME>/state, the root of every seat's state dir. */
+  stateRoot: string;
+  usageStore: RuntimeUsageStore;
+  homedir?: string;
+  now?: () => Date;
+}
+
+interface RegistrySeat {
+  node_id: string;
+  session_name: string;
+  runtime: string;
+  resume_token: string | null;
+  cwd: string | null;
+}
+
+/** A reading's context, as a context_usage row. Percentages only when the CLI
+ *  reports its context window; sampledAt is when OpenRig read it. */
+export function registryContextUsage(
+  reading: RuntimeUsageReading,
+  seat: { sessionName: string; resumeToken: string | null },
+  readAt: string,
+): ContextUsage | null {
+  if (reading.contextUsedTokens === undefined) return null;
+  const window = reading.contextWindowTokens;
+  const used = window && window > 0 ? Math.min(100, Math.max(0, Math.round((reading.contextUsedTokens / window) * 100))) : null;
+  return {
+    availability: "known",
+    reason: null,
+    source: reading.source,
+    usedPercentage: used,
+    remainingPercentage: used === null ? null : 100 - used,
+    contextWindowSize: window ?? null,
+    totalInputTokens: reading.contextUsedTokens,
+    totalOutputTokens: reading.outputTokens ?? null,
+    currentUsage: null,
+    transcriptPath: null,
+    sessionId: seat.resumeToken,
+    sessionName: seat.sessionName,
+    sampledAt: readAt,
+    fresh: true,
+  };
+}
 
 /** Default polling interval: 30 seconds. */
 export const DEFAULT_POLL_INTERVAL_MS = 30_000;
@@ -51,6 +101,7 @@ export class ContextMonitor {
   private providerWindowSampler: (() => ProviderWindowSampleInput[]) | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private activePoll: Promise<void> | null = null;
+  private registryUsage: RegistryUsageDeps | null = null;
 
   constructor(
     db: Database.Database,
@@ -71,6 +122,11 @@ export class ContextMonitor {
     if (claudeContextProvisioner && !this.readinessCheckers["claude-code"]) {
       this.readinessCheckers["claude-code"] = claudeContextProvisioner;
     }
+  }
+
+  /** Feature 1: also poll registry CLI runtimes that declare readUsage. */
+  attachRegistryUsage(deps: RegistryUsageDeps): void {
+    this.registryUsage = deps;
   }
 
   /** Discover active managed Claude sessions and poll their sidecar files. */
@@ -127,6 +183,70 @@ export class ContextMonitor {
       await this.maybeAutoCompact(session, observed);
     }
     this.drainProviderWindowSamples();
+    await this.pollRegistryUsage();
+  }
+
+  /** Feature 1: read each running registry seat's usage through its
+   *  descriptor's readUsage hook (never throws) and persist it: the full
+   *  reading to runtime_usage, and its context to context_usage plus the
+   *  usage-samples series when the CLI reports one. */
+  private async pollRegistryUsage(): Promise<void> {
+    const deps = this.registryUsage;
+    if (!deps) return;
+    let seats: RegistrySeat[];
+    try {
+      seats = this.getRegistrySeats();
+    } catch {
+      return;
+    }
+    for (const seat of seats) {
+      const descriptor = getRuntimeDescriptor(seat.runtime);
+      if (!descriptor?.readUsage) continue;
+      try {
+        const reading = await runDescriptorUsageRead(descriptor, {
+          sessionName: seat.session_name,
+          cwd: seat.cwd,
+          seatStateDir: seatStateDirFor(deps.stateRoot, seat.runtime, seat.session_name),
+          homedir: deps.homedir ?? os.homedir(),
+          resumeToken: seat.resume_token,
+        }) as RuntimeUsageReading | null;
+        if (!reading) continue;
+        const readAt = (deps.now ?? (() => new Date()))().toISOString();
+        deps.usageStore.persist({ nodeId: seat.node_id, sessionName: seat.session_name, runtime: seat.runtime, reading, readAt });
+        const context = registryContextUsage(reading, { sessionName: seat.session_name, resumeToken: seat.resume_token }, readAt);
+        if (!context) continue;
+        this.store.persist(seat.node_id, context);
+        if (this.usageSamples) {
+          try {
+            this.usageSamples.appendContextSample({
+              nodeId: seat.node_id,
+              seatSession: seat.session_name,
+              source: context.source,
+              sampledAt: readAt,
+              totalInputTokens: context.totalInputTokens,
+              totalOutputTokens: context.totalOutputTokens,
+              usedPercentage: context.usedPercentage,
+            }, readAt);
+          } catch { /* series write must never break polling */ }
+        }
+      } catch {
+        // One seat's bad record must not stop the others.
+      }
+    }
+  }
+
+  /** Running seats of registry (non built-in) runtimes, latest session per node. */
+  private getRegistrySeats(): RegistrySeat[] {
+    const builtins = [...BUILTIN_RUNTIME_IDS];
+    return this.db.prepare(`
+      SELECT n.id AS node_id, s.session_name, n.runtime, s.resume_token, n.cwd
+      FROM nodes n
+      JOIN sessions s ON s.node_id = n.id
+        AND s.id = (SELECT s2.id FROM sessions s2 WHERE s2.node_id = n.id ORDER BY s2.id DESC LIMIT 1)
+      WHERE s.status = 'running'
+        AND n.runtime IS NOT NULL
+        AND n.runtime NOT IN (${builtins.map(() => "?").join(",")})
+    `).all(...builtins) as RegistrySeat[];
   }
 
   /** 51-08 A1: drain the provider-window supplier once per tick, advance-only.

@@ -65,6 +65,10 @@ Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or
 - **Source-derived, not behavior-proven:** the variable name and the log line `Auto-update disabled via environment variable %s` are in the agy 1.1.27 binary. The accepted value was not observed live (the TUI is not launched, see below); `1` is the conventional truthy value. The first live launch should confirm that log line in `~/.gemini/antigravity-cli/cli.log`.
 - Correction: an earlier revision of this page said no update switch existed. That came from a strings search anchored on word boundaries, which missed variable names that the Go binary stores glued to the next string (`AGY_CLI_DISABLE_AUTO_UPDATE` among them). agy 1.1.27 has no update flag (`--noUpdate`, `--no-update`, and similar are rejected as undefined), and the CLI reference documents no update setting; the environment variable is the switch.
 
+## Usage
+
+Usage: not reported. Antigravity CLI is closed source with no verified on-disk usage record, so the runtime declares no `readUsage` (CTX and COST stay unknown).
+
 ## Known limits
 
 - The trust prompt has no known pre-trust flag; a seat in an untrusted project stops at `trust_gate` until someone answers it once.

@@ -123,6 +123,10 @@ flag).
 - Skills are projected into `<cwd>/.agents/skills/`, one of Copilot's project
   skill locations.
 
+## Usage
+
+Usage: not reported. Copilot CLI ships as a native binary and its on-disk usage format is not verified, so the runtime declares no `readUsage` (CTX and COST stay unknown).
+
 ## Known limits
 
 - The npm install runs under `node`, so the pane command alone does not

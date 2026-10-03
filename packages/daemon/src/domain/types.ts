@@ -670,6 +670,9 @@ export interface NodeInventoryEntry {
   startupCompletedAt: string | null;
   agentActivity?: AgentActivity;
   contextUsage?: ContextUsage;
+  /** Feature 1: tokens, cost, and model a registry CLI runtime reports for the
+   *  current session (absent when the runtime has no reading). */
+  runtimeUsage?: import("./runtime-usage-store.js").RuntimeUsageRecord;
   /** Health of the daemon-owned transcript capture for this seat. */
   transcriptIngest?: import("./transcript-store.js").TranscriptIngestHealth & {
     runtime: string | null;
@@ -1410,7 +1413,8 @@ export type ContextUnknownReason =
 export interface ContextUsage {
   availability: ContextAvailability;
   reason: ContextUnknownReason | null;
-  source: "claude_statusline_json" | "codex_token_count_jsonl" | null;
+  /** claude/codex sources, or a registry runtime's readUsage source id (e.g. "cline_session_json"). */
+  source: "claude_statusline_json" | "codex_token_count_jsonl" | (string & {}) | null;
   usedPercentage: number | null;
   remainingPercentage: number | null;
   contextWindowSize: number | null;

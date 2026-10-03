@@ -18,6 +18,7 @@ import { findLatestUsableSnapshot, findLatestUsableSnapshotsForAllRigs } from ".
 import { resolveNodeWorkspace } from "./workspace/workspace-resolver.js";
 import { deriveCanonicalSessionName } from "./session-name.js";
 import { buildNativeResumeCommand, buildCodexResumeCore } from "./native-resume-probe.js";
+import { RuntimeUsageStore } from "./runtime-usage-store.js";
 
 // -- Row types for SQL results --
 
@@ -913,6 +914,11 @@ export function getNodeInventoryWithContext(
   }));
 
   const contextMap = contextUsageStore.getForNodes(contextEntries);
+  // Feature 1: registry runtimes' token/cost readings for the current session.
+  let usageMap = new Map<string, import("./runtime-usage-store.js").RuntimeUsageRecord>();
+  try {
+    usageMap = new RuntimeUsageStore(db).getForNodes(contextEntries);
+  } catch { /* usage is optional; the node list must still render */ }
 
   return entries.map((e) => {
     const nodeId = nodeIdByLogicalId.get(e.logicalId) ?? "";
@@ -928,9 +934,11 @@ export function getNodeInventoryWithContext(
           runtime: e.runtime,
         }
       : undefined;
+    const runtimeUsage = usageMap.get(nodeId);
     return {
       ...e,
       contextUsage: { ...usage, currentUsage: null },
+      ...(runtimeUsage ? { runtimeUsage } : {}),
       ...(transcriptIngest ? { transcriptIngest } : {}),
     };
   });

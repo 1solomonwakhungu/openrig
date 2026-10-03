@@ -103,6 +103,10 @@ Qwen Code checks npm on launch and, unless `general.enableAutoUpdate` is `false`
 - Every launch also sets `NPM_CONFIG_PREFIX` and `npm_config_prefix` to the seat's own `<OPENRIG_HOME>/state/qwen/<seat>/npm-global`, so a global npm self-update (if re-enabled) lands there and never in the operator's prefix; `NPM_CONFIG_CACHE` points at the seat's own `npm-cache`, so `~/.npm` is untouched.
 - Project-local installs only print an update message. pnpm, yarn, and bun global installs and the standalone installer are outside the npm prefix; the defaults layer above keeps them from updating. If your own settings re-enable updates, set `general.enableAutoUpdate` back to `false` in `~/.qwen/settings.json`: OpenRig only detects such an update ("Attempting to automatically update now..." reports `attention_required`, code `self_update`, with pane evidence) and cannot prevent it once Qwen Code has started the install.
 
+## Usage
+
+Usage (`rig ps`): `usageMetadata` from the conversation file, plus `contextWindowSize`, so CTX shows a percentage; qwen records no cost.
+
 ## Known limits
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../qwen`), never from the process name alone.

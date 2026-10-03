@@ -124,6 +124,10 @@ Gemini CLI checks npm on launch and, unless `general.enableAutoUpdate` is `false
 
 The `gemini` launcher is a small parent process that ignores SIGHUP and SIGTERM and waits for the real CLI child, which does not finish its SIGHUP cleanup once the pane is gone. Both processes outlive `tmux kill-session` (verified live). OpenRig therefore reaps the pane's process tree when it stops a `gemini` seat: it records the pane's processes before killing the session, sends SIGTERM to that process group, and SIGKILL to anything left. Stopping never relies on typing Ctrl-C into the pane.
 
+## Usage
+
+Usage (`rig ps`): per-reply `tokens` from the session file (input, output, cached, thoughts) and the latest reply's context; gemini records no cost and no context window.
+
 ## Known limits
 
 - The pane process is `node`, so seat identity comes from the process arguments (`.../gemini`), never from the process name alone.

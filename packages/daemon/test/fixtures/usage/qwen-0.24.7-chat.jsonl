@@ -1,0 +1,5 @@
+{"uuid":"u1","parentUuid":null,"sessionId":"s1","timestamp":"2026-09-29T12:00:10.000Z","type":"user","message":{"role":"user","parts":[{"text":"hello"}]}}
+{"uuid":"a1","parentUuid":"u1","sessionId":"s1","timestamp":"2026-09-29T12:00:20.000Z","type":"assistant","model":"qwen3-coder-plus","contextWindowSize":1000000,"usageMetadata":{"promptTokenCount":4100,"candidatesTokenCount":210,"cachedContentTokenCount":3000,"thoughtsTokenCount":0,"totalTokenCount":4310}}
+{"uuid":"t1","parentUuid":"a1","sessionId":"s1","timestamp":"2026-09-29T12:00:25.000Z","type":"tool_result"}
+{"uuid":"a2","parentUuid":"t1","sessionId":"s1","timestamp":"2026-09-29T12:00:40.000Z","type":"assistant","model":"qwen3-coder-plus","contextWindowSize":1000000,"usageMetadata":{"promptTokenCount":4600,"candidatesTokenCount":95,"cachedContentTokenCount":4100,"thoughtsTokenCount":15,"totalTokenCount":4710}}
+{"uuid":"a3","parentUuid":"a2","sessionId":"s1","timestamp":"2026-09-29T12:00:41.000Z","type":"assist

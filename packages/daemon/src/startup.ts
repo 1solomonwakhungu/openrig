@@ -39,6 +39,7 @@ import { PiResumeAdapter } from "./adapters/pi-resume.js";
 import { createNodeFsOps } from "./adapters/node-fs-ops.js";
 import { listNativeProcesses } from "./domain/native-process-lineage.js";
 import { createRuntimeStopHook } from "./domain/process-tree-reaper.js";
+import { RuntimeUsageStore } from "./domain/runtime-usage-store.js";
 import { buildRuntimeAdapters, createCliRuntimeAdapters } from "./adapters/runtime-adapter-map.js";
 import { RigSpecExporter } from "./domain/rigspec-exporter.js";
 import { PodRepository } from "./domain/pod-repository.js";
@@ -2311,6 +2312,11 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
       legacyProviderUsageDirectory(OPENRIG_HOME),
     ),
   ));
+  // Feature 1: registry CLI runtimes report usage through their readUsage hook.
+  contextMonitor.attachRegistryUsage({
+    stateRoot: nodePath.join(OPENRIG_HOME, "state"),
+    usageStore: new RuntimeUsageStore(db),
+  });
   deps.contextMonitor = contextMonitor;
   // OPR.0.4.3.14 — expose the SAME enforcer instance to routes for the manual
   // compaction trigger. Sharing one instance with ContextMonitor is what makes

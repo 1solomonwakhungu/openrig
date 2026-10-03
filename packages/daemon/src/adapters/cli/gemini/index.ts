@@ -9,7 +9,9 @@ import type { CliRuntimeRegistration } from "../types.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { GEMINI_DIALECT, validateSessionToken } from "../gemini-family/launch-args.js";
 import { GEMINI_PANE_PATTERNS } from "../gemini-family/pane-patterns.js";
-import { checkGeminiResumeTarget, geminiSessionIsResumable } from "../gemini-family/session-store.js";
+import { checkGeminiResumeTarget, findGeminiSessionFile, geminiSessionIsResumable } from "../gemini-family/session-store.js";
+import { readGeminiUsage } from "../gemini-family/usage.js";
+import { readSessionText } from "../gemini-family/runtime.js";
 import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
 
 /**
@@ -51,6 +53,11 @@ export const GEMINI_DESCRIPTOR: RuntimeDescriptor = {
   captureResumeToken: createGeminiFamilyCapture({ sessionExists: geminiSessionIsResumable }),
   // Maps the recorded approval mode back to a posture for permission drift.
   permissionPostureFor: geminiFamilyPermissionPosture(GEMINI_DIALECT),
+  // Usage (feature 1): per-reply tokens from the seat session's file.
+  readUsage: ({ resumeToken, cwd, homedir }) => {
+    if (!resumeToken || !cwd) return null;
+    return readGeminiUsage(readSessionText((ctx) => findGeminiSessionFile(ctx, resumeToken.trim()), { cwd, homedir }));
+  },
   supportsFork: false,
   // Each posture maps to distinct launch flags, so a seat may select either.
   permissionModes: ["floor", "full_bypass"],

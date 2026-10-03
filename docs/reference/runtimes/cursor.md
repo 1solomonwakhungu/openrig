@@ -112,6 +112,10 @@ printf '%s' "$CHAT_ID" | rig seat set-resume-token impl@my-rig --token-stdin --r
 - Skills are projected into `<cwd>/.agents/skills/`, one of the skill
   locations Cursor discovers.
 
+## Usage
+
+Usage: not reported. Cursor CLI is closed source with no verified on-disk usage record, so the runtime declares no `readUsage` (CTX and COST stay unknown).
+
 ## Known limits
 
 - The `cursor-agent` script runs its bundled `node` under its own name, so the

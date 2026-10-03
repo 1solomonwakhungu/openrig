@@ -42,6 +42,10 @@ pods:
 
 Model (`-m provider/model`), posture (`full_bypass` adds `--auto`, `floor` never does), resume (`-s <ses_ id>` with a pre-launch check of the seat's database), fork (refused), guidance (`AGENTS.md`), readiness (including the dialog guard), and stop all match OpenCode. Stop kills the tmux session and then reaps the pane's process tree (`reapProcessTreeOnStop`), which also covers the npm `node` launcher and its native `.kilo` child.
 
+## Usage
+
+Usage (`rig ps`): token, cache, reasoning, and cost totals from the seat database's `session` row (the opencode schema), and the context in use from the latest assistant message; no context window is recorded.
+
 ## Known limits
 
 - The same limits as OpenCode.
