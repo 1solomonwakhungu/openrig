@@ -9,12 +9,13 @@
 import fs from "node:fs";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
+import { activityMarkers } from "../activity-markers.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
 import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
 import type { CliAdapterFsOps, CliRuntimeRegistration } from "../types.js";
 import {
-  GOOSE_BINARY, GOOSE_BUSY_PATTERNS, GOOSE_ERROR_PATTERNS, GOOSE_FLOOR_MODE, GOOSE_FULL_BYPASS_MODE, GOOSE_GATE_PATTERNS, GOOSE_GUIDANCE_FILE,
+  GOOSE_BINARY, GOOSE_ERROR_PATTERNS, GOOSE_FLOOR_MODE, GOOSE_FULL_BYPASS_MODE, GOOSE_GATE_PATTERNS, GOOSE_GUIDANCE_FILE,
   GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS, GOOSE_RESUME_TYPE, GOOSE_RUNTIME_ID, GOOSE_SKILLS_SUBDIR,
   buildGooseArgv, captureGooseSessionId, readGooseTranscript, readGooseUsage, gooseLaunchEnv, gooseModeFor, gooseSessionPresence, gooseSessionsDbPath,
   validateGooseSessionId, verifyGooseVersionOutput,
@@ -133,7 +134,7 @@ export const GOOSE_SPEC: TuiCliRuntimeSpec = {
       ? { ok: true }
       : { ok: false, reason: "the goose session is not in goose's sessions database" },
   readyPatterns: GOOSE_READY_PATTERNS,
-  busyPatterns: GOOSE_BUSY_PATTERNS,
+  ...activityMarkers(GOOSE_RUNTIME_ID),
   gatePatterns: GOOSE_GATE_PATTERNS,
   errorPatterns: GOOSE_ERROR_PATTERNS,
   observeLaunch: ({ posture }): AppliedLaunchObservation => ({

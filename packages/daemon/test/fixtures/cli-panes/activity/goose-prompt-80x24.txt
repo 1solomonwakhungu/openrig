@@ -1,0 +1,18 @@
+$ GOOSE_TELEMETRY_OFF=1 GOOSE_PROVIDER=ollama OLLAMA_HOST=http://127.0.0.1:9 GOO
+SE_MODEL=qwen3 goose session --name 'dev@rig'
+    __( O)>  ● new session · ollama qwen3
+   \____)    20261003_7 · /home/user/workspaces/example-org/team-repositories/sa
+ndbox-home-dirs/projects/a-fairly-long-workspace-directory-name/service-api
+     L L     goose is ready
+  ⏳ loading extensions in background...
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 0% 0/128k
+
+─── text_editor | developer ──────────────────────────
+command: write
+path: src/health.ts
+
+◆  Goose would like to call the above tool, do you allow?
+│  ● Allow (Allow the tool call once)
+│  ○ Always Allow
+│  ○ Deny
+└

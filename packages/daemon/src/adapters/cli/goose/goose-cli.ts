@@ -132,8 +132,6 @@ export const GOOSE_READY_PATTERNS: readonly RegExp[] = [
   /Enter to send · \S+ newline/,
 ];
 
-export const GOOSE_BUSY_PATTERNS: readonly RegExp[] = [/\(Ctrl\+C to interrupt\)/];
-
 export const GOOSE_GATE_PATTERNS: readonly TuiCliGatePattern[] = [
   {
     // First run of a goose that has not recorded a telemetry choice. Managed
