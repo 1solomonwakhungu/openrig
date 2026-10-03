@@ -9,11 +9,12 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { GOOSE_REGISTRATION, GOOSE_SEAT_FILE, GOOSE_SPEC } from "../src/adapters/cli/goose/index.js";
 import {
-  GOOSE_BUSY_PATTERNS, GOOSE_ERROR_PATTERNS, GOOSE_GATE_PATTERNS, GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS,
+  GOOSE_ERROR_PATTERNS, GOOSE_GATE_PATTERNS, GOOSE_PROCESS_MATCH, GOOSE_READY_PATTERNS,
   GOOSE_TRANSCRIPT_SOURCE, GOOSE_USAGE_SOURCE, buildGooseArgv, captureGooseSessionId, readGooseTranscript, readGooseUsage, gooseLaunchEnv, gooseSessionPresence, gooseSessionsDbPath, gooseTimestamp,
   parseGooseVersion, validateGooseSessionId, verifyGooseVersionOutput,
 } from "../src/adapters/cli/goose/goose-cli.js";
 import { TuiCliRuntimeAdapter } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
+import { activityMarkers } from "../src/adapters/cli/activity-markers.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import {
@@ -144,7 +145,7 @@ describe("pane patterns (live 80x24 captures, goose 1.53.0)", () => {
   });
 
   it("reads the working spinner as busy and the idle screen as not", async () => {
-    expect(GOOSE_BUSY_PATTERNS.some((p) => p.test(READY))).toBe(false);
+    expect(activityMarkers("goose").busyPatterns.some((p) => p.test(READY))).toBe(false);
     const working = `${READY}\n  ◒ Pondering the request... (Ctrl+C to interrupt)`;
     const adapter = new TuiCliRuntimeAdapter(GOOSE_SPEC, harnessDeps({ tmux: mockTmux([{ command: "goose", content: working }]).tmux, fsOps: memFs() }));
     expect(await adapter.classifyActivity(harnessBinding())).toBe("working");

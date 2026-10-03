@@ -163,6 +163,14 @@ const AIDER: RuntimeActivityMarkers = {
   inputPromptPatterns: [],
 };
 
+/** goose 1.53.0 (strings in the release binary). */
+const GOOSE: RuntimeActivityMarkers = {
+  // Spinner line while a turn runs: "<thinking message> (Ctrl+C to interrupt)".
+  busyPatterns: [/\(Ctrl\+C to interrupt\)/],
+  // Tool approval in approve / smart_approve mode.
+  inputPromptPatterns: [anyPanePhrase(["Goose would like to call the above tool, do you allow?", "Do you allow this tool call?"])],
+};
+
 const MARKERS: Readonly<Record<string, RuntimeActivityMarkers>> = {
   aider: AIDER,
   antigravity: ANTIGRAVITY,
@@ -170,6 +178,7 @@ const MARKERS: Readonly<Record<string, RuntimeActivityMarkers>> = {
   copilot: COPILOT,
   cursor: CURSOR,
   gemini: GEMINI,
+  goose: GOOSE,
   grok: GROK,
   kilo: KILO,
   opencode: OPENCODE,
