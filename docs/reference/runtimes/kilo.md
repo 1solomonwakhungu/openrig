@@ -52,6 +52,7 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
 
 ## Known limits
 
+- Tracked guidance file: with `guidance: { tracked_file: redirect }` on the rig, a git-tracked `AGENTS.md` is left alone and OpenRig's blocks go to `.kilo/rules/openrig.md` (see rig-spec.md).
 - The same limits as OpenCode.
 - Kilo account sign-in is not affected by the per-seat database. `kilo auth login` stores the Kilo Gateway token in the shared `auth.json`, the gateway reads it from there, and on every startup Kilo copies `auth.json` into the seat database's credential table.
 - Project skills under `.kilo/skills/` load, but Kilo treats them as project-scoped (not trusted for shell injection). Kilo only fully trusts global and `KILO_CONFIG_DIR` skills.

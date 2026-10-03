@@ -1,3 +1,4 @@
+import { CLAUDE_TRACKED_GUIDANCE_REDIRECT, guidanceTeardownTargets } from "./guidance-target.js";
 import type Database from "better-sqlite3";
 import type { RigRepository } from "./rig-repository.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -225,12 +226,19 @@ export class RigTeardownOrchestrator {
     if (!targetPath) {
       return;
     }
-    removeManagedBlocksFromFile({
-      exists: (path) => fs.existsSync(path),
-      readFile: (path) => fs.readFileSync(path, "utf-8"),
-      writeFile: (path, content) => fs.writeFileSync(path, content, "utf-8"),
-      deleteFile: (path) => fs.unlinkSync(path),
-    }, targetPath);
+    // guidance.tracked_file: clean exactly what delivery could have written
+    // (a tracked file under skip/redirect is left alone; a redirect alternate is cleaned).
+    const redirectPath = runtime === "claude-code"
+      ? nodePath.join(cwd, CLAUDE_TRACKED_GUIDANCE_REDIRECT)
+      : getRuntimeDescriptor(runtime)?.trackedGuidanceRedirect?.({ cwd }) ?? null;
+    for (const path of guidanceTeardownTargets({ targetPath, policy: this.deps.rigRepo.getRigGuidanceTrackedFile(rigId), redirectPath })) {
+      removeManagedBlocksFromFile({
+        exists: (p) => fs.existsSync(p),
+        readFile: (p) => fs.readFileSync(p, "utf-8"),
+        writeFile: (p, content) => fs.writeFileSync(p, content, "utf-8"),
+        deleteFile: (p) => fs.unlinkSync(p),
+      }, path);
+    }
   }
 }
 

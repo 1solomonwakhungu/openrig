@@ -13,6 +13,7 @@
 // (ctx% via ContextUsageStore) and the four seeded behaviors are later RED-first
 // increments (A5 items 5-8) — deliberately NOT here.
 
+import { logGuidanceSkip, resolveGuidanceTarget, type GuidanceDestination } from "../domain/guidance-target.js";
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TmuxAdapter } from "./tmux.js";
@@ -124,7 +125,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         switch (hint) {
           case "guidance_merge": {
             const targetPath = nodePath.join(binding.cwd, "AGENTS.md");
-            if (!this.mergeGuidance(targetPath, file.path, content)) continue; // rig-role skip
+            if (!this.mergeGuidance(targetPath, file.path, content, { policy: binding.guidanceTrackedFile, redirectPath: null })) continue; // rig-role or tracked-file skip
             break;
           }
           case "skill_install": {
@@ -288,7 +289,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     if (!this.fsOps) return false;
     if (entry.category === "guidance" && entry.mergeStrategy === "managed_block") {
       const targetPath = nodePath.join(binding.cwd, "AGENTS.md");
-      return this.mergeGuidance(targetPath, entry.effectiveId, this.fsOps.readFile(entry.absolutePath));
+      return this.mergeGuidance(targetPath, entry.effectiveId, this.fsOps.readFile(entry.absolutePath), { policy: binding.guidanceTrackedFile, redirectPath: null });
     }
     if (entry.category === "skill") {
       const targetDir = nodePath.join(binding.cwd, ".openrig", "stub", "skills", entry.effectiveId);
@@ -309,12 +310,19 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     return false;
   }
 
-  private mergeGuidance(targetPath: string, blockId: string, content: string): boolean {
+  private mergeGuidance(targetPath: string, blockId: string, content: string, destination?: GuidanceDestination): boolean {
     if (!this.fsOps) return false;
     // Per-seat rig-role content collides across pod-mates when merged into a shared
     // cwd file; it is delivered via send_text instead (mirrors the other adapters).
     if (blockId === "rig-role") return false;
-    mergeManagedBlock(this.fsOps, targetPath, blockId, content, {
+    // guidance.tracked_file: a git-tracked guidance file may be skipped or
+    // redirected to the runtime's untracked alternate (guidance-target.ts).
+    const target = resolveGuidanceTarget({ targetPath, policy: destination?.policy, redirectPath: destination?.redirectPath });
+    if (target.kind === "skip") {
+      logGuidanceSkip(target, blockId);
+      return false;
+    }
+    mergeManagedBlock(this.fsOps, target.path, blockId, content, {
       replaceBlockIds: blockId === "openrig-start.md" ? ["using-openrig.md"] : [],
     });
     return true;

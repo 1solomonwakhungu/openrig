@@ -75,6 +75,7 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
 
 ## Known limits
 
+- Tracked guidance file: with `guidance: { tracked_file: redirect }` on the rig, a git-tracked `AGENTS.md` is left alone and OpenRig's blocks go to `.grok/rules/openrig.md`. Grok skips gitignored rule files, so exclude it with `.git/info/exclude` if at all (see rig-spec.md).
 - `--trust` persists folder trust in grok's own `trusted_folders.toml`.
 - Admins can disable bypass mode; `--always-approve` is then refused by grok.
 - grok's session store is shared across seats (`~/.grok`); only the minted id makes a seat's session unambiguous.

@@ -140,6 +140,10 @@ export interface RuntimeDescriptor {
   /** Reap the pane's process tree on stop (the CLI can outlive kill-session).
    *  PID-scoped, snapshot before the kill (process-tree-reaper.ts). Default false. */
   readonly reapProcessTreeOnStop?: boolean;
+  /** guidance.tracked_file redirect: an untracked file the CLI loads automatically,
+   *  in addition to guidanceFile, that receives managed blocks when guidanceFile
+   *  is tracked by git. Absent = redirect is an honest skip for this runtime. */
+  readonly trackedGuidanceRedirect?: (ctx: { cwd: string }) => string | null;
   /** Registry runtimes that record a permission-axis applied-launch observation
    *  (TuiCliRuntimeSpec.observeLaunch): map the observed launch value back to
    *  the OpenRig posture that emits it, or null for a value this runtime never

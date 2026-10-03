@@ -11,6 +11,7 @@
 // discipline note there): the descriptor arrives through the spec, and token
 // capture goes through the dependency-leaf domain/runtime-capture.ts.
 
+import { logGuidanceSkip, resolveGuidanceTarget, type GuidanceDestination } from "../../domain/guidance-target.js";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
@@ -345,7 +346,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
               this.logSkip(`no guidance file for ${this.runtime}`, file.path);
               continue;
             }
-            if (!this.mergeGuidance(guidance, file.path, content)) continue; // rig-role skip: not delivered
+            if (!this.mergeGuidance(guidance, file.path, content, this.guidanceDestination(binding))) continue; // rig-role or tracked-file skip: not delivered
             break;
           }
           case "skill_install": {
@@ -849,7 +850,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     if (entry.category === "guidance" && entry.mergeStrategy === "managed_block") {
       const guidance = this.guidancePath(binding);
       if (!guidance) return false;
-      return this.mergeGuidance(guidance, entry.effectiveId, this.fs.readFile(entry.absolutePath));
+      return this.mergeGuidance(guidance, entry.effectiveId, this.fs.readFile(entry.absolutePath), this.guidanceDestination(binding));
     }
     if (entry.category === "skill") {
       const skillsDir = this.skillsDir(binding);
@@ -873,7 +874,15 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return false;
   }
 
-  private mergeGuidance(targetPath: string, blockId: string, content: string): boolean {
+  /** guidance.tracked_file destination: the descriptor's untracked alternate, if any. */
+  private guidanceDestination(binding: NodeBinding): GuidanceDestination {
+    return {
+      policy: binding.guidanceTrackedFile,
+      redirectPath: this.descriptor.trackedGuidanceRedirect?.({ cwd: binding.cwd }) ?? null,
+    };
+  }
+
+  private mergeGuidance(targetPath: string, blockId: string, content: string, destination?: GuidanceDestination): boolean {
     // Per-seat `rig-role` content collides across pod-mates in a shared cwd
     // file; it is delivered via send_text instead (ADR-0006).
     if (blockId === "rig-role") {
@@ -882,7 +891,14 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       );
       return false;
     }
-    mergeManagedBlock(this.fs, targetPath, blockId, content, {
+    // guidance.tracked_file: a git-tracked guidance file may be skipped or
+    // redirected to the runtime's untracked alternate (guidance-target.ts).
+    const target = resolveGuidanceTarget({ targetPath, policy: destination?.policy, redirectPath: destination?.redirectPath });
+    if (target.kind === "skip") {
+      logGuidanceSkip(target, blockId);
+      return false;
+    }
+    mergeManagedBlock(this.fs, target.path, blockId, content, {
       replaceBlockIds: blockId === "openrig-start.md" ? ["using-openrig.md"] : [],
     });
     return true;

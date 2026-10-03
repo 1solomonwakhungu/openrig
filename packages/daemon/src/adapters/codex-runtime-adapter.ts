@@ -1,3 +1,4 @@
+import { logGuidanceSkip, resolveGuidanceTarget, type GuidanceDestination } from "../domain/guidance-target.js";
 import nodePath from "node:path";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
@@ -258,7 +259,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       }
 
       try {
-        const didProject = this.projectEntry(entry, binding.cwd);
+        const didProject = this.projectEntry(entry, binding.cwd, codexGuidanceDestination(binding));
         if (didProject) {
           projected.push(entry.effectiveId);
         } else {
@@ -288,7 +289,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
         switch (hint) {
           case "guidance_merge": {
             const targetPath = nodePath.join(binding.cwd, "AGENTS.md");
-            const merged = this.mergeGuidance(targetPath, file.path, content);
+            const merged = this.mergeGuidance(targetPath, file.path, content, codexGuidanceDestination(binding));
             if (!merged) continue; // rig-role skip: do not count as delivered
             break;
           }
@@ -540,7 +541,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     this.provisionWorkspaceTrust(binding.cwd ?? null);
   }
 
-  private projectEntry(entry: ProjectionEntry, cwd: string): boolean {
+  private projectEntry(entry: ProjectionEntry, cwd: string, destination?: GuidanceDestination): boolean {
     if (entry.category === "runtime_resource" && this.applyRuntimeResource(entry)) {
       return true;
     }
@@ -548,7 +549,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     if (entry.category === "guidance" && entry.mergeStrategy === "managed_block") {
       const targetPath = nodePath.join(cwd, "AGENTS.md");
       const content = this.fs.readFile(entry.absolutePath);
-      return this.mergeGuidance(targetPath, entry.effectiveId, content);
+      return this.mergeGuidance(targetPath, entry.effectiveId, content, destination);
     }
 
     // HG-1.3 plugin runtime applicability filter (per DESIGN.md §5.1):
@@ -653,7 +654,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
    * propagate the skip signal so ProjectionResult and StartupDeliveryResult
    * report honest counts.
    */
-  private mergeGuidance(targetPath: string, blockId: string, content: string): boolean {
+  private mergeGuidance(targetPath: string, blockId: string, content: string, destination?: GuidanceDestination): boolean {
     // Mirrors Claude Code adapter: the `rig-role` managed block collides across
     // pod-mates because the regenerator pairs (target-file × spec) without
     // seat correlation. Per-seat role content is delivered through `send_text`
@@ -665,7 +666,14 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       );
       return false;
     }
-    mergeManagedBlock(this.fs, targetPath, blockId, content, {
+    // guidance.tracked_file: a git-tracked guidance file may be skipped or
+    // redirected to the runtime's untracked alternate (guidance-target.ts).
+    const target = resolveGuidanceTarget({ targetPath, policy: destination?.policy, redirectPath: destination?.redirectPath });
+    if (target.kind === "skip") {
+      logGuidanceSkip(target, blockId);
+      return false;
+    }
+    mergeManagedBlock(this.fs, target.path, blockId, content, {
       replaceBlockIds: blockId === "openrig-start.md" ? ["using-openrig.md"] : [],
     });
     return true;
@@ -1516,4 +1524,11 @@ function commandLooksLikeCodex(command: string): boolean {
 function isSkippableCodexUpdatePrompt(paneContent: string): boolean {
   return paneContent.includes("Update available!")
     && /^\s*[›>]?\s*3\. Skip until next version\s*$/m.test(paneContent);
+}
+
+/** Codex has no untracked alternate it loads in addition to AGENTS.md
+ *  (AGENTS.override.md replaces AGENTS.md rather than adding to it), so a
+ *  redirect for a tracked AGENTS.md is an honest skip. */
+function codexGuidanceDestination(binding: NodeBinding): GuidanceDestination {
+  return { policy: binding.guidanceTrackedFile, redirectPath: null };
 }

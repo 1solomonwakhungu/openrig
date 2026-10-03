@@ -152,6 +152,9 @@ export class StartupOrchestrator {
     // and reads the file already written in its cwd.
     const claudeManagedBlockFile = new RigRepository(this.db).getRigClaudeManagedBlockFile(input.rigId);
     if (claudeManagedBlockFile) input = { ...input, binding: { ...input.binding, claudeManagedBlockFile } };
+    // guidance.tracked_file is bound here for the same delivery paths.
+    const guidanceTrackedFile = new RigRepository(this.db).getRigGuidanceTrackedFile(input.rigId);
+    if (guidanceTrackedFile) input = { ...input, binding: { ...input.binding, guidanceTrackedFile } };
     const errors: string[] = [];
     let continuityOutcome: "resumed" | "fresh" | "forked" | "rebuilt" = input.resumeToken
       ? "resumed"

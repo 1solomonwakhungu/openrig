@@ -113,6 +113,7 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
 
 ## Known limits
 
+- Tracked guidance file: with `guidance: { tracked_file: redirect }` on the rig, a git-tracked `QWEN.md` is left alone and OpenRig's blocks go to `<git root>/.qwen/QWEN.local.md` (see rig-spec.md, "Leaving a tracked guidance file alone").
 - The pane process is `node`, so seat identity comes from the process arguments (`.../qwen`), never from the process name alone.
 - Ready detection matches the English placeholder. With a non-English UI language, readiness times out with pane evidence.
 - Session ids must be UUID versions 1 to 5; Qwen Code treats anything else given to `--resume` as a session title.

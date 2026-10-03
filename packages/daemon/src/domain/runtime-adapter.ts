@@ -22,6 +22,8 @@ export interface NodeBinding extends Binding {
   permissionMode?: string;
   /** Reserved successor generation; current tenure remains the input fence until commit. */
   launchGeneration?: string;
+  /** The rig's guidance.tracked_file policy (guidance-target.ts). Absent = managed_block. */
+  guidanceTrackedFile?: import("./guidance-target.js").TrackedGuidancePolicy;
   /** #25: the rig's `managed_blocks.claude-code` file. Absent = CLAUDE.md. Only the Claude adapter reads it. */
   claudeManagedBlockFile?: import("./managed-blocks.js").ClaudeManagedBlockFile;
 }

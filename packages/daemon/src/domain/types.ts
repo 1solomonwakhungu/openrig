@@ -1181,6 +1181,9 @@ export interface RigSpec {
   permissionPolicy?: string;
   /** #25: per-runtime managed-block destination. Absent = CLAUDE.md. */
   managedBlocks?: { "claude-code"?: import("./managed-blocks.js").ClaudeManagedBlockFile };
+  /** What managed guidance does when a runtime's guidance file is tracked by git
+   *  in the seat cwd (guidance-target.ts). Absent = managed_block (merge as before). */
+  guidance?: { trackedFile?: import("./guidance-target.js").TrackedGuidancePolicy };
   docs?: RigSpecDoc[];
   startup?: StartupBlock;
   services?: RigServicesSpec;

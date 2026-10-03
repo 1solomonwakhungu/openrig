@@ -89,6 +89,9 @@ export const GROK_DESCRIPTOR: RuntimeDescriptor = {
   guidanceFile: "AGENTS.md",
   // Project skills (loaded once the folder is trusted).
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".grok", "skills"),
+  // guidance.tracked_file redirect: grok loads every .grok/rules/*.md from cwd up to the git
+  // root (agents_md.rs). It skips gitignored files, so exclude it via .git/info/exclude if at all.
+  trackedGuidanceRedirect: ({ cwd }) => nodePath.join(cwd, ".grok", "rules", "openrig.md"),
   // A native (Rust) binary. On macOS tmux reports the symlink target's name
   // (grok-<version>-macos-aarch64) as the pane command, so discovery also
   // matches the program path: `.../bin/grok` matches, the installer's

@@ -5,6 +5,7 @@
 // `--session-id`; forks use `--resume <parent> --fork-session` and the child
 // id qwen picks is captured from its runtime.json.
 
+import { guidanceTargetDeps } from "../../../domain/guidance-target.js";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliPrepareContext } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeRegistration } from "../types.js";
@@ -98,6 +99,13 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   // Codex/Pi seats sharing the cwd AGENTS.md.
   guidanceFile: "QWEN.md",
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".qwen", "skills"),
+  // guidance.tracked_file redirect: <gitRoot>/.qwen/QWEN.local.md, which qwen loads after
+  // the project context files and documents as gitignored (memory-constants.ts). Only read
+  // with a git root (and a trusted folder), so no redirect outside a repository.
+  trackedGuidanceRedirect: ({ cwd }) => {
+    const root = guidanceTargetDeps.toplevel(cwd);
+    return root ? nodePath.join(root, ".qwen", "QWEN.local.md") : null;
+  },
   // The pane shows `node`; the script basename is the identity (`node .../bin/qwen`).
   processMatch: "qwen",
   // Qwen exits cleanly on kill-session (verified live): no tree reap.

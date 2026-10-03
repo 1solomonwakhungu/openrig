@@ -1,3 +1,4 @@
+import { CLAUDE_TRACKED_GUIDANCE_REDIRECT, logGuidanceSkip, resolveGuidanceTarget, type GuidanceDestination } from "../domain/guidance-target.js";
 import nodePath from "node:path";
 import fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -119,7 +120,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       }
 
       try {
-        const didProject = this.projectEntry(entry, binding.cwd, binding.claudeManagedBlockFile ?? DEFAULT_CLAUDE_MANAGED_BLOCK_FILE);
+        const didProject = this.projectEntry(entry, binding.cwd, binding.claudeManagedBlockFile ?? DEFAULT_CLAUDE_MANAGED_BLOCK_FILE, guidanceDestination(binding));
         if (didProject) {
           projected.push(entry.effectiveId);
         } else {
@@ -180,7 +181,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         switch (hint) {
           case "guidance_merge": {
             const targetPath = nodePath.join(binding.cwd, binding.claudeManagedBlockFile ?? DEFAULT_CLAUDE_MANAGED_BLOCK_FILE);
-            const merged = this.mergeGuidance(targetPath, file.path, content);
+            const merged = this.mergeGuidance(targetPath, file.path, content, guidanceDestination(binding));
             if (!merged) continue; // rig-role skip: do not count as delivered
             break;
           }
@@ -443,7 +444,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return { ok: false, error: "Claude resume failed: timed out waiting for Claude to become active" };
   }
 
-  private projectEntry(entry: ProjectionEntry, cwd: string, managedBlockFile: ClaudeManagedBlockFile): boolean {
+  private projectEntry(entry: ProjectionEntry, cwd: string, managedBlockFile: ClaudeManagedBlockFile, destination?: GuidanceDestination): boolean {
     if (entry.category === "runtime_resource" && this.applyRuntimeResource(entry, cwd)) {
       return true;
     }
@@ -451,7 +452,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (entry.category === "guidance" && entry.mergeStrategy === "managed_block") {
       const targetPath = nodePath.join(cwd, managedBlockFile);
       const content = this.fs.readFile(entry.absolutePath);
-      return this.mergeGuidance(targetPath, entry.effectiveId, content);
+      return this.mergeGuidance(targetPath, entry.effectiveId, content, destination);
     }
 
     // HG-1.3 plugin runtime applicability filter (per DESIGN.md §5.1):
@@ -563,7 +564,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
    * ProjectionResult and StartupDeliveryResult report honest counts instead
    * of claiming a merge that never landed.
    */
-  private mergeGuidance(targetPath: string, blockId: string, content: string): boolean {
+  private mergeGuidance(targetPath: string, blockId: string, content: string, destination?: GuidanceDestination): boolean {
     // The `rig-role` managed block is authored per seat but delivered through a
     // projection path that pairs (target-file × spec) without seat correlation,
     // so multiple pod-mates' role bodies collide into one CLAUDE.md. The fix
@@ -576,7 +577,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       );
       return false;
     }
-    mergeManagedBlock(this.fs, targetPath, blockId, content, {
+    // guidance.tracked_file: a git-tracked guidance file may be skipped or
+    // redirected to the runtime's untracked alternate (guidance-target.ts).
+    const target = resolveGuidanceTarget({ targetPath, policy: destination?.policy, redirectPath: destination?.redirectPath });
+    if (target.kind === "skip") {
+      logGuidanceSkip(target, blockId);
+      return false;
+    }
+    mergeManagedBlock(this.fs, target.path, blockId, content, {
       replaceBlockIds: blockId === "openrig-start.md" ? ["using-openrig.md"] : [],
     });
     return true;
@@ -1011,4 +1019,11 @@ export function readClaudeSelfReportEvidence(input: {
   } catch {
     return null; // unreadable dir ⇒ fall down the ladder
   }
+}
+
+function guidanceDestination(binding: NodeBinding): GuidanceDestination {
+  return {
+    policy: binding.guidanceTrackedFile,
+    redirectPath: nodePath.join(binding.cwd, CLAUDE_TRACKED_GUIDANCE_REDIRECT),
+  };
 }

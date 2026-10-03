@@ -154,6 +154,7 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
 
 ## Known limits
 
+- Tracked guidance file: with `guidance: { tracked_file: redirect }` on the rig, a git-tracked `AGENTS.md` is left alone and OpenRig's blocks go to `<git root>/.cline/rules/openrig.md` (see rig-spec.md).
 - No per-seat model (see "Model selection"). All cline seats on a host share
   the operator's Cline provider and model.
 - A cline session the operator starts by hand in a seat's cwd can be captured

@@ -2,6 +2,7 @@
 // Reference: docs/reference/runtimes/cline.md.
 
 import { activityMarkers } from "../activity-markers.js";
+import { guidanceTargetDeps } from "../../../domain/guidance-target.js";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import { createNodeFsOps } from "../../node-fs-ops.js";
@@ -55,6 +56,9 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
   permissionModes: ["floor", "full_bypass"],
   guidanceFile: CLINE_GUIDANCE_FILE,
   skillsDir: ({ cwd }) => nodePath.join(cwd, ".cline", "skills"),
+  // guidance.tracked_file redirect: a distinct rule file in .cline/rules, which cline loads
+  // wholesale from the git top level (the cwd outside a repository), keyed by file name.
+  trackedGuidanceRedirect: ({ cwd }) => nodePath.join(guidanceTargetDeps.toplevel(cwd) ?? cwd, ".cline", "rules", "openrig.md"),
   // The pane runs `node .../cline/bin/cline` (script path), which spawns the
   // native `.../bin/.cline` (program path); "node" alone is not identity.
   processMatch: /(?:^|\/)\.?cline$/,
