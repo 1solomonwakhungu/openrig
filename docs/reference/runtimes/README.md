@@ -21,7 +21,7 @@ One line per runtime, alphabetical by id:
 - `grok`: Grok Build (`grok`). Resume and fork by minted session id, managed `AGENTS.md` blocks. [grok.md](grok.md)
 - `kilo`: Kilo CLI (`kilo`), an OpenCode fork. Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.kilo/skills`. No fork. See [kilo.md](kilo.md).
 - `kiro`: [Kiro CLI](kiro.md) (`kiro-cli`). No resume (restore asks for `--fresh`), no fork, managed `AGENTS.md` blocks, `.kiro/skills`. Readiness partly derived from binary strings; see the doc.
-- `omp`: Oh My Pi (`omp`, the Pi RPC runner in the pane, ported from the upstream Oh My Pi runtime). Isolated per-seat state and HOME under `<OPENRIG_HOME>/state/omp/<seat>`, resume by session file once the file exists, fork, approval mode `always-ask` (floor) or `yolo` (full_bypass). See the `omp` notes in [rig-spec.md](../rig-spec.md).
+- `omp`: Oh My Pi (`omp`, the Pi RPC runner in the pane, ported from the upstream Oh My Pi runtime). Isolated per-seat state and HOME under `<OPENRIG_HOME>/state/omp/<seat>`, resume by session file once the file exists, fork, approval mode `always-ask` (floor) or `yolo` (full_bypass). See the `omp` notes in [rig-spec.md](../rig-spec.md). Usage: not reported (`CTX` and `COST` stay unknown).
 - `opencode`: OpenCode (`opencode`). Resume by session id from a per-seat session database, managed `AGENTS.md` blocks, `.opencode/skills`. No fork. See [opencode.md](opencode.md).
 - `pi`: Pi coding agent (`pi`, RPC runner in the pane). Resume by session file, fork.
 - `qwen`: Qwen Code (`qwen`), a Gemini CLI fork. Resume by minted session id, managed `QWEN.md` blocks, `.qwen/skills`. Fork via `--fork-session`. See [qwen.md](qwen.md).
