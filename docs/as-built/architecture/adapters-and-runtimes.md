@@ -458,7 +458,22 @@ the seat's `launch.json`). No built-in runtime declares a hook yet, so
 | `docsPath` | descriptor | repo-relative docs page | n/a | `rig runtimes` docs link (feature 6) |
 | `readTranscript` | descriptor | `(input) => { source; entries: { role; text; at? }[]; truncated? } \| null` | `runDescriptorTranscriptRead` (keeps the newest `maxEntries`) | `rig transcript` fallback when the pane transcript is thin, after transcript redaction (feature 5) |
 | `busyPatterns` | `TuiCliRuntimeSpec` | the CLI's busy markers | n/a | read by `classifyActivity` |
-| `classifyActivity` | `RuntimeAdapter` (optional), implemented once in `TuiCliRuntimeAdapter` | `(binding) => "working" \| "idle" \| "needs_input" \| null`, read from the visible screen only (never scrollback), with gate and busy markers matched only in the bottom status region (`ACTIVITY_STATUS_LINES` non-blank lines) so stale lines never count: pane at a shell is null, then gate is needs_input, busy is working, ready is idle, otherwise null so a wrong guess never suppresses a wake | n/a | activity taxonomy and `rig ps` for registry runtimes; claude-code, codex, and pi keep their own sources (feature 2) |
+| `inputPromptPatterns` | `TuiCliRuntimeSpec` | in-session prompts that wait for the operator (tool or command approval, mid-session confirms, blocking update dialogs); never affect launch or readiness | n/a | read by `classifyActivity` as needs_input |
+| `classifyActivity` | `RuntimeAdapter` (optional), implemented once in `TuiCliRuntimeAdapter` | `(binding) => "working" \| "idle" \| "needs_input" \| null`, read from the visible screen only (never scrollback). Gates (full-screen launch dialogs) match anywhere on the visible screen, as checkReady does; in-session prompts and busy markers match only in the bottom status region (`ACTIVITY_STATUS_LINES` non-blank lines), so an answered prompt or an old busy line higher in the history never counts. Pane at a shell is null, then gate or prompt is needs_input, busy is working, ready is idle, otherwise null so a wrong guess never suppresses a wake | n/a | activity taxonomy and `rig ps` for registry runtimes; claude-code, codex, and pi keep their own sources (feature 2) |
+
+Feature 2 wiring: `SeatActivityService` (the 1 Hz seat sweep) takes a
+`paneClassifier` (startup resolves each registry runtime's adapter). Seats on a
+registry CLI runtime declare `TUI_CLI_ACTIVITY_RUNG_INVENTORY`: every sweep
+reports the classification as `needs-input-chrome` evidence (authoritative;
+count 1 for needs_input, else 0, so an answered prompt clears on the next sweep)
+and, for working or idle, as `pane-markers` evidence. `pane-markers` enters at
+trial: it is measured against `window-sampling` and decides working/idle only
+after promotion, so an unverified busy marker never holds a seat at working.
+This feeds the arbitrated seat state that `rig ps` (`activityState`), the TUI
+(`seat.activity_changed`), and the parked and queue-waiting sweeps read. The
+per-runtime markers live in `adapters/cli/activity-markers.ts` with the CLI
+version and source each string was read from (none verified on a signed-in
+screen).
 
 Per-seat permission modes (`permissionModes`) are added with their consumer in
 the feature-3 PR, not here.

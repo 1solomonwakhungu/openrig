@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+
+
+
+
+ ● Read src/server.ts
+ Looked at the request handler and the router setup.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Run this command?                                                            │
+│                                                                              │
+│   npm test                                                                   │
+│                                                                              │
+│ > Yes, run command                                                           │
+│   Yes, and always allow 'npm' in this conversation                           │
+│   No, deny                                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯

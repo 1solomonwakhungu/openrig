@@ -1,6 +1,7 @@
 // Aider runtime registration (`runtime: aider`).
 // Reference: docs/reference/runtimes/aider.md.
 
+import { activityMarkers } from "../activity-markers.js";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import { createNodeFsOps } from "../../node-fs-ops.js";
 import { seatStateDirFor } from "../../../domain/runtime-capture.js";
@@ -71,6 +72,7 @@ export function createAiderSpec(stateRoot: string, newId?: () => string): TuiCli
       const checked = checkAiderResumeTarget(token, { fs });
       return checked.ok ? { ok: true } : { ok: false, reason: checked.error, recovery: checked.recovery };
     },
+    ...activityMarkers(AIDER_RUNTIME_ID),
     readyPatterns: AIDER_READY_PATTERNS,
     gatePatterns: AIDER_GATE_PATTERNS,
     errorPatterns: AIDER_ERROR_PATTERNS,

@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+ ● Read src/server.ts
+ Looked at the request handler and the router setup.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Run shell command                                                            │
+│                                                                              │
+│   npm test                                                                   │
+│                                                                              │
+│ Do you want to run this command?                                             │
+│                                                                              │
+│ ❯ 1. Yes                                                                     │
+│   2. Yes, and don't ask again for `npm` in this repo                         │
+│   3. No, and tell Copilot what to do differently (Esc)                       │
+│                                                                              │
+│ up-down to navigate · enter to select · esc to cancel                        │
+╰──────────────────────────────────────────────────────────────────────────────╯

@@ -1,6 +1,7 @@
 // Cline CLI runtime registration (`runtime: cline`).
 // Reference: docs/reference/runtimes/cline.md.
 
+import { activityMarkers } from "../activity-markers.js";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import { createNodeFsOps } from "../../node-fs-ops.js";
@@ -91,6 +92,7 @@ export function createClineSpec(
       const checked = checkClineResumeTarget(token, { fs, env, homedir });
       return checked.ok ? { ok: true } : { ok: false, reason: checked.error, recovery: checked.recovery };
     },
+    ...activityMarkers(CLINE_RUNTIME_ID),
     readyPatterns: CLINE_READY_PATTERNS,
     gatePatterns: CLINE_GATE_PATTERNS,
     errorPatterns: CLINE_ERROR_PATTERNS,

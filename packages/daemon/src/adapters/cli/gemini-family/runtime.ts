@@ -6,6 +6,7 @@
 // Runtime imports stay off domain/runtime-registry.ts (import discipline note
 // there); descriptor types are type-only.
 
+import { activityMarkers } from "../activity-markers.js";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { LAUNCH_RECORD_FILE, type LaunchRecord } from "../../../domain/runtime-capture.js";
@@ -118,6 +119,7 @@ export function createGeminiFamilySpec(
       }
       if (errors.length > 0) throw errors[0];
     },
+    ...activityMarkers(descriptor.id),
     readyPatterns: patterns.readyPatterns,
     gatePatterns: patterns.gatePatterns,
     errorPatterns: patterns.errorPatterns,

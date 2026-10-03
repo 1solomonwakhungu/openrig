@@ -205,6 +205,11 @@ export interface TuiCliRuntimeSpec {
   /** The CLI's busy marker (e.g. "esc to interrupt"); classifyActivity reads
    *  a match as working. Absent = activity never reads as working. */
   busyPatterns?: readonly RegExp[];
+  /** In-session prompts that wait for the operator (tool or command approval,
+   *  mid-session yes/no confirms, blocking update dialogs). classifyActivity
+   *  reads a match in the status region as needs_input; unlike gatePatterns
+   *  they never affect launch or readiness. */
+  inputPromptPatterns?: readonly RegExp[];
   /** Interactive gates that need an operator (trust, login, update, ...). */
   gatePatterns?: readonly TuiCliGatePattern[];
   /** CLI errors. They fire while the TUI runs and, on new pane lines, after it
@@ -505,12 +510,14 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
 
   /**
    * Activity from the pane (F1, feature 2), with the readiness shell guard.
-   * Reads the visible screen only (never scrollback), and matches gate and
-   * busy markers only in its bottom status region (the last
-   * ACTIVITY_STATUS_LINES non-blank lines), so an old busy line or an answered
-   * dialog left higher on the screen never reads as working or needs_input.
-   * In order: pane at a shell => null; a gate in the status region =>
-   * needs_input; a busy marker there => working; a ready marker on screen =>
+   * Reads the visible screen only (never scrollback). Gates (full-screen
+   * launch dialogs) match anywhere on the visible screen; in-session prompts
+   * and busy markers match only in the bottom status region (the last
+   * ACTIVITY_STATUS_LINES non-blank lines), where the live prompt and status
+   * render, so an answered prompt or an old busy line left higher in the
+   * visible history never reads as needs_input or working. In order: pane at
+   * a shell => null; a gate on screen, or an in-session prompt in the status
+   * region => needs_input; a busy marker there => working; a ready marker on screen =>
    * idle; anything else => null, so callers fall back to their generic source
    * and a wrong guess never suppresses a wake.
    */
@@ -520,7 +527,11 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     if (SHELL_COMMANDS.has(paneCommand)) return null;
     const screen = (await this.tmux.capturePaneScreen(binding.tmuxSession, JOINED)) ?? "";
     const status = screen.split("\n").filter((line) => line.trim() !== "").slice(-ACTIVITY_STATUS_LINES).join("\n");
-    if ((this.spec.gatePatterns ?? []).some((gate) => gate.pattern.test(status))) return "needs_input";
+    // A gate is a full-screen dialog (sign-in, trust, provider picker): its text
+    // can sit well above the bottom lines on an 80x24 pane, so gates match the
+    // whole visible screen, as checkReady does.
+    if ((this.spec.gatePatterns ?? []).some((gate) => gate.pattern.test(screen))) return "needs_input";
+    if ((this.spec.inputPromptPatterns ?? []).some((pattern) => pattern.test(status))) return "needs_input";
     if ((this.spec.busyPatterns ?? []).some((pattern) => pattern.test(status))) return "working";
     if (this.spec.readyPatterns.some((pattern) => pattern.test(screen))) return "idle";
     return null;

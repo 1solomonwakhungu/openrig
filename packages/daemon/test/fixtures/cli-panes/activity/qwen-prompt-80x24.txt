@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ● Read src/server.ts
+ Looked at the request handler and the router setup.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Allow execution of: 'npm test'?                                              │
+│                                                                              │
+│ ● 1. Yes, allow once                                                         │
+│   2. Always allow [npm] in this project                                      │
+│   3. Always allow [npm] for this user                                        │
+│   4. No, suggest changes (esc)                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯

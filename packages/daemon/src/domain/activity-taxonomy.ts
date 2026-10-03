@@ -78,10 +78,14 @@ export function deriveDisplayActivity(activity: string, needsInput: NeedsInput):
 /** The named rungs, in ARBITRATION RANK order for the working/idle decision (top first).
  *  needs-input-chrome is special-cased: it outranks self-report for the needs-input
  *  signal ONLY, never for working/idle. window-sampling is the fallback floor. */
-export type EvidenceRungId = "self-report" | "lifecycle-hooks" | "needs-input-chrome" | "window-sampling";
+export type EvidenceRungId = "self-report" | "lifecycle-hooks" | "needs-input-chrome" | "pane-markers" | "window-sampling";
 export const EVIDENCE_RUNG_RANK: readonly EvidenceRungId[] = [
   "self-report",
   "lifecycle-hooks",
+  // A registry CLI's own busy and ready markers read from its pane
+  // (classifyActivity). Seats declare it at trial: it decides working/idle only
+  // after agreeing with window-sampling enough to be promoted.
+  "pane-markers",
   "window-sampling",
 ];
 
@@ -104,7 +108,7 @@ export interface RungDeclaration {
  *  never inherits its predecessor's rung authority. */
 export interface AdapterRungInventory {
   adapterId: string;
-  runtime: "claude-code" | "codex" | "tmux-generic";
+  runtime: "claude-code" | "codex" | "tui-cli" | "tmux-generic";
   rungs: RungDeclaration[];
 }
 
@@ -180,6 +184,22 @@ export const CODEX_ACTIVITY_RUNG_INVENTORY: AdapterRungInventory = {
   ],
 };
 
+/** Registry TUI CLI runtimes whose adapter classifies its pane (classifyActivity):
+ *  a visible gate or in-session prompt is needs-input chrome (authoritative: the
+ *  CLI's own dialog on screen); its busy and ready markers enter at TRIAL on the
+ *  pane-markers rung (measured against sampling, never consulted until promoted),
+ *  so an unverified busy marker can never hold a seat at working and suppress a
+ *  wake. Sampling stays the floor. */
+export const TUI_CLI_ACTIVITY_RUNG_INVENTORY: AdapterRungInventory = {
+  adapterId: "tui-cli-runtime-adapter",
+  runtime: "tui-cli",
+  rungs: [
+    { rung: "needs-input-chrome", lifecycleCoverage: "full", initialTrust: "authoritative" },
+    { rung: "pane-markers", lifecycleCoverage: "full", initialTrust: "trial" },
+    { rung: "window-sampling", lifecycleCoverage: "full", initialTrust: "authoritative" },
+  ],
+};
+
 /** The generic tmux floor: sampling only — exactly what an undeclared seat gets. */
 export const TMUX_GENERIC_RUNG_INVENTORY: AdapterRungInventory = {
   adapterId: "tmux-generic",
@@ -188,9 +208,11 @@ export const TMUX_GENERIC_RUNG_INVENTORY: AdapterRungInventory = {
 };
 
 /** Resolve a runtime string to its rung inventory (the ingest auto-declaration path).
+ *  `paneClassified` marks a registry runtime whose adapter classifies its pane.
  *  Unknown runtimes get the generic floor — partial-coverage honesty by default. */
-export function runtimeRungInventory(runtime: string | null): AdapterRungInventory {
+export function runtimeRungInventory(runtime: string | null, paneClassified = false): AdapterRungInventory {
   if (runtime === "claude-code") return CLAUDE_ACTIVITY_RUNG_INVENTORY;
   if (runtime === "codex") return CODEX_ACTIVITY_RUNG_INVENTORY;
+  if (paneClassified) return TUI_CLI_ACTIVITY_RUNG_INVENTORY;
   return TMUX_GENERIC_RUNG_INVENTORY;
 }

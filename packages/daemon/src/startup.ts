@@ -1,4 +1,6 @@
 import { configureShadowCapture } from "./domain/shadow-capture.js";
+import type { NodeBinding, RuntimeAdapter } from "./domain/runtime-adapter.js";
+import { BUILTIN_RUNTIME_IDS, getRuntimeDescriptor } from "./domain/runtime-registry.js";
 import { SeatDeliveryGuard, resolveGuardTarget } from "./domain/seat-delivery-guard.js";
 import { queueRecoveryOwnsWake } from "./domain/queue-wake-ladder.js";
 import { HealthPolicyStore } from "./domain/health-policy.js";
@@ -442,10 +444,22 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   // window: 3s per slice 15 README. Per-seat silenceWindowSeconds from
   // AgentSpec.profile.activity is currently inert (the poller uses the
   // global default; per-seat windows are not wired to the live poll).
+  // Feature 2: registry CLI runtimes classify their own pane (gates, in-session
+  // prompts, busy and ready markers). The adapter map is built further down, so
+  // the classifier resolves it late; until then it reports nothing.
+  let paneClassifierAdapters: Record<string, RuntimeAdapter> | null = null;
   const seatActivityService = new SeatActivityService({
     tmux: tmuxAdapter,
     defaultWindowSeconds: 3,
     eventBus,
+    paneClassifier: {
+      supports: (runtime) => !(BUILTIN_RUNTIME_IDS as readonly string[]).includes(runtime) && !!getRuntimeDescriptor(runtime),
+      classify: async (runtime, sessionName) => {
+        const adapter = paneClassifierAdapters?.[runtime];
+        if (!adapter?.classifyActivity) return null;
+        return adapter.classifyActivity({ tmuxSession: sessionName } as NodeBinding);
+      },
+    },
     // S19 — the Claude self-report rung (pid.json), consulted per sweep for seats whose
     // declared inventory staffs it; unreadable = null = the ladder falls, never errors.
     selfReportReader: (sessionName, seatNodeId) => {
@@ -742,7 +756,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const stubRunnerEntryPath = nodePath.resolve(import.meta.dirname, "./adapters/stub-runner.js");
   const stubAdapter = new StubRuntimeAdapter({ tmux: tmuxAdapter, fsOps: nodeFsOps, runnerEntryPath: stubRunnerEntryPath });
   const { TerminalAdapter } = await import("./adapters/terminal-adapter.js");
-  const runtimeAdapters = buildRuntimeAdapters(
+  const runtimeAdapters = paneClassifierAdapters = buildRuntimeAdapters(
     { claudeCode: claudeAdapter, codex: codexAdapter, pi: piAdapter, omp: ompAdapter, stub: stubAdapter, terminal: new TerminalAdapter() },
     cliRuntimeAdapters,
   );

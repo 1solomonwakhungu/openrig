@@ -183,10 +183,13 @@ describe("TuiCliRuntimeAdapter.classifyActivity", () => {
     expect(tmux.capturePaneContent).not.toHaveBeenCalled();
   });
 
-  it("ignores stale busy and gate lines above the bottom status region", async () => {
+  it("ignores a stale busy line above the bottom status region; a gate anywhere on screen counts", async () => {
     const filler = Array.from({ length: ACTIVITY_STATUS_LINES }, (_, n) => `answer line ${n + 1}`).join("\n");
     expect(await classify({ command: "example-cli", content: `Thinking... (esc to interrupt)\n${filler}\nexample-cli ready>` })).toBe("idle");
-    expect(await classify({ command: "example-cli", content: `Please log in\n${filler}\nexample-cli ready>` })).toBe("idle");
+    // Gates are full-screen launch dialogs whose text can sit above the bottom
+    // lines on an 80x24 pane (cline login, gemini auth/trust, qwen auth), so they
+    // match the whole visible screen, as checkReady does.
+    expect(await classify({ command: "example-cli", content: `Please log in\n${filler}\nexample-cli ready>` })).toBe("needs_input");
     // The same markers inside the region still count; blank lines do not push them out.
     expect(await classify({ command: "example-cli", content: `${filler}\nThinking... (esc to interrupt)\n\n\n\nexample-cli ready>` })).toBe("working");
     expect(await classify({ command: "example-cli", content: `${filler}\nPlease log in\n\n\n` })).toBe("needs_input");

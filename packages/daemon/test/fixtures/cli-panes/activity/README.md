@@ -1,0 +1,7 @@
+# Activity marker fixtures (80x24)
+
+Synthesized, not captured: each screen is laid out from the busy marker or
+in-session prompt strings read from the CLI's source or shipped bundle (see
+`src/adapters/cli/activity-markers.ts` for versions and references). OpenRig
+never signs in to a CLI, so a working model turn or a tool approval could not
+be captured live. Layouts are illustrative; the marker text is verbatim.
