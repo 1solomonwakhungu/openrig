@@ -19,6 +19,7 @@ export const runtimeUsageSchema: Migration = {
       cache_write_tokens     INTEGER,
       reasoning_tokens       INTEGER,
       cost_usd               REAL,
+      cost_source            TEXT,
       context_used_tokens    INTEGER,
       context_window_tokens  INTEGER,
       model                  TEXT,

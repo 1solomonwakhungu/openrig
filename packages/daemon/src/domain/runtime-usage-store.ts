@@ -28,6 +28,7 @@ interface RuntimeUsageRow {
   cache_write_tokens: number | null;
   reasoning_tokens: number | null;
   cost_usd: number | null;
+  cost_source: string | null;
   context_used_tokens: number | null;
   context_window_tokens: number | null;
   model: string | null;
@@ -45,21 +46,21 @@ export class RuntimeUsageStore {
     this.db.prepare(`
       INSERT INTO runtime_usage (
         node_id, session_name, runtime, source, observed_at, input_tokens, output_tokens,
-        cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_usd,
+        cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_usd, cost_source,
         context_used_tokens, context_window_tokens, model, approximate, read_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(node_id) DO UPDATE SET
         session_name = excluded.session_name, runtime = excluded.runtime, source = excluded.source,
         observed_at = excluded.observed_at, input_tokens = excluded.input_tokens,
         output_tokens = excluded.output_tokens, cache_read_tokens = excluded.cache_read_tokens,
         cache_write_tokens = excluded.cache_write_tokens, reasoning_tokens = excluded.reasoning_tokens,
-        cost_usd = excluded.cost_usd, context_used_tokens = excluded.context_used_tokens,
+        cost_usd = excluded.cost_usd, cost_source = excluded.cost_source, context_used_tokens = excluded.context_used_tokens,
         context_window_tokens = excluded.context_window_tokens, model = excluded.model,
         approximate = excluded.approximate, read_at = excluded.read_at
     `).run(
       input.nodeId, input.sessionName, input.runtime, r.source, r.observedAt,
       r.inputTokens ?? null, r.outputTokens ?? null, r.cacheReadTokens ?? null, r.cacheWriteTokens ?? null,
-      r.reasoningTokens ?? null, r.costUsd ?? null, r.contextUsedTokens ?? null, r.contextWindowTokens ?? null,
+      r.reasoningTokens ?? null, r.costUsd ?? null, r.costSource ?? null, r.contextUsedTokens ?? null, r.contextWindowTokens ?? null,
       r.model ?? null, r.approximate ? 1 : 0, input.readAt,
     );
   }
@@ -87,6 +88,7 @@ export class RuntimeUsageStore {
         cacheWriteTokens: optional(row.cache_write_tokens),
         reasoningTokens: optional(row.reasoning_tokens),
         costUsd: optional(row.cost_usd),
+        costSource: (row.cost_source === "cli_reported" || row.cost_source === "estimated") ? row.cost_source : undefined,
         contextUsedTokens: optional(row.context_used_tokens),
         contextWindowTokens: optional(row.context_window_tokens),
         model: optional(row.model),

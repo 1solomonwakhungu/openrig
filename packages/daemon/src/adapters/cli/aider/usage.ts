@@ -66,6 +66,8 @@ export function readAiderUsage(text: string | null, now: () => Date = () => new 
     cacheWriteTokens: sawCacheWrite ? cacheWrite : undefined,
     cacheReadTokens: sawCacheHit ? cacheHit : undefined,
     costUsd: sawCost ? Math.round(costTotal * 1e6) / 1e6 : undefined,
+    // aider prints the cost it computed (litellm price data); exact to its print precision.
+    costSource: sawCost ? "cli_reported" : undefined,
     contextUsedTokens: latestSent,
     observedAt: now().toISOString(),
     source: AIDER_USAGE_SOURCE,

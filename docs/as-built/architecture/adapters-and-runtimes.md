@@ -476,7 +476,9 @@ percentage only when the CLI reports its context window) and a
 occupant-generation guard compares when OpenRig read it; the CLI's own record
 time stays in `runtime_usage.observed_at`. The node inventory attaches the
 current session's reading as `runtimeUsage`, and `rig ps --nodes --full` shows
-it in the `COST` column (`~` marks aider's rounded figures).
+it in the `COST` column. Every cost carries its provenance, `costSource`
+(`cli_reported` when the CLI computed it, `estimated` otherwise); the F1 runner
+drops a cost without one, and `~` in the column marks an estimated cost.
 
 ## 7. Adding a runtime adapter
 

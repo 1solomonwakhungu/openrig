@@ -159,7 +159,7 @@ the operator. Declare `model:` and the provider key in the seat env to get
 
 ## Usage
 
-Usage (`rig ps`): the `Tokens: ... Cost: ...` lines aider writes to the chat history. Counts are rounded by aider (`2.1k`), so COST shows `~`; the session cost restarts per aider process and is summed per segment.
+Usage (`rig ps`): the `Tokens: ... Cost: ...` lines aider writes to the chat history. Token counts are rounded by aider (`2.1k`) and marked approximate; the cost is what aider printed (`cli_reported`), so COST shows it unmarked; the session cost restarts per aider process and is summed per segment.
 
 ## Known limits
 

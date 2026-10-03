@@ -45,7 +45,7 @@ describe("cline (3.0.65 session record)", () => {
   it("reads the seat's aggregate usage (the session plus agents it spawned) and the model", () => {
     const files = { [clineSessionMetadataPath(SESSIONS, ID)]: fixture("cline-3.0.65-session.json") };
     expect(readClineUsage({ fs: fsOf(files), sessionsDir: SESSIONS, sessionId: ID, now: NOW })).toEqual({
-      inputTokens: 1500, outputTokens: 410, cacheReadTokens: 9000, cacheWriteTokens: 2500, costUsd: 0.0482,
+      inputTokens: 1500, outputTokens: 410, cacheReadTokens: 9000, cacheWriteTokens: 2500, costUsd: 0.0482, costSource: "cli_reported",
       model: "claude-sonnet-4-5", observedAt: NOW().toISOString(), source: CLINE_USAGE_SOURCE,
     });
   });
@@ -88,7 +88,7 @@ describe("opencode / kilo (seat session database)", () => {
     try {
       expect(readOpencodeUsage({ db, sessionId: "ses_1", source: "opencode_session_db", now: NOW })).toEqual({
         inputTokens: 30000, outputTokens: 2100, reasoningTokens: 400, cacheReadTokens: 120000, cacheWriteTokens: 9000,
-        costUsd: 0.42, contextUsedTokens: 1200 + 41000, model: "anthropic/claude-sonnet-4-5",
+        costUsd: 0.42, costSource: "cli_reported", contextUsedTokens: 1200 + 41000, model: "anthropic/claude-sonnet-4-5",
         observedAt: "2026-10-02T10:00:00.000Z", source: "opencode_session_db",
       });
     } finally {
@@ -153,7 +153,7 @@ describe("aider (0.86.2 chat history)", () => {
   it("sums requests, sums each process segment's session cost, and marks the result approximate", () => {
     expect(readAiderUsage(fixture("aider-0.86.2-chat.history.md"), NOW)).toEqual({
       inputTokens: 2100 + 3400 + 12000, outputTokens: 120 + 250 + 80, cacheWriteTokens: 1500, cacheReadTokens: 900,
-      costUsd: 0.02 + 0.03, contextUsedTokens: 12000, observedAt: NOW().toISOString(), source: AIDER_USAGE_SOURCE, approximate: true,
+      costUsd: 0.02 + 0.03, costSource: "cli_reported", contextUsedTokens: 12000, observedAt: NOW().toISOString(), source: AIDER_USAGE_SOURCE, approximate: true,
     });
   });
 
@@ -180,7 +180,7 @@ describe("descriptor readUsage wiring (real files, per runtime)", () => {
     const file = clineSessionMetadataPath(nodePath.join(homedir, ".cline", "data", "sessions"), id);
     nodeFs.mkdirp(nodePath.dirname(file));
     fs.writeFileSync(file, fixture("cline-3.0.65-session.json"));
-    expect(await read("cline", seatInput({ homedir, resumeToken: id }))).toMatchObject({ costUsd: 0.0482, source: CLINE_USAGE_SOURCE });
+    expect(await read("cline", seatInput({ homedir, resumeToken: id }))).toMatchObject({ costUsd: 0.0482, costSource: "cli_reported", source: CLINE_USAGE_SOURCE });
     expect(await read("cline", seatInput({ homedir, resumeToken: null }))).toBeNull();
   });
 
@@ -192,7 +192,7 @@ describe("descriptor readUsage wiring (real files, per runtime)", () => {
     db.exec("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)");
     db.prepare("INSERT INTO session VALUES (?,?,?,?,?,?,?,?,?)").run("ses_9", 1, null, 1.5, 10, 20, 0, 0, 0);
     db.close();
-    expect(await read("opencode", seatInput({ seatStateDir, resumeToken: "ses_9" }))).toMatchObject({ costUsd: 1.5, inputTokens: 10, source: "opencode_session_db" });
+    expect(await read("opencode", seatInput({ seatStateDir, resumeToken: "ses_9" }))).toMatchObject({ costUsd: 1.5, costSource: "cli_reported", inputTokens: 10, source: "opencode_session_db" });
     expect(await read("opencode", seatInput({ seatStateDir: nodePath.join(tmp, "no-db"), resumeToken: "ses_9" }))).toBeNull();
   });
 
@@ -201,7 +201,7 @@ describe("descriptor readUsage wiring (real files, per runtime)", () => {
     nodeFs.mkdirp(seatStateDir);
     const history = nodePath.join(seatStateDir, "aider.chat.history.launch-1.md");
     fs.writeFileSync(history, fixture("aider-0.86.2-chat.history.md"));
-    expect(await read("aider", seatInput({ seatStateDir, resumeToken: history }))).toMatchObject({ costUsd: 0.05, approximate: true });
+    expect(await read("aider", seatInput({ seatStateDir, resumeToken: history }))).toMatchObject({ costUsd: 0.05, costSource: "cli_reported", approximate: true });
   });
 
   it("gemini and qwen: the seat session's file in the CLI's own store", async () => {

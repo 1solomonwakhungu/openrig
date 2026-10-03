@@ -49,7 +49,7 @@ describe("registry usage pass (feature 1)", () => {
     monitor = new ContextMonitor(db, contextStore, undefined, undefined, {}, new UsageSamplesStore(db));
     monitor.attachRegistryUsage({ stateRoot: join(tmp, "state"), usageStore, homedir: "/home/operator", now: () => READ_AT });
     reading = {
-      inputTokens: 30_000, outputTokens: 2_100, cacheReadTokens: 120_000, reasoningTokens: 400, costUsd: 0.42,
+      inputTokens: 30_000, outputTokens: 2_100, cacheReadTokens: 120_000, reasoningTokens: 400, costUsd: 0.42, costSource: "cli_reported",
       contextUsedTokens: 50_000, contextWindowTokens: 200_000, model: "anthropic/claude-sonnet-4-5",
       observedAt: "2026-10-03T03:59:00.000Z", source: "usage_test_db",
     };
@@ -112,12 +112,12 @@ describe("registry usage pass (feature 1)", () => {
   });
 
   it("keeps context_usage untouched when the CLI reports no context, and stores the rest", async () => {
-    reading = { costUsd: 0.05, outputTokens: 10, observedAt: "2026-10-03T03:00:00.000Z", source: "usage_test_db", approximate: true };
+    reading = { costUsd: 0.05, costSource: "estimated", outputTokens: 10, observedAt: "2026-10-03T03:00:00.000Z", source: "usage_test_db", approximate: true };
     const { node, sessionName } = seed();
     await monitor.pollOnce();
     expect(contextStore.getForNode(node.id, sessionName)).toMatchObject({ availability: "unknown", reason: "no_data" });
     expect(usageStore.getForNodes([{ nodeId: node.id, currentSessionName: sessionName }]).get(node.id))
-      .toMatchObject({ costUsd: 0.05, approximate: true });
+      .toMatchObject({ costUsd: 0.05, costSource: "estimated", approximate: true });
   });
 
   it("a null reading or a throwing hook stores nothing and does not stop the poll", async () => {
@@ -127,6 +127,16 @@ describe("registry usage pass (feature 1)", () => {
     readUsage.mockImplementationOnce(async () => { throw new Error("corrupt record"); });
     await expect(monitor.pollOnce()).resolves.toBeUndefined();
     expect(usageStore.getForNodes([{ nodeId: a.node.id, currentSessionName: "a@usage" }]).size).toBe(0);
+  });
+
+  it("a cost without its provenance is never stored (the F1 runner drops it)", async () => {
+    reading = { costUsd: 9.99, inputTokens: 5, observedAt: "2026-10-03T03:00:00.000Z", source: "usage_test_db" };
+    const { node, sessionName } = seed();
+    await monitor.pollOnce();
+    const stored = usageStore.getForNodes([{ nodeId: node.id, currentSessionName: sessionName }]).get(node.id);
+    expect(stored).toMatchObject({ inputTokens: 5 });
+    expect(stored?.costUsd).toBeUndefined();
+    expect(stored?.costSource).toBeUndefined();
   });
 
   it("a reading from a previous session is not shown for the current one", async () => {

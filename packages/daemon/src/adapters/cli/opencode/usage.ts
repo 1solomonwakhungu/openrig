@@ -54,6 +54,8 @@ export function readOpencodeUsage(input: {
     cacheReadTokens: usageNumber(row.tokens_cache_read),
     cacheWriteTokens: usageNumber(row.tokens_cache_write),
     costUsd: usageNumber(row.cost),
+    // opencode computes cost itself from its model price data.
+    costSource: usageNumber(row.cost) !== undefined ? "cli_reported" : undefined,
     contextUsedTokens: contextInput !== undefined ? contextInput + (contextCache ?? 0) : undefined,
     model,
     observedAt: updated ? new Date(updated).toISOString() : (input.now ?? (() => new Date()))().toISOString(),

@@ -39,13 +39,16 @@ export function readClineUsage(input: {
   const metadata = record.metadata ?? {};
   const usage = (metadata.aggregateUsage ?? metadata.usage) as ClineUsageRecord | undefined;
   if (!usage || typeof usage !== "object") return null;
+  // cline computes the cost itself from its provider price data.
+  const cost = usageNumber(usage.totalCost) ?? usageNumber(metadata.totalCost);
   const model = typeof metadata.model === "string" ? metadata.model : typeof record.model === "string" ? record.model : undefined;
   return compactUsage({
     inputTokens: usageNumber(usage.inputTokens),
     outputTokens: usageNumber(usage.outputTokens),
     cacheReadTokens: usageNumber(usage.cacheReadTokens),
     cacheWriteTokens: usageNumber(usage.cacheWriteTokens),
-    costUsd: usageNumber(usage.totalCost) ?? usageNumber(metadata.totalCost),
+    costUsd: cost,
+    costSource: cost !== undefined ? "cli_reported" : undefined,
     model,
     observedAt: (input.now ?? (() => new Date()))().toISOString(),
     source: CLINE_USAGE_SOURCE,

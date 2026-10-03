@@ -8,13 +8,15 @@ import { formatRuntimeCost, padNodeRow } from "../src/commands/ps.js";
 const EMPTY_CELL = "\u2014";
 
 describe("rig ps COST column", () => {
-  it("formats a reported cost, marks rounded figures, and shows a dash when unknown", () => {
+  it("formats a reported cost, marks an estimated one, and shows a dash when unknown", () => {
     expect(formatRuntimeCost({ costUsd: 0.4231 })).toBe("$0.42");
     expect(formatRuntimeCost({ costUsd: 12.5 })).toBe("$12.50");
     expect(formatRuntimeCost({ costUsd: 250 })).toBe("$250");
     expect(formatRuntimeCost({ costUsd: 0.004 })).toBe("$<0.01");
     expect(formatRuntimeCost({ costUsd: 0 })).toBe("$0.00");
-    expect(formatRuntimeCost({ costUsd: 0.05, approximate: true })).toBe("~$0.05");
+    expect(formatRuntimeCost({ costUsd: 0.05, costSource: "estimated" })).toBe("~$0.05");
+    // aider's counts are rounded, but its cost is what aider printed: not marked.
+    expect(formatRuntimeCost({ costUsd: 0.05, costSource: "cli_reported", approximate: true })).toBe("$0.05");
     expect(formatRuntimeCost(undefined)).toBe(EMPTY_CELL);
     expect(formatRuntimeCost({ inputTokens: 100 })).toBe(EMPTY_CELL);
     expect(formatRuntimeCost({ costUsd: Number.NaN })).toBe(EMPTY_CELL);

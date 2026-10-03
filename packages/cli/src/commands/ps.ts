@@ -106,6 +106,8 @@ interface NodeEntry {
    *  session (from the daemon node inventory; absent = unknown). */
   runtimeUsage?: {
     costUsd?: number;
+    /** "cli_reported" (the CLI computed it) or "estimated" (marked with "~"). */
+    costSource?: "cli_reported" | "estimated";
     inputTokens?: number;
     outputTokens?: number;
     model?: string;
@@ -1351,14 +1353,14 @@ function formatHasWork(has: boolean | undefined, count: number | undefined): str
 // known + fresh, "<percent>%*" when known but stale, "??" when unknown.
 // 4-char width keeps the table compact without truncating two-digit
 // percentages (e.g., "98%*" or "5%").
-/** Feature 1: a seat's reported cost ("$0.42"); "~" marks a CLI that only
- *  reports rounded figures (aider); the table's usual empty-cell mark when the
- *  runtime reports no cost. */
+/** Feature 1: a seat's session cost ("$0.42"); "~" marks an estimated cost
+ *  (costSource "estimated"); the table's usual empty-cell mark when the runtime
+ *  reports no cost. */
 export function formatRuntimeCost(usage: NodeEntry["runtimeUsage"]): string {
   const cost = usage?.costUsd;
   if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) return "\u2014";
   const text = cost >= 100 ? cost.toFixed(0) : cost >= 0.01 ? cost.toFixed(2) : cost > 0 ? "<0.01" : "0.00";
-  return `${usage?.approximate ? "~" : ""}$${text}`;
+  return `${usage?.costSource === "estimated" ? "~" : ""}$${text}`;
 }
 
 function formatContextUsage(ctx: NodeEntry["contextUsage"]): string {
