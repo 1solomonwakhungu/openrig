@@ -17,6 +17,7 @@ import { NativePermissionStore } from "../src/domain/native-permission-store.js"
 import { registryPermissionModes, validateNativePermissionSelection } from "../src/domain/native-permission-selection.js";
 import { AppliedLaunchObservationStore } from "../src/domain/applied-launch-observation-store.js";
 import { PermissionDriftObserver } from "../src/domain/permission-drift-observer.js";
+import { observeClaudePermission, observeCodexSandbox } from "../src/domain/permission-drift.js";
 import { getRuntimeDescriptor, registerRuntimeDescriptor } from "../src/domain/runtime-registry.js";
 import { CLI_RUNTIME_REGISTRATIONS } from "../src/adapters/cli/index.js";
 import { COPILOT_SPEC } from "../src/adapters/cli/copilot/index.js";
@@ -114,10 +115,10 @@ describe("rig seat set-permissions on a registry runtime seat", () => {
   });
 });
 
-describe("migration 100 drops the runtime CHECK and keeps existing selections", () => {
+describe("migration 510 drops the runtime CHECK and keeps existing selections", () => {
   it("preserves codex and claude rows, accepts registry runtimes, and applies once", () => {
     const db = new Database(":memory:"); opened.push(db); db.pragma("foreign_keys = ON");
-    migrate(db, ALL_MIGRATIONS.filter((m) => !m.name.startsWith("100_")));
+    migrate(db, ALL_MIGRATIONS.filter((m) => !m.name.startsWith("510_")));
     const repo = new RigRepository(db); const rig = repo.createRig("upgrade");
     const codex = repo.addNode(rig.id, "codex", { runtime: "codex", cwd: "/inert" });
     const copilot = repo.addNode(rig.id, "copilot", { runtime: "copilot", cwd: "/inert" });
@@ -128,10 +129,17 @@ describe("migration 100 drops the runtime CHECK and keeps existing selections", 
     expect(db.prepare("SELECT * FROM node_permission_selections").all()).toEqual(before);
     db.prepare("INSERT INTO node_permission_selections(node_id, runtime, mode, actor, reason) VALUES (?, 'copilot', 'floor', 'op', 'why')").run(copilot.id);
     expect(new NativePermissionStore(db).read(copilot.id)).toMatchObject({ runtime: "copilot", mode: "floor" });
-    expect(db.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE name LIKE '100_%'").get()).toEqual({ n: 1 });
+    expect(db.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE name LIKE '510_%'").get()).toEqual({ n: 1 });
     expect(db.pragma("foreign_key_check")).toEqual([]);
   });
 });
+
+const driftFs = { readFile: () => "", cwdReadable: () => true, commandAvailable: () => true, claudePermissionModes: () => null };
+/** A diagnosis without its per-call timestamp. */
+function stable(diagnostic: unknown) {
+  const { observedAt: _observedAt, ...rest } = (diagnostic ?? {}) as Record<string, unknown>;
+  return rest;
+}
 
 describe("drift detection compares against the seat's selected posture", () => {
   function observed(posture: "floor" | "full_bypass") {
@@ -142,7 +150,7 @@ describe("drift detection compares against the seat's selected posture", () => {
     const f = fixture("copilot");
     const generation = f.registry.currentOccupantTenure(f.node.id)!.generationUuid;
     const observations = new AppliedLaunchObservationStore(f.db);
-    const observer = new PermissionDriftObserver({ db: f.db, fs: { readFile: () => "", cwdReadable: () => true, commandAvailable: () => true, claudePermissionModes: () => null } });
+    const observer = new PermissionDriftObserver({ db: f.db, fs: driftFs });
     observations.recordGeneration(generation, observed("full_bypass"));
     // No policy and no selection: nothing to compare against.
     expect(observer.diagnose(f.node.id)?.enforcement).toMatchObject({ state: "unknown", reason: "expected_posture_unknown" });
@@ -150,5 +158,37 @@ describe("drift detection compares against the seat's selected posture", () => {
     expect(observer.diagnose(f.node.id)?.enforcement).toMatchObject({ state: "aligned", expected: "full_bypass", effective: "full_bypass" });
     await f.service.setPermissions(request("floor"));
     expect(observer.diagnose(f.node.id)?.enforcement).toMatchObject({ state: "drift", expected: "floor", effective: "full_bypass" });
+  });
+
+  // codex and claude-code accept floor/full_bypass selections too, but their
+  // drift path never consults the expected posture (built-ins report launch
+  // arguments as native_permission_effect_unverified, or inspect Claude's own
+  // settings), so a selection must leave their diagnosis byte-identical.
+  it("leaves codex drift unchanged by a floor or full_bypass selection", async () => {
+    const f = fixture("codex");
+    const generation = f.registry.currentOccupantTenure(f.node.id)!.generationUuid;
+    new AppliedLaunchObservationStore(f.db).recordGeneration(generation, observeCodexSandbox("-s danger-full-access -a never"));
+    const observer = new PermissionDriftObserver({ db: f.db, fs: driftFs });
+    const before = stable(observer.diagnose(f.node.id));
+    expect(before.enforcement).toMatchObject({ reason: "native_permission_effect_unverified" });
+    for (const mode of ["full_bypass", "floor"]) {
+      expect(await f.service.setPermissions(request(mode))).toMatchObject({ ok: true });
+      expect(stable(observer.diagnose(f.node.id)), mode).toEqual(before);
+    }
+  });
+
+  it("leaves claude-code drift unchanged by floor, full_bypass, or a native mode selection", async () => {
+    const f = fixture("claude-code");
+    const generation = f.registry.currentOccupantTenure(f.node.id)!.generationUuid;
+    new AppliedLaunchObservationStore(f.db).recordGeneration(generation, observeClaudePermission("--permission-mode acceptEdits"));
+    const observer = new PermissionDriftObserver({ db: f.db, fs: driftFs });
+    const before = stable(observer.diagnose(f.node.id));
+    for (const mode of ["full_bypass", "floor", "acceptEdits"]) {
+      // A native mode keeps the policy posture as expected (selectedPosture
+      // reads only floor and full_bypass); written directly because native
+      // modes need a bound managed launch context to validate.
+      f.store.write(f.node.id, { runtime: "claude-code", mode }, "operator@permissions", "test");
+      expect(stable(observer.diagnose(f.node.id)), mode).toEqual(before);
+    }
   });
 });

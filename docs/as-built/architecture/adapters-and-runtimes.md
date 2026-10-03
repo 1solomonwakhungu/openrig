@@ -322,7 +322,7 @@ Per-seat permission selection (`native-permission-selection.ts`,
 `rig seat set-permissions`) is registry-driven for CLI runtimes: a descriptor
 that declares `permissionModes` (every registered CLI runtime declares
 `["floor", "full_bypass"]`) accepts those postures per seat, stored in
-`node_permission_selections` (migration 100 dropped the old claude/codex
+`node_permission_selections` (migration 510 dropped the old claude/codex
 `runtime` CHECK) and applied as `binding.launchPosture` on the next launch,
 restore resume, or handover. Permission drift uses the selected posture as the
 expected one before the policy posture. Claude native modes and Codex keep their

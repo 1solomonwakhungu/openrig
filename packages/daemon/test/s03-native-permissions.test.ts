@@ -61,7 +61,7 @@ describe("S03 future native permission selections (offline; no native effect cla
   it("migration 088 preserves prior launch observations and histories and applies only once", () => {
     const db = new Database(":memory:"); opened.push(db); db.pragma("foreign_keys = ON");
     // The pre-088 database: every migration before 088 (later ones, such as
-    // 100, alter the table 088 creates).
+    // 510, alter the table 088 creates).
     migrate(db, ALL_MIGRATIONS.filter(m => m.name < "088_"));
     const repo = new RigRepository(db); const rig = repo.createRig("upgrade");
     const node = repo.addNode(rig.id, "owner", { runtime: "codex", cwd: "/inert" });

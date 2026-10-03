@@ -4,7 +4,7 @@ import type { Migration } from "../migrate.js";
 // drop the claude-code/codex CHECK on runtime and keep every existing row. The
 // runtime and mode pair is validated against the registry on read and write.
 export const nodePermissionSelectionsAnyRuntimeSchema: Migration = {
-  name: "100_node_permission_selections_any_runtime.sql",
+  name: "510_node_permission_selections_any_runtime.sql",
   sql: `
     CREATE TABLE node_permission_selections_next (
       node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
