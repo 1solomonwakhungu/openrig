@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import nodePath from "node:path";
+import { LAUNCH_RECORD_FILE, seatStateDirFor } from "../src/domain/runtime-capture.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type Database from "better-sqlite3";
 import { CmuxAdapter } from "../src/adapters/cmux.js";
@@ -752,6 +756,31 @@ describe("Session routes", () => {
     expect((await detail.json()).permissionDrift).toMatchObject({ enforcement: { axis: "sandbox", state: "aligned" } });
     expect(diagnose).toHaveBeenCalledOnce();
     expect(diagnose).toHaveBeenCalledWith(node.id);
+  });
+
+  it("node detail carries the trust answers recorded for the seat's current launch; the list does not", async () => {
+    const stateRoot = fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-detail-trust-"));
+    try {
+      const { app, rigRepo, sessionRegistry } = createTestApp(db, { runtimeStateRoot: stateRoot });
+      const rig = rigRepo.createRig("test-rig");
+      const node = rigRepo.addNode(rig.id, "dev.impl", { runtime: "copilot", cwd: "/work/repo" });
+      sessionRegistry.registerClaimedSession(node.id, "dev-impl@test-rig");
+      const detailOf = async () => (await (await app.request(`/api/rigs/${rig.id}/nodes/${encodeURIComponent("dev.impl")}`)).json());
+      expect((await detailOf()).trustAnswers).toEqual([]);
+      const seatDir = seatStateDirFor(stateRoot, "copilot", "dev-impl@test-rig");
+      fs.mkdirSync(seatDir, { recursive: true });
+      fs.writeFileSync(nodePath.join(seatDir, LAUNCH_RECORD_FILE), JSON.stringify({
+        sessionName: "dev-impl@test-rig", cwd: "/work/repo",
+        gateAnswers: [{ code: "trust_gate", option: "Yes", describe: "session only", answeredAt: "2026-10-03T03:30:00.000Z" }],
+      }));
+      expect((await detailOf()).trustAnswers).toEqual([expect.objectContaining({
+        code: "trust_gate", summary: "OpenRig trusted /work/repo for this session (copilot)",
+      })]);
+      const list = await app.request(`/api/rigs/${rig.id}/nodes?full=true`);
+      expect((await list.json())[0].trustAnswers).toBeUndefined();
+    } finally {
+      fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
   });
 
   it("GET /api/rigs/:rigId/nodes includes read-only agent activity evidence", async () => {

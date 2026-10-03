@@ -87,6 +87,15 @@ export interface NodeDetailData {
     sampledAt?: string | null;
     fresh?: boolean;
   };
+  /** Dialogs OpenRig answered for the seat's current launch (folder trust). */
+  trustAnswers?: Array<{
+    code: string;
+    option: string;
+    folder: string | null;
+    runtime: string;
+    answeredAt: string;
+    summary: string;
+  }>;
 }
 
 async function fetchNodeDetail(rigId: string, logicalId: string, hostId: string): Promise<NodeDetailData> {

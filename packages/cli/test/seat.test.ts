@@ -248,6 +248,25 @@ describe("rig seat status", () => {
     expect(output).toContain("Previous occupant: none");
   });
 
+  it("prints each trust answer OpenRig made for the current launch", async () => {
+    const answered = {
+      ...STATUS,
+      runtime: "copilot",
+      trust_answers: [{
+        code: "trust_gate", option: "Yes", folder: "/work/repo", runtime: "copilot", answeredAt: "2026-10-03T03:30:00.000Z",
+        summary: "OpenRig trusted /work/repo for this session (copilot)",
+      }],
+    };
+    const { logs } = await captureLogs(async () => {
+      await makeCommand(makeDeps({ status: 200, data: answered }, [])).parseAsync(["node", "rig", "seat", "status", "dev-impl@seat-rig"]);
+    });
+    expect(logs.join("\n")).toContain("OpenRig trusted /work/repo for this session (copilot) at 2026-10-03T03:30:00.000Z");
+    const quiet = await captureLogs(async () => {
+      await makeCommand(makeDeps({ status: 200, data: STATUS }, [])).parseAsync(["node", "rig", "seat", "status", "dev-impl@seat-rig"]);
+    });
+    expect(quiet.logs.join("\n")).not.toContain("OpenRig trusted");
+  });
+
   it("returns a nonzero status for an unknown seat", async () => {
     const deps = makeDeps({
       status: 404,

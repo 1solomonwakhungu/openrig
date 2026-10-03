@@ -1,3 +1,5 @@
+import nodePath from "node:path";
+import os from "node:os";
 import { mockShellCommand } from "./shell-command-mock.js";
 import { vi } from "vitest";
 import type Database from "better-sqlite3";
@@ -233,6 +235,8 @@ export function createTestApp(
       diagnose(nodeId: string): import("../../src/domain/permission-drift.js").PermissionDriftDiagnostic | null;
     };
     listProcesses?: () => Promise<Array<{ pid: number; ppid: number; command: string }>>;
+    /** Per-seat runtime state root for launch records (trust answers). */
+    runtimeStateRoot?: string;
     /**
      * Agent Starter v1 vertical M2: optional real-fs upRouter for tests
      * that POST /api/up with a YAML spec on disk. Default behavior
@@ -366,7 +370,10 @@ export function createTestApp(
     sessionRegistry,
     contextUsageStore,
   }));
-  const whoamiService = new WhoamiService({ db, rigRepo, sessionRegistry, transcriptStore, contextUsageStore });
+  // Seat launch records (trust answers) are read from here, never from the
+  // owner's <OPENRIG_HOME>/state: each test app gets its own temp root.
+  const runtimeStateRoot = opts?.runtimeStateRoot ?? fs.mkdtempSync(nodePath.join(os.tmpdir(), "openrig-test-state-"));
+  const whoamiService = new WhoamiService({ db, rigRepo, sessionRegistry, transcriptStore, contextUsageStore, runtimeStateRoot });
   const cmuxTmux = { ...tmux, hasSession: vi.fn(async () => true) } as unknown as TmuxAdapter;
   const nodeCmuxService = new NodeCmuxService(rigRepo, sessionRegistry, cmux, cmuxTmux);
   const agentActivityStore = new AgentActivityStore({
@@ -428,9 +435,11 @@ export function createTestApp(
     // across the suite). Tests for the observer itself construct it directly
     // and pass it here explicitly.
     permissionDriftObserver: opts?.permissionDriftObserver ?? { diagnose: () => null },
+    runtimeStateRoot,
     runtimeAdapters: opts?.wireRuntimeAdapters ? adapters : undefined,
   });
   return {
+    runtimeStateRoot,
     app, rigRepo, sessionRegistry, eventBus, nodeLauncher, snapshotRepo,
     snapshotCapture, checkpointStore, restoreOrchestrator,
     rigSpecExporter, rigSpecPreflight, rigInstantiator,

@@ -438,6 +438,27 @@ function ContextUsageSection({ data }: { data: NodeDetailData }) {
   );
 }
 
+// Visible trust answers: dialogs OpenRig answered for this seat's current
+// launch (for example Copilot's folder trust, for that session only). Renders
+// nothing when there were none.
+export function TrustAnswersSection({ data }: { data: NodeDetailData }) {
+  const answers = data.trustAnswers ?? [];
+  if (answers.length === 0) return null;
+  return (
+    <section data-testid="detail-trust-answers" className={SECTION_CLASS}>
+      <div className="font-mono text-[8px] text-on-surface-variant uppercase tracking-wider mb-2">Trust</div>
+      <ul className="space-y-1 font-mono text-[10px]">
+        {answers.map((answer) => (
+          <li key={`${answer.code}-${answer.answeredAt}`} data-testid="detail-trust-answer">
+            {answer.summary}
+            {answer.answeredAt ? <span className="text-on-surface-variant"> at {answer.answeredAt}</span> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 // V0.3.1 slice 25 follow-on — Overview tab. Stack order:
 //   1. Notification banner (renders only when active message exists)
 //   2. Info table (column-oriented; cwd + current-work full-width)
@@ -457,6 +478,7 @@ function OverviewTab({ data, activityVisual }: { data: NodeDetailData; activityV
       <SeatNotificationBanner data={data} />
       <SeatOverviewTable data={data} activityVisual={activityVisual} />
       <SeatOverviewSecondary data={data} />
+      <TrustAnswersSection data={data} />
       <InlineTerminal data={data} />
       <RecentEventsSection data={data} />
     </div>

@@ -73,6 +73,9 @@ If any of these fail, or the dialog is still showing after the answer, the
 launch reports `attention_required` with the code `trust_gate` and the pane
 text as evidence. Each answer is logged by the daemon and recorded as
 `gateAnswers` in the seat's `launch.json` under the OpenRig state directory.
+Operators see it as "OpenRig trusted <folder> for this session (copilot)" in
+`rig seat status`, `rig whoami` (human output and `--json`), the node detail
+API (`rig ps` detail), and the seat's Overview in the UI.
 This applies with both `floor` and `full_bypass`, because OpenRig only
 launches into the working directory the rig spec chose.
 

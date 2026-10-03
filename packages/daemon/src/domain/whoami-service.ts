@@ -3,6 +3,7 @@ import type { RigRepository } from "./rig-repository.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { TranscriptStore } from "./transcript-store.js";
 import { resolveWorkspaceContext, type WhoamiWorkspaceBlock } from "./workspace/workspace-resolver.js";
+import { readSeatTrustAnswers, type SeatTrustAnswer } from "./seat-trust-answers.js";
 
 export interface WhoamiResult {
   resolvedBy: "node_id" | "session_name";
@@ -67,6 +68,9 @@ export interface WhoamiResult {
   workspace?: WhoamiWorkspaceBlock | null;
   /** W3 explicit current-seat diagnostic; omitted from ordinary whoami reads. */
   permissionDrift?: import("./permission-drift.js").PermissionDriftDiagnostic | null;
+  /** Dialogs OpenRig answered for this seat's current launch (TuiCliGateAnswer).
+   *  Present only when there is at least one. */
+  trustAnswers?: SeatTrustAnswer[];
 }
 
 export type RuntimeContext =
@@ -136,6 +140,8 @@ interface WhoamiDeps {
   rigRepo: RigRepository;
   sessionRegistry: SessionRegistry;
   transcriptStore: TranscriptStore;
+  /** Per-seat runtime state root for trust answers (<OPENRIG_HOME>/state by default). */
+  runtimeStateRoot?: string;
   contextUsageStore?: import("./context-usage-store.js").ContextUsageStore;
 }
 
@@ -145,6 +151,7 @@ export class WhoamiService {
   private sessionRegistry: SessionRegistry;
   private transcriptStore: TranscriptStore;
   private contextUsageStore: import("./context-usage-store.js").ContextUsageStore | null;
+  private runtimeStateRoot?: string;
 
   constructor(deps: WhoamiDeps) {
     this.db = deps.db;
@@ -152,6 +159,7 @@ export class WhoamiService {
     this.sessionRegistry = deps.sessionRegistry;
     this.transcriptStore = deps.transcriptStore;
     this.contextUsageStore = deps.contextUsageStore ?? null;
+    this.runtimeStateRoot = deps.runtimeStateRoot;
   }
 
   resolve(query: { nodeId?: string; sessionName?: string; targetRepoOverride?: string; compact?: boolean }): WhoamiResult | null {
@@ -348,7 +356,13 @@ export class WhoamiService {
       contextUsage,
       runtimeContext,
       workspace,
+      ...this.trustAnswersBlock(identity.runtime, identity.sessionName),
     };
+  }
+
+  private trustAnswersBlock(runtime: string, sessionName: string | null): { trustAnswers?: SeatTrustAnswer[] } {
+    const answers = readSeatTrustAnswers(runtime, sessionName, this.runtimeStateRoot);
+    return answers.length > 0 ? { trustAnswers: answers } : {};
   }
 
   /** PL-012: produce the runtime-specific context block. v0 surfaces

@@ -74,9 +74,12 @@ export class SeatSwitchClientService {
   private rigRepo: RigRepository;
   private tmuxAdapter: TmuxAdapter;
 
-  constructor(deps: { rigRepo: RigRepository; tmuxAdapter: TmuxAdapter }) {
+  private runtimeStateRoot?: string;
+
+  constructor(deps: { rigRepo: RigRepository; tmuxAdapter: TmuxAdapter; runtimeStateRoot?: string }) {
     this.rigRepo = deps.rigRepo;
     this.tmuxAdapter = deps.tmuxAdapter;
+    this.runtimeStateRoot = deps.runtimeStateRoot;
   }
 
   /** Honest probe-failure result. The tmux adapter intentionally RETHROWS
@@ -95,7 +98,7 @@ export class SeatSwitchClientService {
 
   async switchClient(req: SeatSwitchClientRequest): Promise<SeatSwitchClientResult> {
     // 1. Resolve seat -> canonical session, READ-ONLY (no binding mutation).
-    const statusService = new SeatStatusService({ rigRepo: this.rigRepo });
+    const statusService = new SeatStatusService({ rigRepo: this.rigRepo, stateRoot: this.runtimeStateRoot });
     const status = statusService.getStatus(req.seatRef);
     if (!status.ok) {
       // Propagate the read-only resolution errors verbatim (seat_ref_required /

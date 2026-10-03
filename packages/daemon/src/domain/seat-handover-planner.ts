@@ -62,8 +62,8 @@ export type SeatHandoverPlanResult =
 export class SeatHandoverPlanner {
   private statusService: SeatStatusService;
 
-  constructor(deps: { rigRepo: RigRepository }) {
-    this.statusService = new SeatStatusService({ rigRepo: deps.rigRepo });
+  constructor(deps: { rigRepo: RigRepository; runtimeStateRoot?: string }) {
+    this.statusService = new SeatStatusService({ rigRepo: deps.rigRepo, stateRoot: deps.runtimeStateRoot });
   }
 
   plan(input: {
