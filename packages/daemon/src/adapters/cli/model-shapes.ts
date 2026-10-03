@@ -7,6 +7,14 @@
 
 import type { RuntimeModelShape } from "../../domain/runtime-capabilities.js";
 
+/** Matches nothing: the runtime takes no per-seat `model:` at all. */
+const NO_MODEL = /(?!)/;
+
+/** Whether a shape means "this runtime takes no model:" (see NO_MODEL). */
+export function acceptsNoModel(shape: RuntimeModelShape): boolean {
+  return shape.pattern.source === NO_MODEL.source && !shape.aliases?.length;
+}
+
 /** A model id with no spaces or shell metacharacters. */
 const PLAIN_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+/-]*$/;
 
@@ -72,7 +80,7 @@ export const ANTIGRAVITY_MODEL_SHAPE: RuntimeModelShape = {
  *  would rewrite the operator's default (adapters/cli/cline/launch.ts), so
  *  every value gets the advisory before launch. */
 export const CLINE_MODEL_SHAPE: RuntimeModelShape = {
-  pattern: /(?!)/,
-  example: "omit model: and run `cline auth <provider> -m <model>`",
-  note: "no model: for cline seats (set the model in Cline itself)",
+  pattern: NO_MODEL,
+  example: "omit model:",
+  note: "set it with cline auth <provider> -m <model>",
 };

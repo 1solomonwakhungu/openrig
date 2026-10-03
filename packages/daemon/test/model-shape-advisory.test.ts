@@ -67,9 +67,9 @@ describe("modelShapeAdvisories", () => {
   });
 
   it("cline: any model gets the advisory before launch refuses it", () => {
-    const [w] = modelShapeAdvisories(spec([{ id: "c", runtime: "cline", model: "anthropic/claude-sonnet-5" }]));
-    expect(w).toContain("no model: for cline seats");
-    expect(w).toContain("cline auth <provider> -m <model>");
+    expect(modelShapeAdvisories(spec([{ id: "x", runtime: "cline", model: "anthropic/claude-sonnet-5" }]))).toEqual([
+      "dev.x: cline seats take no model: (set it with cline auth <provider> -m <model>); the launch refuses model:, so remove it",
+    ]);
   });
 });
 

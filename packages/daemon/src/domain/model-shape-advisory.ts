@@ -5,6 +5,7 @@
 
 import { getRuntimeDescriptor } from "./runtime-registry.js";
 import { checkModelShape } from "./runtime-capabilities.js";
+import { acceptsNoModel } from "../adapters/cli/model-shapes.js";
 
 interface ModelAdvisoryMember {
   id: string;
@@ -23,6 +24,14 @@ export function modelShapeAdvisories(spec: ModelAdvisorySpec): string[] {
       if (!model || !member.runtime) continue;
       const shape = getRuntimeDescriptor(member.runtime)?.modelShape;
       if (!shape) continue;
+      if (acceptsNoModel(shape)) {
+        // The launch refuses any model for these runtimes (cline: launch.ts).
+        warnings.push(
+          `${pod.id}.${member.id}: ${member.runtime} seats take no model: (${shape.note ?? "set it in the CLI itself"}); `
+          + "the launch refuses model:, so remove it",
+        );
+        continue;
+      }
       const result = checkModelShape(shape, model);
       if (result.ok) continue;
       warnings.push(
