@@ -14,6 +14,7 @@ import {
   validateAiderChatHistoryToken,
 } from "./launch.js";
 import { AIDER_ERROR_PATTERNS, AIDER_GATE_PATTERNS, AIDER_READY_PATTERNS } from "./patterns.js";
+import { readAiderUsage } from "./usage.js";
 
 export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   id: AIDER_RUNTIME_ID,
@@ -30,6 +31,16 @@ export const AIDER_DESCRIPTOR: RuntimeDescriptor = {
   captureIsSessionScoped: true,
   captureResumeToken: ({ seatStateDir }) =>
     captureAiderChatHistory({ fs: createNodeFsOps(), seatStateDir }) ?? null,
+  // Usage (feature 1): the seat's chat history, the resume token or else the
+  // history file minted for the latest fresh launch.
+  readUsage: ({ resumeToken, seatStateDir }) => {
+    const fsOps = createNodeFsOps();
+    const file = resumeToken && validateAiderChatHistoryToken(resumeToken).ok
+      ? resumeToken.trim()
+      : captureAiderChatHistory({ fs: fsOps, seatStateDir });
+    if (!file || !fsOps.exists(file)) return null;
+    return readAiderUsage(fsOps.readFile(file));
+  },
   supportsFork: false,
   // Each posture maps to distinct launch flags, so a seat may select either.
   permissionModes: ["floor", "full_bypass"],

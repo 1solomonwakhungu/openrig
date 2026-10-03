@@ -157,6 +157,10 @@ the operator. Declare `model:` and the provider key in the seat env to get
   content is delivered per seat, and teardown strips the managed blocks.
 - Skills: aider has no skills location, so skill projection is an honest skip.
 
+## Usage
+
+Usage (`rig ps`): the `Tokens: ... Cost: ...` lines aider writes to the chat history. Counts are rounded by aider (`2.1k`), so COST shows `~`; the session cost restarts per aider process and is summed per segment.
+
 ## Known limits
 
 - The pane's foreground process is the Python interpreter (`Python` on macOS).

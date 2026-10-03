@@ -92,10 +92,11 @@ import { scopedOperatingPostureSchema } from "./migrations/080_scoped_operating_
 import { seatDeliveryGuardSchema } from "./migrations/087_seat_delivery_guard.js";
 import { nodePermissionSelectionsSchema } from "./migrations/088_node_permission_selections.js";
 import { classificationIdentityProvenanceSchema } from "./migrations/089_classification_identity_provenance.js";
+import { runtimeUsageSchema } from "./migrations/505_runtime_usage.js";
 import { nodePermissionSelectionsAnyRuntimeSchema } from "./migrations/510_node_permission_selections_any_runtime.js";
 import type { Migration } from "./migrate.js";
 
-/** Ordered 001→089, then fork migrations from 510 (S02 086/089, S09 087, S03 088; 510 per-seat permissions for registry runtimes). */
+/** Ordered 001→089, then fork migrations from 505 (S02 086/089, S09 087, S03 088; 505 registry runtime usage; 510 per-seat permissions for registry runtimes). */
 export const ALL_MIGRATIONS: Migration[] = [
   coreSchema,
   bindingsSessionsSchema,
@@ -186,5 +187,6 @@ export const ALL_MIGRATIONS: Migration[] = [
   seatDeliveryGuardSchema,
   nodePermissionSelectionsSchema,
   classificationIdentityProvenanceSchema,
+  runtimeUsageSchema,
   nodePermissionSelectionsAnyRuntimeSchema,
 ];

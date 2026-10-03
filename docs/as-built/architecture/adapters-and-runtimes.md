@@ -463,6 +463,21 @@ the seat's `launch.json`). No built-in runtime declares a hook yet, so
 Per-seat permission modes (`permissionModes`) are added with their consumer in
 the feature-3 PR, not here.
 
+Usage (feature 1). `cline`, `opencode`, `kilo`, `gemini`, `qwen`, and `aider`
+declare `readUsage` (readers under `adapters/cli/<id>/usage.ts`, keyed by the
+seat's resume token); `copilot`, `cursor`, `grok`, and `antigravity` declare
+none until an on-disk usage record is verified. On every `ContextMonitor` tick,
+after the claude/codex pass, `attachRegistryUsage` reads each running registry
+seat through `runDescriptorUsageRead` and stores the reading in
+`runtime_usage` (migration 505, `RuntimeUsageStore`, one row per node). When
+the CLI reports the context in use, it also writes `context_usage` (a
+percentage only when the CLI reports its context window) and a
+`usage_samples` context sample. `sampled_at` there is the read time, so the
+occupant-generation guard compares when OpenRig read it; the CLI's own record
+time stays in `runtime_usage.observed_at`. The node inventory attaches the
+current session's reading as `runtimeUsage`, and `rig ps --nodes --full` shows
+it in the `COST` column (`~` marks aider's rounded figures).
+
 ## 7. Adding a runtime adapter
 
 1. Create `packages/daemon/src/adapters/cli/<id>/index.ts` exporting a

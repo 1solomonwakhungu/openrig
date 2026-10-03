@@ -14,6 +14,7 @@ import {
 } from "./launch.js";
 import { checkClineResumeTarget, clineLaunchEnv, clineSessionsDir, findClineSessionForLaunch } from "./sessions.js";
 import { CLINE_ERROR_PATTERNS, CLINE_GATE_PATTERNS, CLINE_READY_PATTERNS } from "./patterns.js";
+import { readClineUsage } from "./usage.js";
 import { clineSeatHubEnv, prepareClineSeatHub, recordClineVersion, type ClineHubFs, type ClineSeatHubDeps } from "./hub.js";
 
 export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
@@ -42,6 +43,12 @@ export const CLINE_DESCRIPTOR: RuntimeDescriptor = {
     });
     return found.ok ? found.sessionId : null;
   },
+  // Usage (feature 1): the seat session's record, keyed by its resume token.
+  readUsage: ({ resumeToken, homedir }) => readClineUsage({
+    fs: createNodeFsOps(),
+    sessionsDir: clineSessionsDir(clineLaunchEnv(), homedir),
+    sessionId: resumeToken,
+  }),
   supportsFork: false,
   // Each posture maps to distinct launch flags, so a seat may select either.
   permissionModes: ["floor", "full_bypass"],

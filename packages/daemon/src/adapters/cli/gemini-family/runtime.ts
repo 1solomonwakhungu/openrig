@@ -135,6 +135,20 @@ export function createGeminiFamilySpec(
   };
 }
 
+/** The text of a session file located by `find`, or null. Read-only; never throws. */
+export function readSessionText(
+  find: (ctx: SessionStoreContext) => string | null,
+  input: { cwd: string; homedir: string; env?: NodeJS.ProcessEnv; fs?: SessionStoreFs },
+): string | null {
+  const fsOps = input.fs ?? NODE_SESSION_STORE_FS;
+  try {
+    const path = find({ cwd: input.cwd, homedir: input.homedir, fs: fsOps, env: input.env ?? process.env });
+    return path && fsOps.exists(path) ? fsOps.readFile(path) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The launch record the TUI base wrote before typing, or null. */
 export function readLaunchRecord(seatStateDir: string, fsOps: SessionStoreFs = NODE_SESSION_STORE_FS): Partial<LaunchRecord> | null {
   try {

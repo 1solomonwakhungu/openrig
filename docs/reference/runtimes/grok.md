@@ -65,6 +65,10 @@ Patterns tolerate an 80x24 pane: words may be split by the TUI's own wrapping or
 - Disabled in every managed seat, on fresh, resume, and fork launches, by `GROK_DISABLE_AUTOUPDATER=1` (process scope) and `--no-auto-update` (session scope, a hidden flag grok 1.0.25 accepts). Neither writes owner config.
 - Not reachable without owner config: session-start plugin auto-update (git updates of installed marketplace plugins inside `~/.grok`), whose only switch is `plugin_auto_update = false` in `config.toml` or managed policy, and first-run registration of the official xAI plugin marketplace in `config.toml`. grok's `GROK_CONFIG` overlay cannot set either (it only accepts `models`, `features`, `toolset`, and part of `shell_environment_policy`). These stay inside grok's own `~/.grok` and never install into a system prefix; an operator who wants them off sets `plugin_auto_update = false` once.
 
+## Usage
+
+Usage: not reported yet. grok keeps a usage ledger in memory (`xai-chat-state/src/usage.rs`), but whether it is persisted to disk is not verified, so the runtime declares no `readUsage`.
+
 ## Known limits
 
 - `--trust` persists folder trust in grok's own `trusted_folders.toml`.

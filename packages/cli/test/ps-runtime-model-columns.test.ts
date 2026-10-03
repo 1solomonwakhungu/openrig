@@ -42,7 +42,7 @@ describe("rig ps — runtime + declared model", () => {
   // human columns land on --full, and the JSON projection carries both for tools.
   it("RED (ii): the FULL header marks the model DECLARED in plain words", () => {
     const header = padNodeRow("RIG", "POD", "MEMBER", "SESSION", "RUNTIME", "MODEL(DECLARED)", "STATUS",
-      "STARTUP", "ORIENTED", "LIFECYCLE", "TERMINAL", "WORK", "ACTIVITY", "CTX", "RESTORE", "ERROR");
+      "STARTUP", "ORIENTED", "LIFECYCLE", "TERMINAL", "WORK", "ACTIVITY", "CTX", "COST", "RESTORE", "ERROR");
     expect(header).toContain("RUNTIME");
     expect(header).toContain("MODEL(DECLARED)");
   });

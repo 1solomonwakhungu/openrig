@@ -84,6 +84,10 @@ The prompt box stays drawn underneath dialogs (the command palette, model and se
 
 The seat is stopped by killing its tmux session, never by keystrokes. OpenRig then reaps the pane's process tree (`reapProcessTreeOnStop`), because OpenCode starts LSP servers and local MCP servers as child processes that can outlive the session. The reap is PID-scoped: it uses a snapshot of the pane's tree taken before the kill.
 
+## Usage
+
+Usage (`rig ps`): token, cache, reasoning, and cost totals from the seat database's `session` row, and the context in use from the latest assistant message; no context window is recorded, so CTX shows no percentage.
+
 ## Known limits
 
 - OpenCode console accounts (the hidden `opencode console login` command, used for organization-managed config) are stored in the session database, so a seat with its own database does not see them. OpenCode has no separate setting for the account store. Provider sign-in (`opencode auth login`, env keys) is unaffected.

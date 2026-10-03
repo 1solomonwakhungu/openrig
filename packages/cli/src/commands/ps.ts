@@ -102,6 +102,17 @@ interface NodeEntry {
     state?: "critical" | "warning" | "low" | "unknown";
     sampledAt: string | null;
   };
+  /** Feature 1: tokens and cost a registry CLI runtime reports for the current
+   *  session (from the daemon node inventory; absent = unknown). */
+  runtimeUsage?: {
+    costUsd?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    model?: string;
+    approximate?: boolean;
+    source?: string;
+    observedAt?: string;
+  };
   /** OPR.0.4.0.34 — resume summary from the daemon node-inventory. resumeToken
    *  is the SECRET: surfaced as a present-boolean in compact, value only in --full. */
   resumeType?: string | null;
@@ -1196,7 +1207,7 @@ async function handleNodes(
       ));
     }
   } else {
-    const header = padNodeRow("RIG", "POD", "MEMBER", "SESSION", "RUNTIME", "MODEL(DECLARED)", "STATUS", "STARTUP", "ORIENTED", "LIFECYCLE", "TERMINAL", "WORK", "ACTIVITY", "CTX", "RESTORE", "ERROR");
+    const header = padNodeRow("RIG", "POD", "MEMBER", "SESSION", "RUNTIME", "MODEL(DECLARED)", "STATUS", "STARTUP", "ORIENTED", "LIFECYCLE", "TERMINAL", "WORK", "ACTIVITY", "CTX", "COST", "RESTORE", "ERROR");
     console.log(header);
     for (const n of humanList as NodeEntry[]) {
       const parts = n.logicalId.split(".");
@@ -1218,6 +1229,7 @@ async function handleNodes(
         formatHasWork(n.hasAssignedWork, n.assignedWorkCount ?? n.pendingWorkCount),
         formatActivity(n),
         formatContextUsage(n.contextUsage),
+        formatRuntimeCost(n.runtimeUsage),
         n.restoreOutcome,
         n.latestError ? truncate(n.latestError, 30) : n.heldReason ? `held: ${truncate(n.heldReason, 25)}` : "—",
       ));
@@ -1279,7 +1291,7 @@ function padRigRow(rig: string, nodes: string, running: string, active: string, 
   ].join("");
 }
 
-export function padNodeRow(rig: string, pod: string, member: string, session: string, runtime: string, model: string, status: string, startup: string, oriented: string, lifecycle: string, terminal: string, work: string, activity: string, ctx: string, restore: string, error: string): string {
+export function padNodeRow(rig: string, pod: string, member: string, session: string, runtime: string, model: string, status: string, startup: string, oriented: string, lifecycle: string, terminal: string, work: string, activity: string, ctx: string, cost: string, restore: string, error: string): string {
   return [
     fitCell(rig, 30),
     fitCell(pod, 10),
@@ -1297,6 +1309,7 @@ export function padNodeRow(rig: string, pod: string, member: string, session: st
     fitCell(work, 6),
     fitCell(activity, 12),
     fitCell(ctx, 6),
+    fitCell(cost, 9),
     fitCell(restore, 10),
     error,
   ].join("");
@@ -1338,6 +1351,16 @@ function formatHasWork(has: boolean | undefined, count: number | undefined): str
 // known + fresh, "<percent>%*" when known but stale, "??" when unknown.
 // 4-char width keeps the table compact without truncating two-digit
 // percentages (e.g., "98%*" or "5%").
+/** Feature 1: a seat's reported cost ("$0.42"); "~" marks a CLI that only
+ *  reports rounded figures (aider); the table's usual empty-cell mark when the
+ *  runtime reports no cost. */
+export function formatRuntimeCost(usage: NodeEntry["runtimeUsage"]): string {
+  const cost = usage?.costUsd;
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) return "\u2014";
+  const text = cost >= 100 ? cost.toFixed(0) : cost >= 0.01 ? cost.toFixed(2) : cost > 0 ? "<0.01" : "0.00";
+  return `${usage?.approximate ? "~" : ""}$${text}`;
+}
+
 function formatContextUsage(ctx: NodeEntry["contextUsage"]): string {
   if (!ctx || ctx.availability !== "known" || typeof ctx.usedPercentage !== "number") {
     return "??";

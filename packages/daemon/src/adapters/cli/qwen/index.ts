@@ -15,7 +15,8 @@ import { QWEN_AUTO_UPDATE_GUARD } from "../gemini-family/auto-update.js";
 import {
   captureQwenForkChild, checkQwenResumeTarget, findQwenSessionFile, type SessionStoreContext,
 } from "../gemini-family/session-store.js";
-import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify } from "../gemini-family/runtime.js";
+import { readQwenUsage } from "../gemini-family/usage.js";
+import { createGeminiFamilyCapture, createGeminiFamilySpec, geminiFamilyPermissionPosture, nodeEngineFloorVerify, readSessionText } from "../gemini-family/runtime.js";
 
 /** <QWEN_HOME or ~/.qwen> */
 function qwenHome(store: SessionStoreContext): string {
@@ -84,6 +85,12 @@ export const QWEN_DESCRIPTOR: RuntimeDescriptor = {
   }),
   // Maps the recorded approval mode back to a posture for permission drift.
   permissionPostureFor: geminiFamilyPermissionPosture(QWEN_DIALECT),
+  // Usage (feature 1): usageMetadata and the context window from the seat
+  // session's conversation file.
+  readUsage: ({ resumeToken, cwd, homedir }) => {
+    if (!resumeToken || !cwd) return null;
+    return readQwenUsage(readSessionText((ctx) => findQwenSessionFile(ctx, resumeToken.trim()), { cwd, homedir }));
+  },
   supportsFork: true,
   // Each posture maps to distinct launch flags, so a seat may select either.
   permissionModes: ["floor", "full_bypass"],

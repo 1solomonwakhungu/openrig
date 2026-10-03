@@ -144,6 +144,10 @@ cannot be tied to one seat by the TUI's pid. The match is therefore guarded:
 - Skills: projected into `<cwd>/.cline/skills/<skill>/`, one of Cline's
   workspace skill locations (alongside `.clinerules/skills` and `.agents/skills`).
 
+## Usage
+
+Usage (`rig ps`): tokens, cache tokens, cost, and model from the session record's `metadata.aggregateUsage` (the session plus agents it spawned); cline records no context size or window, so CTX stays `??`.
+
 ## Known limits
 
 - No per-seat model (see "Model selection"). All cline seats on a host share

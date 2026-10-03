@@ -21,7 +21,8 @@ import {
   validateOpencodeSessionId,
   type OpencodeFamilyVariant,
 } from "./family.js";
-import { readCurrentSessionId, sessionPresence } from "./session-store.js";
+import { openSessionDbReadonly, readCurrentSessionId, sessionPresence } from "./session-store.js";
+import { readOpencodeUsage } from "./usage.js";
 
 export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): RuntimeDescriptor {
   return {
@@ -48,6 +49,17 @@ export function createOpencodeFamilyDescriptor(variant: OpencodeFamilyVariant): 
     captureIsSessionScoped: true,
     // Each seat has its own session database, so a parent session from
     // another seat is not visible to `--fork`.
+    // Usage (feature 1): the seat's own session database, read-only.
+    readUsage: ({ resumeToken, seatStateDir }) => {
+      const dbPath = opencodeFamilyDbPath(variant, seatStateDir);
+      if (!resumeToken || !fs.existsSync(dbPath)) return null;
+      const db = openSessionDbReadonly(dbPath);
+      try {
+        return readOpencodeUsage({ db, sessionId: resumeToken.trim(), source: `${variant.id}_session_db` });
+      } finally {
+        db.close();
+      }
+    },
     supportsFork: false,
     // Each posture maps to distinct launch flags, so a seat may select either.
     permissionModes: ["floor", "full_bypass"],

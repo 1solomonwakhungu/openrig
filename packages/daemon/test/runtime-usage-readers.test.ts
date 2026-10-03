@@ -19,6 +19,9 @@ import { openSessionDbReadonly } from "../src/adapters/cli/opencode/session-stor
 import { readGeminiUsage, readQwenUsage, GEMINI_USAGE_SOURCE, QWEN_USAGE_SOURCE } from "../src/adapters/cli/gemini-family/usage.js";
 import { readAiderUsage, parseAiderTokenCount, AIDER_USAGE_SOURCE } from "../src/adapters/cli/aider/usage.js";
 import { compactUsage } from "../src/adapters/cli/usage-snapshot.js";
+import { getRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import type { RuntimeUsageInput } from "../src/domain/runtime-capabilities.js";
+import { seedGeminiSession, seedQwenConversation } from "./helpers/gemini-family-seed.js";
 
 const FIXTURES = nodePath.join(nodePath.dirname(fileURLToPath(import.meta.url)), "fixtures", "usage");
 const fixture = (name: string) => fs.readFileSync(nodePath.join(FIXTURES, name), "utf8");
@@ -157,5 +160,69 @@ describe("aider (0.86.2 chat history)", () => {
   it("returns null for a history with no usage lines", () => {
     expect(readAiderUsage(null)).toBeNull();
     expect(readAiderUsage("# aider chat started at 2026-09-29 12:19:22\n\n#### hi\n")).toBeNull();
+  });
+});
+
+describe("descriptor readUsage wiring (real files, per runtime)", () => {
+  const nodeFs = {
+    writeFile: (p: string, c: string) => fs.writeFileSync(p, c),
+    mkdirp: (p: string) => fs.mkdirSync(p, { recursive: true }),
+  };
+  const seatInput = (over: Partial<RuntimeUsageInput>): RuntimeUsageInput => ({
+    sessionName: "dev-impl@rig", cwd: null, seatStateDir: nodePath.join(tmp, "state-x"), homedir: nodePath.join(tmp, "home-x"),
+    resumeToken: null, ...over,
+  });
+  const read = (id: string, input: RuntimeUsageInput) => getRuntimeDescriptor(id)!.readUsage!(input);
+
+  it("cline: the resume token's session record under the seat's home", async () => {
+    const homedir = nodePath.join(tmp, "home-cline");
+    const id = "1790702191676_lovnf";
+    const file = clineSessionMetadataPath(nodePath.join(homedir, ".cline", "data", "sessions"), id);
+    nodeFs.mkdirp(nodePath.dirname(file));
+    fs.writeFileSync(file, fixture("cline-3.0.65-session.json"));
+    expect(await read("cline", seatInput({ homedir, resumeToken: id }))).toMatchObject({ costUsd: 0.0482, source: CLINE_USAGE_SOURCE });
+    expect(await read("cline", seatInput({ homedir, resumeToken: null }))).toBeNull();
+  });
+
+  it("opencode: the seat's own database", async () => {
+    const seatStateDir = nodePath.join(tmp, "seat-opencode");
+    nodeFs.mkdirp(seatStateDir);
+    const db = new Database(nodePath.join(seatStateDir, "opencode.db"));
+    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, time_updated INTEGER, model TEXT, cost REAL, tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER)");
+    db.exec("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)");
+    db.prepare("INSERT INTO session VALUES (?,?,?,?,?,?,?,?,?)").run("ses_9", 1, null, 1.5, 10, 20, 0, 0, 0);
+    db.close();
+    expect(await read("opencode", seatInput({ seatStateDir, resumeToken: "ses_9" }))).toMatchObject({ costUsd: 1.5, inputTokens: 10, source: "opencode_session_db" });
+    expect(await read("opencode", seatInput({ seatStateDir: nodePath.join(tmp, "no-db"), resumeToken: "ses_9" }))).toBeNull();
+  });
+
+  it("aider: the resume token's chat history file", async () => {
+    const seatStateDir = nodePath.join(tmp, "seat-aider");
+    nodeFs.mkdirp(seatStateDir);
+    const history = nodePath.join(seatStateDir, "aider.chat.history.launch-1.md");
+    fs.writeFileSync(history, fixture("aider-0.86.2-chat.history.md"));
+    expect(await read("aider", seatInput({ seatStateDir, resumeToken: history }))).toMatchObject({ costUsd: 0.05, approximate: true });
+  });
+
+  it("gemini and qwen: the seat session's file in the CLI's own store", async () => {
+    const homedir = nodePath.join(tmp, "home-gq");
+    const cwd = nodePath.join(tmp, "work-gq");
+    nodeFs.mkdirp(cwd);
+    const gToken = "0198a2f0-1111-7222-8333-444455556666";
+    const gFile = seedGeminiSession(nodeFs, { homedir, cwd, token: gToken });
+    fs.appendFileSync(gFile, `${JSON.stringify({ id: "m9", timestamp: "2026-10-03T01:00:00.000Z", type: "gemini", content: "ok", model: "gemini-3.5-pro", tokens: { input: 700, output: 30, cached: 0, total: 730 } })}\n`);
+    expect(await read("gemini", seatInput({ homedir, cwd, resumeToken: gToken }))).toMatchObject({ inputTokens: 700, contextUsedTokens: 700, source: GEMINI_USAGE_SOURCE });
+
+    const qToken = "0198a2f0-aaaa-7bbb-8ccc-dddddddddddd";
+    const qFile = seedQwenConversation(nodeFs, { homedir, cwd, token: qToken });
+    fs.appendFileSync(qFile, `${JSON.stringify({ uuid: "a1", timestamp: "2026-10-03T01:00:00.000Z", type: "assistant", model: "qwen3-coder-plus", contextWindowSize: 1000000, usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 50 } })}\n`);
+    expect(await read("qwen", seatInput({ homedir, cwd, resumeToken: qToken }))).toMatchObject({ contextUsedTokens: 900, contextWindowTokens: 1_000_000, source: QWEN_USAGE_SOURCE });
+    expect(await read("gemini", seatInput({ homedir, cwd: null, resumeToken: gToken }))).toBeNull();
+  });
+
+  it("runtimes with no usage on disk declare no hook (copilot, cursor, grok, antigravity)", () => {
+    for (const id of ["copilot", "cursor", "grok", "antigravity"]) {
+      expect(getRuntimeDescriptor(id)?.readUsage, id).toBeUndefined();
+    }
   });
 });
