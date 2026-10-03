@@ -133,20 +133,35 @@ describe("S03 future native permission selections (offline; no native effect cla
     expect(new SeatStatusService({ rigRepo: f.rigRepo }).getStatus(input("").seatRef)).toMatchObject({ ok: true, status: { permissions: { selectionState: "unknown", nativeEffect: "unverified" } } });
     expect(() => f.store.apply(binding(f.node.id), "codex")).toThrow();
   });
-  it("real HTTP route requires sender and audits that sender, ignoring an actor body override", async () => {
-    const f = fixture(); const app = new Hono();
+  function routeApp(f: ReturnType<typeof fixture>) {
+    const app = new Hono();
     app.use("*", async (c, next) => {
       for (const [key, value] of Object.entries({ rigRepo: f.rigRepo, sessionRegistry: f.registry, eventBus: f.eventBus, tmuxAdapter: {} })) c.set(key as never, value as never);
       await next();
     });
     app.route("/api/seat", seatRoutes);
-    const url = "/api/seat/set-permissions/dev-owner%40permissions";
-    const request = { method: "POST", body: JSON.stringify({ mode: "full_bypass", reason: "explicit choice", actor: "spoof" }), headers: { "content-type": "application/json" } };
-    expect((await app.request(url, request)).status).toBe(400);
-    expect((await app.request(url, { ...request, body: "null", headers: { ...request.headers, "x-openrig-session": "real-operator" } })).status).toBe(400);
-    const response = await app.request(url, { ...request, headers: { ...request.headers, "x-openrig-session": "real-operator" } });
+    return app;
+  }
+  const routeUrl = "/api/seat/set-permissions/dev-owner%40permissions";
+  const post = (body: unknown, headers: Record<string, string> = {}) =>
+    ({ method: "POST", body: typeof body === "string" ? body : JSON.stringify(body), headers: { "content-type": "application/json", ...headers } });
+  it("real HTTP route audits a seat's sender, ignoring actor and operator body overrides", async () => {
+    const f = fixture(); const app = routeApp(f);
+    const sender = { "x-openrig-session": "real-operator" };
+    expect((await app.request(routeUrl, post("null", sender))).status).toBe(400);
+    expect((await app.request(routeUrl, post({ mode: "full_bypass" }, sender))).status).toBe(400);
+    const response = await app.request(routeUrl, post({ mode: "full_bypass", reason: "explicit choice", actor: "spoof", operator: "spoof" }, sender));
     expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ ok: true, changed: true });
     expect(f.store.read(f.node.id)?.actor).toBe("real-operator");
+  });
+  it.each(["codex", "claude-code", "copilot"])("real HTTP route accepts an operator terminal (no sender) for %s and audits the operator", async runtime => {
+    const f = fixture(runtime); const app = routeApp(f);
+    const named = await app.request(routeUrl, post({ mode: "full_bypass", reason: "operator choice", operator: "solomon@host", actor: "spoof" }));
+    expect(named.status).toBe(200); expect(await named.json()).toMatchObject({ ok: true, changed: true });
+    expect(f.store.read(f.node.id)?.actor).toBe("solomon@host");
+    const unnamed = await app.request(routeUrl, post({ mode: "floor", reason: "operator choice", actor: "spoof" }));
+    expect(unnamed.status).toBe(200);
+    expect(f.store.read(f.node.id)?.actor).toBe("operator");
   });
   it.each(["codex", "claude-code"])("legacy restore resolves current stored selection for %s", async runtime => {
     const f = fixture(runtime); await f.service.setPermissions(input(runtime === "codex" ? "full_bypass" : "auto"));

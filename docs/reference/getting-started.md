@@ -407,7 +407,9 @@ rig seat set-permissions owner@first-project --mode full_bypass --reason "Operat
 rig seat status owner@first-project --json
 ```
 
-This records the actor, reason and old/new choice on that seat. It does not
+This records the actor, reason and old/new choice on that seat. Run from a
+seat, the actor is that seat; run from an operator terminal, it is the
+`--operator <address>` you pass, or `operator`. It does not
 relaunch it, alter native history, change sibling seats, or edit permission
 rules/hooks. A later lifecycle action remains a separate decision. The explicit
 seat choice overrides the inherited member/rig policy; `--mode inherit` clears
