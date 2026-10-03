@@ -76,7 +76,7 @@ describe("OMP runtime adapter exact session tokens", () => {
   });
 });
 
-describe("OMP registry built-in (fork port of upstream #35)", () => {
+describe("OMP registry built-in (fork port of the upstream Oh My Pi runtime)", () => {
   it("projects skills into the seat's own agent dir, never a shared project path", () => {
     const { fs, tmux } = fakeSeat({});
     const adapter = new OmpRuntimeAdapter({ tmux, fsOps: fs, stateRoot, runnerEntryPath: "/runner.js" });

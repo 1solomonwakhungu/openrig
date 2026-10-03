@@ -311,7 +311,7 @@ export class SessionRegistry {
   }
 
   /** Test durable identity without returning the stored credential or changing
-   *  its provenance (upstream #40). An equal protected token needs no
+   *  its provenance (ported from upstream). An equal protected token needs no
    *  lower-ranked write. */
   resumeTokenMatches(sessionId: string, type: string, token: string): boolean {
     if (!type.trim() || !token.trim()) return false;
