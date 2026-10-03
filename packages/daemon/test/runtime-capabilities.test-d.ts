@@ -30,6 +30,8 @@ describe("capability hook types (the contract feature PRs implement)", () => {
     expectTypeOf<RuntimeAuthStatus["state"]>().toEqualTypeOf<"signed_in" | "missing" | "unknown">();
     expectTypeOf<RuntimeUsageSnapshot["observedAt"]>().toEqualTypeOf<string>();
     expectTypeOf<RuntimeUsageSnapshot["costUsd"]>().toEqualTypeOf<number | undefined>();
+    expectTypeOf<RuntimeUsageSnapshot["reasoningTokens"]>().toEqualTypeOf<number | undefined>();
+    expectTypeOf<RuntimeUsageSnapshot["approximate"]>().toEqualTypeOf<boolean | undefined>();
   });
 
 });

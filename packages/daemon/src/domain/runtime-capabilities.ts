@@ -42,6 +42,8 @@ export interface RuntimeUsageSnapshot {
   outputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Reasoning or thinking tokens, when the CLI records them separately. */
+  reasoningTokens?: number;
   costUsd?: number;
   contextUsedTokens?: number;
   /** Only when the CLI reports its context window. */
@@ -51,6 +53,9 @@ export interface RuntimeUsageSnapshot {
   observedAt: string;
   /** Stable id of where the numbers came from, e.g. "cline_session_json". */
   source: string;
+  /** True when the CLI only reports rounded counts (e.g. "2.1k sent"), so
+   *  displays must show the numbers as estimates. Absent = exact. */
+  approximate?: boolean;
 }
 
 // ── Sign-in status (feature 6) ───────────────────────────────────────────────
