@@ -257,6 +257,32 @@ export function grokAuthStatus(ctx: RuntimeAuthContext): RuntimeAuthStatus {
   return { state: "missing", hint: "run `grok login`, or set XAI_API_KEY" };
 }
 
+// ── Goose ───────────────────────────────────────────────────────────────────
+
+const YAML_PROVIDER_LINE = /^GOOSE_PROVIDER:[ \t]*["']?([A-Za-z0-9._-]+)/m;
+
+/** A provider from GOOSE_PROVIDER or `goose configure`'s
+ *  <XDG_CONFIG_HOME or ~/.config>/goose/config.yaml, plus its key: a provider
+ *  key in the env, or (with GOOSE_DISABLE_KEYRING) a non-empty secrets.yaml.
+ *  Goose keeps keys in the system keychain by default, which is never read,
+ *  so a configured provider without a visible key is "unknown". */
+export function gooseAuthStatus(ctx: RuntimeAuthContext): RuntimeAuthStatus {
+  const configDir = nodePath.join((ctx.env.XDG_CONFIG_HOME ?? "").trim() || nodePath.join(ctx.homedir, ".config"), "goose");
+  const configFile = nodePath.join(configDir, "config.yaml");
+  const hint = "run `goose configure`, or set GOOSE_PROVIDER, GOOSE_MODEL, and the provider's key";
+  const providerSource = firstSetEnv(ctx, ["GOOSE_PROVIDER"])
+    ? "env GOOSE_PROVIDER"
+    : YAML_PROVIDER_LINE.test(ctx.fs.readFile(configFile, MAX_AUTH_FILE_BYTES) ?? "") ? displayPath(ctx, configFile) : null;
+  if (!providerSource) return { state: "missing", hint, detail: "no goose provider is configured" };
+  const key = firstSetEnv(ctx, COMMON_PROVIDER_KEYS);
+  if (key) return signedIn(`env ${key} + ${providerSource}`);
+  if ((ctx.env.GOOSE_DISABLE_KEYRING ?? "").trim()) {
+    const secrets = nodePath.join(configDir, "secrets.yaml");
+    if ((ctx.fs.readFile(secrets, MAX_AUTH_FILE_BYTES) ?? "").trim()) return signedIn(`${displayPath(ctx, secrets)} + ${providerSource}`);
+  }
+  return { state: "unknown", source: providerSource, hint, detail: "a provider is configured; its key is in the system keychain, which OpenRig does not read" };
+}
+
 // ── Antigravity CLI ─────────────────────────────────────────────────────────
 
 /** The API-key path (modelProvider "gemini" in

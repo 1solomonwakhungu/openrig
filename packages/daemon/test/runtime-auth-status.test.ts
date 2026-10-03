@@ -15,6 +15,7 @@ import {
   copilotAuthStatus,
   cursorAuthStatus,
   geminiAuthStatus,
+  gooseAuthStatus,
   grokAuthStatus,
   opencodeFamilyAuthStatus,
   qwenAuthStatus,
@@ -196,6 +197,20 @@ describe("cline, aider, grok, antigravity", () => {
     const file = `${HOME}/.gemini/antigravity-cli/settings.json`;
     expect(safe(antigravityAuthStatus(ctx({ env: { GEMINI_API_KEY: SECRET }, files: { [file]: JSON.stringify({ modelProvider: "gemini" }) } }))).state).toBe("signed_in");
     expect(antigravityAuthStatus(ctx({ env: { GEMINI_API_KEY: SECRET } }))).toMatchObject({ state: "unknown", detail: expect.stringContaining("keyring") });
+  });
+
+  it("goose: needs a provider (env or config.yaml) and shows a visible key; a keychain key is unknown", () => {
+    const config = `${HOME}/.config/goose/config.yaml`;
+    expect(gooseAuthStatus(ctx({ env: { ANTHROPIC_API_KEY: SECRET } }))).toMatchObject({ state: "missing", hint: expect.stringContaining("goose configure") });
+    expect(safe(gooseAuthStatus(ctx({ env: { GOOSE_PROVIDER: "anthropic", ANTHROPIC_API_KEY: SECRET } })))).toEqual({
+      state: "signed_in", source: "env ANTHROPIC_API_KEY + env GOOSE_PROVIDER",
+    });
+    expect(gooseAuthStatus(ctx({ env: { ANTHROPIC_API_KEY: SECRET }, files: { [config]: "GOOSE_PROVIDER: anthropic\nGOOSE_MODEL: claude-sonnet-4-5\n" } })).source)
+      .toBe("env ANTHROPIC_API_KEY + ~/.config/goose/config.yaml");
+    expect(gooseAuthStatus(ctx({ env: { XDG_CONFIG_HOME: "/xc", ANTHROPIC_API_KEY: SECRET }, files: { "/xc/goose/config.yaml": "GOOSE_PROVIDER: \"openai\"\n" } })).state).toBe("signed_in");
+    expect(gooseAuthStatus(ctx({ files: { [config]: "GOOSE_PROVIDER: anthropic\n" } }))).toMatchObject({ state: "unknown", detail: expect.stringContaining("keychain") });
+    expect(safe(gooseAuthStatus(ctx({ env: { GOOSE_PROVIDER: "anthropic", GOOSE_DISABLE_KEYRING: "1" }, files: { [`${HOME}/.config/goose/secrets.yaml`]: `ANTHROPIC_API_KEY: ${SECRET}\n` } }))).state).toBe("signed_in");
+    expect(gooseAuthStatus(ctx({ files: { [config]: "GOOSE_MODEL: x\n" } })).state).toBe("missing");
   });
 
   it("oversized files are not read", () => {
