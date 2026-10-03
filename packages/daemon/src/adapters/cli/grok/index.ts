@@ -10,6 +10,7 @@
 // unambiguous when several seats share a cwd. Sessions live at
 // <GROK_HOME or ~/.grok>/sessions/<url-encoded cwd>/<session-id>/.
 
+import { activityMarkers } from "../activity-markers.js";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
@@ -138,6 +139,7 @@ export const GROK_SPEC: TuiCliRuntimeSpec = {
     ? { ok: true }
     : { ok: false, reason: "no grok session with that id under the grok sessions directory" },
   // Patterns tolerate the wrapping and box borders of an 80x24 pane (pane-phrase.ts).
+  ...activityMarkers("grok"),
   readyPatterns: [panePhrase("Build anything")],
   gatePatterns: [
     { pattern: panePhrase("Do you trust the contents of this directory?"), code: "trust_gate", reason: "grok is asking to trust the working directory" },

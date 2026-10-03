@@ -13,7 +13,9 @@ const domainDir = join(repoRoot, "packages", "daemon", "src", "domain");
 
 describe("S19 A9 — rejected oracles stay rejected", () => {
   it("the rung set is CLOSED and contains no transcript-shaped rung", () => {
-    expect(EVIDENCE_RUNG_RANK).toEqual(["self-report", "lifecycle-hooks", "window-sampling"]);
+    // pane-markers (feature 2) reads the CLI's own busy/ready markers from its
+    // visible pane, not a transcript, and enters at trial.
+    expect(EVIDENCE_RUNG_RANK).toEqual(["self-report", "lifecycle-hooks", "pane-markers", "window-sampling"]);
     for (const rung of EVIDENCE_RUNG_RANK) expect(rung).not.toMatch(/transcript/i);
   });
 

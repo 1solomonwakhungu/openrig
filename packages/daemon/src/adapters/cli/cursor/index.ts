@@ -7,6 +7,7 @@
 // passes `--trust`; it never launches the bare `agent` name. See cursor-cli.ts
 // for the verified CLI facts.
 
+import { activityMarkers } from "../activity-markers.js";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
@@ -119,6 +120,7 @@ export const CURSOR_SPEC: TuiCliRuntimeSpec = {
     cursorResumeTargetExists(fsOps, cursorChatsDirForCwd(seatConfigDir(readSnapshot(fsOps, seatStateDir), homedir), cwd), token)
       ? { ok: true }
       : { ok: false, reason: "the Cursor chat no longer exists for this workspace" },
+  ...activityMarkers(CURSOR_RUNTIME_ID),
   readyPatterns: CURSOR_READY_PATTERNS,
   gatePatterns: CURSOR_GATE_PATTERNS,
   observeLaunch: ({ posture }): AppliedLaunchObservation => posture === "full_bypass"

@@ -136,7 +136,12 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
 - `cursor-agent create-chat` was considered for choosing the chat id up front.
   Without signing in it printed an id but wrote no chat, so it is not used.
 - Readiness is read from the composer placeholder (`Plan, search, build
-  anything` or `Add a follow-up`). A busy-state marker is not used.
+  anything` or `Add a follow-up`).
+- Activity: `ctrl+c to stop` reads as working (at trial: measured, not yet
+  authoritative), and an approval prompt such as `Run this command?` or
+  `Waiting for decision (y/n/p)` reads as needs-input in `rig ps` and the TUI.
+  These strings come from Cursor's shipped bundle; they were not observed on a
+  signed-in screen.
 
 ## What was verified live
 

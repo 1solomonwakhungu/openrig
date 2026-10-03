@@ -598,7 +598,9 @@ function needsAttention(node: NodeEntry): boolean {
   return node.lifecycleState === "attention_required"
     || node.startupStatus === "attention_required"
     || node.startupStatus === "failed"
-    || node.agentActivity?.state === "needs_input";
+    || node.agentActivity?.state === "needs_input"
+    // The arbitrated seat state: registry CLI seats at a gate or prompt.
+    || (node.activityState?.needsInput.count ?? 0) > 0;
 }
 
 // OPR.0.4.0.34 — the compact orch field set (PRD FR-4). Carries the
@@ -668,6 +670,10 @@ export function compactNodeProjection(nodes: NodeEntry[]): Array<Record<string, 
     if (n.heldReason) compact.heldReason = n.heldReason;
     if (attention && n.latestError) {
       compact.latestError = n.latestError;
+    }
+    // The arbitrated needs-input (a CLI seat at a gate or prompt) says why.
+    if (attention && (n.activityState?.needsInput.count ?? 0) > 0) {
+      compact.needsInput = n.activityState!.needsInput;
     }
     return compact;
   });
@@ -1197,7 +1203,7 @@ async function handleNodes(
     for (const n of humanList as NodeEntry[]) {
       const attn = needsAttention(n);
       const reason = attn
-        ? (n.latestError ? truncate(n.latestError, 40) : n.agentActivity?.reason ?? "—")
+        ? (n.latestError ? truncate(n.latestError, 40) : n.agentActivity?.reason ?? n.activityState?.needsInput.reason ?? "—")
         : "—";
       console.log(padCompactNodeRow(
         n.rigName,

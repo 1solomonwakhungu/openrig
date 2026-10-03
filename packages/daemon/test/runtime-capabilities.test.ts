@@ -183,9 +183,13 @@ describe("TuiCliRuntimeAdapter.classifyActivity", () => {
     expect(tmux.capturePaneContent).not.toHaveBeenCalled();
   });
 
-  it("ignores stale busy and gate lines above the bottom status region", async () => {
+  it("ignores a stale busy line above the status region; a gate anywhere counts only while no ready or busy marker shows", async () => {
     const filler = Array.from({ length: ACTIVITY_STATUS_LINES }, (_, n) => `answer line ${n + 1}`).join("\n");
     expect(await classify({ command: "example-cli", content: `Thinking... (esc to interrupt)\n${filler}\nexample-cli ready>` })).toBe("idle");
+    // A full-screen gate can sit above the bottom lines on an 80x24 pane
+    // (cline login, gemini auth/trust, qwen auth), so it counts anywhere on
+    // screen, but an answered gate left above a ready prompt does not.
+    expect(await classify({ command: "example-cli", content: `Please log in\n${filler}` })).toBe("needs_input");
     expect(await classify({ command: "example-cli", content: `Please log in\n${filler}\nexample-cli ready>` })).toBe("idle");
     // The same markers inside the region still count; blank lines do not push them out.
     expect(await classify({ command: "example-cli", content: `${filler}\nThinking... (esc to interrupt)\n\n\n\nexample-cli ready>` })).toBe("working");

@@ -5,6 +5,7 @@
 // Runtime imports stay off domain/runtime-registry.ts (import discipline, see
 // adapters/cli/types.ts): the registry imports this module through the index.
 
+import { activityMarkers } from "../activity-markers.js";
 import fs from "node:fs";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import type { CliRuntimeRegistration } from "../types.js";
@@ -92,6 +93,7 @@ export function createOpencodeFamilySpec(variant: OpencodeFamilyVariant, descrip
         recovery: "retry_fresh",
       };
     },
+    ...activityMarkers(variant.id),
     readyPatterns: OPENCODE_FAMILY_READY_PATTERNS,
     // Neither CLI shows a trust or login modal (unauthenticated launches use
     // free models), so there are no gate patterns.

@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ● Read src/server.ts
+ Looked at the request handler and the router setup.
+
+┃                                                                              
+┃  Ask anything... "Fix a TODO in the codebase"                                
+┃                                                                              
+  ⋯ esc interrupt                                 tab agents  ctrl+p commands

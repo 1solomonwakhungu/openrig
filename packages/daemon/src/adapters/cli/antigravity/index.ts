@@ -13,6 +13,7 @@
 // where <app data> is ~/.gemini/antigravity-cli. Resume is
 // `--conversation <uuid>`. There is no fork.
 
+import { activityMarkers } from "../activity-markers.js";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
@@ -172,6 +173,7 @@ export const ANTIGRAVITY_SPEC: TuiCliRuntimeSpec = {
   // is strict: the status line must show and the TUI must not still be
   // initializing. Anything else runs out the wait as attention_required with
   // pane evidence, never a false ready.
+  ...activityMarkers("antigravity"),
   readyPatterns: [ANTIGRAVITY_READY_RE],
   gatePatterns: [
     { pattern: panePhrase("Do you trust the contents of this project?"), code: "trust_gate", reason: "agy is asking to trust the project" },

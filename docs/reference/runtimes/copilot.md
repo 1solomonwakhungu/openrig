@@ -138,7 +138,10 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
   the `@github/copilot` packages. Stop reaps the pane's process tree because
   the launcher starts the native binary as a child.
 - Readiness is read from the pane: the footer `/ commands · ? help` means ready.
-  A busy-state marker is not used.
+- Activity: `(Esc to cancel)` reads as working (at trial: measured, not yet
+  authoritative), and a permission prompt such as `Do you want to run this
+  command?` reads as needs-input in `rig ps` and the TUI. These strings come
+  from Copilot's shipped bundle; they were not observed on a signed-in screen.
 - OpenRig records the `COPILOT_HOME` each launch resolved in the seat's state
   and uses it for the resume check and capture.
 

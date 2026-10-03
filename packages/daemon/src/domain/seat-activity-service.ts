@@ -42,6 +42,15 @@ export interface SeatActivityServiceDeps {
   /** S19: the self-report rung producer (Claude pid.json). Consulted per sweep for seats
    *  whose declared inventory staffs self-report; absent = the rung is absent. */
   selfReportReader?: (sessionName: string, seatNodeId: string) => ActivityEvidence | null;
+  /** Registry CLI runtimes that classify their own pane (adapter.classifyActivity):
+   *  `supports` picks the TUI CLI rung inventory, and each sweep reports the result
+   *  as needs-input chrome (gate or in-session prompt visible) plus pane-markers
+   *  working/idle (trial). null = no usable reading (pane at a shell, nothing
+   *  recognizable): no prompt is shown, and working/idle stays with sampling. */
+  paneClassifier?: {
+    supports(runtime: string): boolean;
+    classify(runtime: string, sessionName: string): Promise<"working" | "idle" | "needs_input" | null>;
+  };
 }
 
 export interface PollSeatOptions {
@@ -60,6 +69,10 @@ export class SeatActivityService {
   private sweeping = false;
 
   private readonly selfReportReader: ((sessionName: string, seatNodeId: string) => ActivityEvidence | null) | null;
+  private readonly paneClassifier: SeatActivityServiceDeps["paneClassifier"] | null;
+  /** session name -> runtime, refreshed each sweep (pollSeat has only the pane id). */
+  private readonly runtimeBySession = new Map<string, string>();
+  private readonly paneSeqBySession = new Map<string, number>();
 
   constructor(deps: SeatActivityServiceDeps) {
     this.tmux = deps.tmux;
@@ -67,6 +80,7 @@ export class SeatActivityService {
     this.eventBus = deps.eventBus ?? null;
     this.now = deps.now ?? (() => new Date());
     this.selfReportReader = deps.selfReportReader ?? null;
+    this.paneClassifier = deps.paneClassifier ?? null;
   }
 
   /**
@@ -134,8 +148,42 @@ export class SeatActivityService {
         const evd = this.selfReportReader(paneId, seatNodeId);
         if (evd) this.reportEvidence(evd); // null = unreadable ⇒ the rung simply stales
       }
+      const runtime = this.runtimeBySession.get(paneId);
+      if (this.paneClassifier && runtime && this.paneClassifier.supports(runtime)
+          && seat?.inventory?.rungs.some((r) => r.rung === "needs-input-chrome")) {
+        await this.reportPaneClassification(seatNodeId, paneId, runtime);
+      }
     }
     return record;
+  }
+
+  /** One classifier reading per sweep. needs-input chrome is reported every time
+   *  (count 1 or 0), so an answered prompt clears on the next sweep; working/idle
+   *  only when the CLI's own marker shows. A classifier failure reports nothing,
+   *  so the rungs simply stale. */
+  private async reportPaneClassification(seatNodeId: string, sessionName: string, runtime: string): Promise<void> {
+    let state: "working" | "idle" | "needs_input" | null;
+    try {
+      state = await this.paneClassifier!.classify(runtime, sessionName);
+    } catch {
+      return;
+    }
+    const observedAt = this.now().toISOString();
+    const nextSeq = () => {
+      const seq = (this.paneSeqBySession.get(sessionName) ?? 0) + 1;
+      this.paneSeqBySession.set(sessionName, seq);
+      return seq;
+    };
+    this.reportEvidence({
+      seatNodeId, sessionName, rung: "needs-input-chrome", sourceId: `pane:${runtime}:prompt`, seq: nextSeq(), observedAt,
+      needsInput: state === "needs_input" ? { count: 1, reason: "prompt in pane" } : { count: 0, reason: null },
+    });
+    if (state === "working" || state === "idle") {
+      this.reportEvidence({
+        seatNodeId, sessionName, rung: "pane-markers", sourceId: `pane:${runtime}:markers`, seq: nextSeq(), observedAt,
+        activity: state === "working" ? "working" : "idle-at-prompt",
+      });
+    }
   }
 
   /**
@@ -181,11 +229,13 @@ export class SeatActivityService {
       // codex hooks-at-trial, generic sampling floor) — production-complete without
       // touching the launch machinery.
       for (const r of rows) {
+        if (r.runtime) this.runtimeBySession.set(r.session_name, r.runtime);
+        else this.runtimeBySession.delete(r.session_name);
         const known = this.ladder.get(r.node_id);
         if (!known || known.inventory === null) {
           this.declareRungInventory(
             { seatNodeId: r.node_id, sessionName: r.session_name },
-            runtimeRungInventory(r.runtime),
+            runtimeRungInventory(r.runtime, !!r.runtime && (this.paneClassifier?.supports(r.runtime) ?? false)),
           );
         }
       }
@@ -195,6 +245,9 @@ export class SeatActivityService {
       const live = new Set(rows.map((r) => r.session_name));
       for (const pane of Array.from(this.latestByPaneId.keys())) {
         if (!live.has(pane)) this.latestByPaneId.delete(pane);
+      }
+      for (const pane of Array.from(this.runtimeBySession.keys())) {
+        if (!live.has(pane)) this.runtimeBySession.delete(pane);
       }
 
       // Best-effort: a single seat's failure does not crash the loop.

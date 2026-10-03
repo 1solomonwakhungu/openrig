@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import type { SessionRegistry } from "./session-registry.js";
 import type { EventBus } from "./event-bus.js";
 import type { AgentActivityStore } from "./agent-activity-store.js";
+import type { SeatActivityService } from "./seat-activity-service.js";
 import type { AgentActivity, SeatIdentityVerdict } from "./types.js";
 import type { TmuxAdapter } from "../adapters/tmux.js";
 import { classifyPaneRuntimeMatch } from "./seat-identity-reconciler.js";
@@ -188,6 +189,10 @@ interface ClearAttentionDeps {
   sessionRegistry: SessionRegistry;
   eventBus: EventBus;
   agentActivityStore: AgentActivityStore;
+  /** The arbitrated seat state (needs-input from a visible gate or in-session
+   *  prompt, feature 2). While it shows needs-input, no evidence clear runs and
+   *  no liveness probe is typed into the pane. */
+  seatActivity?: Pick<SeatActivityService, "getSeatStateBySession">;
   sendVerify?: SendVerifyFn;
   capture?: CaptureFn;
   db?: Database.Database;
@@ -376,6 +381,18 @@ export class SeatAttentionReconciler {
         derivedEvidence: derivedOutcome?.source === "restore.subset_completed"
           ? { source: "operator_attestation", reason: opts.reason, runtimeCwdVerified: false }
           : undefined,
+      };
+    }
+
+    // A seat whose pane shows a prompt waiting for the operator (sign-in,
+    // trust, tool approval) is not responsive, and typing the liveness probe
+    // into that dialog could answer it. Refuse before any evidence path.
+    const arbitrated = this.deps.seatActivity?.getSeatStateBySession(sessionName) ?? null;
+    if (arbitrated && arbitrated.needsInput.count > 0) {
+      return {
+        ok: false,
+        code: "not_demonstrably_responsive",
+        detail: `The seat's pane shows a prompt waiting for the operator (needs-input: ${arbitrated.needsInput.reason ?? "prompt in pane"}); answer it in the pane first. No liveness probe was typed.`,
       };
     }
 

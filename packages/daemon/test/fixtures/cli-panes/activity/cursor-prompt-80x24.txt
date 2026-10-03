@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+
+
+
+ ● Read src/server.ts
+ Looked at the request handler and the router setup.
+
+ Run this command?
+   $ npm test
+
+ → Run (once) (y)
+   Add Shell(npm) to allowlist? (tab)
+   Run Everything (shift+tab)
+   Skip & tell the agent what to do instead (esc or n)
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ Waiting for decision (y/n/p)...                                            │
+ └────────────────────────────────────────────────────────────────────────────┘

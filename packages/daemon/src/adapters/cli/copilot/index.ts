@@ -6,6 +6,7 @@
 // in the base); OpenRig writes no Copilot config. See copilot-cli.ts for the
 // verified CLI facts.
 
+import { activityMarkers } from "../activity-markers.js";
 import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
@@ -116,6 +117,7 @@ export const COPILOT_SPEC: TuiCliRuntimeSpec = {
     copilotResumeTargetExists(fsOps, seatCopilotHome(fsOps, seatStateDir, homedir), token)
       ? { ok: true }
       : { ok: false, reason: "the Copilot session no longer exists under session-state" },
+  ...activityMarkers(COPILOT_RUNTIME_ID),
   readyPatterns: COPILOT_READY_PATTERNS,
   gatePatterns: COPILOT_GATE_PATTERNS,
   errorPatterns: COPILOT_ERROR_PATTERNS,

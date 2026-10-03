@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ● Read src/server.ts
+ Looked at the request handler and the router setup.
+
+ ⠋ Thinking... (esc to cancel)
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Ask anything...                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ Auto-approve all disabled (Shift+Tab)
