@@ -1,4 +1,5 @@
 import { inventoryCaptureOptions, type ShadowCapture } from "../domain/shadow-capture.js";
+import { readSeatTrustAnswers } from "../domain/seat-trust-answers.js";
 import { Hono } from "hono";
 import { getSelfHostId } from "../domain/hosts/fanout-contract.js";
 import type { RigRepository } from "../domain/rig-repository.js";
@@ -209,6 +210,11 @@ nodesRoutes.get("/:logicalId", async (c) => {
       .get(rigId, logicalId) as { id: string } | undefined;
     if (row) detail.permissionDrift = observer.diagnose(row.id);
   }
+  // Visible trust answers: one launch-record read for this one seat (also
+  // absent from the list path).
+  detail.trustAnswers = readSeatTrustAnswers(
+    detail.runtime, detail.canonicalSessionName, c.get("runtimeStateRoot" as never) as string | undefined,
+  );
 
   // PL-019 item 5: surface in-progress qitems on node-detail when the
   // node has a session name (matches /graph payload's enrichment shape).

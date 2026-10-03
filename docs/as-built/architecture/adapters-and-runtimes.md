@@ -391,6 +391,10 @@ tmux pane, driven by a `TuiCliRuntimeSpec`:
   answer, the launch is `attention_required`. Each answer is
   logged and recorded in the seat's `launch.json` as `gateAnswers`. The GitHub
   Copilot adapter uses it to trust the seat cwd for that session only.
+  `domain/seat-trust-answers.ts` reads the current launch's answers (the record
+  must name the seat's session) for seat status (`trust_answers`), whoami
+  (`trustAnswers`, only when present), and node detail (`trustAnswers`; not the
+  list route), which the UI seat Overview renders.
 - Launch polls readiness with an injectable sleep up to `launchTimeoutMs`.
   Before typing it records the pane's absolute line position (tmux
   `history_size + cursor_y`); every poll captures only the lines after it,

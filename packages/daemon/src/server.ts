@@ -320,6 +320,9 @@ export interface AppDeps {
   whoamiService?: WhoamiService;
   /** W3 single-seat, read-only runtime-policy observer. */
   permissionDriftObserver?: PermissionDriftReader;
+  /** Per-seat runtime state root (<OPENRIG_HOME>/state when absent); node
+   *  detail reads trust answers from the seat launch records under it. */
+  runtimeStateRoot?: string;
   contextUsageStore?: import("./domain/context-usage-store.js").ContextUsageStore;
   /** 0.5.10 S04 — one on-demand, read-only health projection shared by consumers. */
   healthProjection?: import("./domain/health-detectors.js").HealthProjectionService;
@@ -580,6 +583,7 @@ export function createApp(deps: AppDeps): Hono {
     c.set("snapshotCapturer" as never, deps.snapshotCapturer);
     c.set("whoamiService" as never, deps.whoamiService);
     c.set("permissionDriftObserver" as never, permissionDriftObserver);
+    c.set("runtimeStateRoot" as never, deps.runtimeStateRoot);
     c.set("contextUsageStore" as never, deps.contextUsageStore);
     c.set("healthProjection" as never, deps.healthProjection);
     c.set("healthDiagnosis" as never, deps.healthDiagnosis);

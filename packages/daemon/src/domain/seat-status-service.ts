@@ -4,6 +4,9 @@ import { parseSessionName } from "./session-name.js";
 import type { NodeInventoryEntry } from "./types.js";
 import { NativePermissionStore, type StoredNativePermissionSelection } from "./native-permission-store.js";
 import { AppliedLaunchObservationStore, type StoredAppliedLaunchObservation } from "./applied-launch-observation-store.js";
+import { readSeatTrustAnswers, type SeatTrustAnswer } from "./seat-trust-answers.js";
+
+export type { SeatTrustAnswer };
 
 const SEAT_LOOKUP_GUIDANCE = "List seats with: rig ps --nodes";
 
@@ -31,7 +34,12 @@ export interface SeatStatus {
     nativeEffect: "unverified";
     error?: string;
   };
+  /** Dialogs OpenRig answered for the seat's current launch (TuiCliGateAnswer,
+   *  recorded in the seat's launch.json). Empty when none were answered or the
+   *  runtime records no launch. */
+  trust_answers: SeatTrustAnswer[];
 }
+
 
 export type SeatStatusResult =
   | { ok: true; status: SeatStatus }
@@ -44,9 +52,12 @@ interface SeatMatch {
 
 export class SeatStatusService {
   private rigRepo: RigRepository;
+  private stateRoot?: string;
 
-  constructor(deps: { rigRepo: RigRepository }) {
+  /** stateRoot: per-seat runtime state (<OPENRIG_HOME>/state by default). */
+  constructor(deps: { rigRepo: RigRepository; stateRoot?: string }) {
     this.rigRepo = deps.rigRepo;
+    this.stateRoot = deps.stateRoot;
   }
 
   getStatus(seatRef: string): SeatStatusResult {
@@ -118,6 +129,7 @@ export class SeatStatusService {
       handover_at: entry.handoverAt,
       restore_outcome: entry.restoreOutcome,
       permissions: this.permissionStatus(entry.nodeId),
+      trust_answers: readSeatTrustAnswers(entry.runtime, entry.canonicalSessionName, this.stateRoot),
     };
   }
 

@@ -67,6 +67,8 @@ interface WhoamiResult {
     remainingPercentage?: number | null;
     contextWindowSize?: number | null;
   };
+  /** Dialogs OpenRig answered for this seat's current launch (absent when none). */
+  trustAnswers?: Array<{ summary: string; answeredAt?: string }>;
 }
 
 /**
@@ -100,6 +102,9 @@ function projectCompactWhoami(data: Record<string, unknown>): Record<string, unk
     // edges already carry only kind + to/from {logicalId, sessionName}.
     edges: data["edges"],
     transcript: { path: transcript["path"], tailCommand: transcript["tailCommand"] },
+    // Kept in compact form: an operator should see that OpenRig answered a
+    // trust dialog for this seat. Absent when there were none.
+    ...(Array.isArray(data["trustAnswers"]) && data["trustAnswers"].length > 0 ? { trustAnswers: data["trustAnswers"] } : {}),
   };
 }
 
@@ -325,6 +330,9 @@ workspace block). The compact form omits the Context line; use 'rig context' or
       console.log(`Runtime:    ${id.runtime}`);
       console.log(`Transport:  ${id.attachmentType === "external_cli" ? "external_cli (outbound only)" : id.attachmentType}`);
       console.log(`Resolved:   via ${data.resolvedBy.replace(/_/g, " ")}`);
+      for (const answer of data.trustAnswers ?? []) {
+        console.log(`Trust:      ${answer.summary}${answer.answeredAt ? ` at ${answer.answeredAt}` : ""}`);
+      }
 
       if (data.peers.length > 0) {
         console.log("");

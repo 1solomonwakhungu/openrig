@@ -824,6 +824,8 @@ export interface NodeDetailCompactSpec {
 export interface NodeDetailEntry extends NodeInventoryEntry {
   /** W3 opt-in single-seat diagnostic; never populated on inventory lists. */
   permissionDrift?: import("./permission-drift.js").PermissionDriftDiagnostic | null;
+  /** Dialogs OpenRig answered for the seat's current launch (node detail only). */
+  trustAnswers?: import("./seat-trust-answers.js").SeatTrustAnswer[];
   binding: Binding | null;
   startupFiles: Array<{ path: string; deliveryHint: string; required: boolean }>;
   startupActions: Array<{ type: string; value: string }>;

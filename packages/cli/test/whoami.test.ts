@@ -63,6 +63,12 @@ const UNBOUND_WHOAMI_RESPONSE = {
   commands: { sendExamples: [], captureExamples: [] },
 };
 
+const TRUST_ANSWER = {
+  code: "trust_gate", option: "Yes", describe: "trusted the seat's cwd for this Copilot session only",
+  answeredAt: "2026-10-03T03:30:00.000Z", folder: "/work/repo", runtime: "copilot",
+  summary: "OpenRig trusted /work/repo for this session (copilot)",
+};
+
 describe("Whoami CLI", () => {
   let server: http.Server;
   let port: number;
@@ -74,6 +80,9 @@ describe("Whoami CLI", () => {
       if (url.includes("/api/whoami") && url.includes("nodeId=node-1")) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(WHOAMI_RESPONSE));
+      } else if (url.includes("/api/whoami") && url.includes("nodeId=node-3")) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ...WHOAMI_RESPONSE, trustAnswers: [TRUST_ANSWER] }));
       } else if (url.includes("/api/whoami") && url.includes("nodeId=node-2")) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(UNBOUND_WHOAMI_RESPONSE));
@@ -266,6 +275,24 @@ describe("Whoami CLI", () => {
     const result = resolveIdentitySource({}, mockTmuxExec);
 
     expect(result).toEqual({ sessionName: "fallback-session" });
+  });
+
+  it("human output shows each trust answer OpenRig made, and nothing when there were none", async () => {
+    process.env["OPENRIG_NODE_ID"] = "node-3";
+    const answered = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami"]); });
+    expect(answered.logs.join("\n")).toContain("Trust:      OpenRig trusted /work/repo for this session (copilot) at 2026-10-03T03:30:00.000Z");
+    process.env["OPENRIG_NODE_ID"] = "node-1";
+    const plain = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami"]); });
+    expect(plain.logs.join("\n")).not.toContain("Trust:");
+  });
+
+  it("compact --json keeps trustAnswers when present and omits the key otherwise", async () => {
+    process.env["OPENRIG_NODE_ID"] = "node-3";
+    const answered = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami", "--json"]); });
+    expect(JSON.parse(answered.logs.join("\n")).trustAnswers).toEqual([TRUST_ANSWER]);
+    process.env["OPENRIG_NODE_ID"] = "node-1";
+    const plain = await captureLogs(async () => { await makeCmd().parseAsync(["node", "rig", "whoami", "--json"]); });
+    expect(JSON.parse(plain.logs.join("\n"))).not.toHaveProperty("trustAnswers");
   });
 
   it("human output includes rig, pod, session, peers, edges, transcript", async () => {

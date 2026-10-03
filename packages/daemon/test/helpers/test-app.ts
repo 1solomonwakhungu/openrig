@@ -233,6 +233,8 @@ export function createTestApp(
       diagnose(nodeId: string): import("../../src/domain/permission-drift.js").PermissionDriftDiagnostic | null;
     };
     listProcesses?: () => Promise<Array<{ pid: number; ppid: number; command: string }>>;
+    /** Per-seat runtime state root for launch records (trust answers). */
+    runtimeStateRoot?: string;
     /**
      * Agent Starter v1 vertical M2: optional real-fs upRouter for tests
      * that POST /api/up with a YAML spec on disk. Default behavior
@@ -428,6 +430,7 @@ export function createTestApp(
     // across the suite). Tests for the observer itself construct it directly
     // and pass it here explicitly.
     permissionDriftObserver: opts?.permissionDriftObserver ?? { diagnose: () => null },
+    runtimeStateRoot: opts?.runtimeStateRoot,
     runtimeAdapters: opts?.wireRuntimeAdapters ? adapters : undefined,
   });
   return {

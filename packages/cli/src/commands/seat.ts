@@ -31,6 +31,8 @@ interface SeatStatusResponse {
     nativeEffect: "unverified";
     error?: string;
   };
+  /** Dialogs OpenRig answered for the seat's current launch (absent from older daemons). */
+  trust_answers?: Array<{ code: string; option: string; folder: string | null; runtime: string; answeredAt: string; summary: string }>;
   session_status: string | null;
   startup_status: string | null;
   occupant_lifecycle: string;
@@ -160,6 +162,9 @@ function printHuman(status: SeatStatusResponse): void {
     console.log(`Last launch arguments: ${p.lastLaunchArguments?.value ?? "unknown"}${p.lastLaunchArguments?.approvalPolicy ? `; approval=${p.lastLaunchArguments.approvalPolicy}` : ""}`);
     console.log("Native permission effect: unverified by this status read");
     if (p.error) console.log(`Permission selection unavailable: ${p.error}`);
+  }
+  for (const answer of status.trust_answers ?? []) {
+    console.log(`${answer.summary}${answer.answeredAt ? ` at ${answer.answeredAt}` : ""}`);
   }
   console.log(`Startup: ${display(status.startup_status, "unknown")}`);
   console.log(`Occupant lifecycle: ${status.occupant_lifecycle}`);
