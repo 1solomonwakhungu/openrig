@@ -14,13 +14,14 @@ const RUNNER = nodePath.join(__dirname, "..", "src", "adapters", "pi-runner.ts")
 let root: string | null = null;
 afterEach(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); root = null; });
 
-/** Run the real runner with a fake `<runtime>` that prints `stderr` and ends with `ending`. */
-function runWithFake(runtime: "omp" | "pi", stderr: string[], ending = "exit 1") {
+/** Run the real runner with a fake `<runtime>` that runs `before`, prints
+ *  `stderr`, and ends with `ending`. */
+function runWithFake(runtime: "omp" | "pi", stderr: string[], ending = "exit 1", before = "") {
   root = fs.mkdtempSync(nodePath.join(os.tmpdir(), `openrig-${runtime}-early-exit-`));
   const bin = nodePath.join(root, "bin");
   fs.mkdirSync(bin);
   const lines = stderr.map((line) => `printf '%s\\n' '${line}' >&2`).join("\n");
-  fs.writeFileSync(nodePath.join(bin, runtime), `#!/bin/sh\n${lines}\n${ending}\n`, { mode: 0o755 });
+  fs.writeFileSync(nodePath.join(bin, runtime), `#!/bin/sh\n${before}\n${lines}\n${ending}\n`, { mode: 0o755 });
   const args = [
     "--import", "tsx", RUNNER,
     "--session-name", "dev@rig", "--state-root", nodePath.join(root, "state", runtime), "--cwd", root,
@@ -112,7 +113,10 @@ describe("OMP exit record with a child holding OMP's stderr", () => {
 
 describe("Pi is unchanged", () => {
   it("an early Pi exit keeps Pi's markers and gets no OMP diagnostic", () => {
-    const { output } = runWithFake("pi", ["pi: fatal: bad config"]);
+    // The fake Pi reads the runner's initial RPC line before it fails, so the
+    // runner's first stdin write never races the child's exit (an EPIPE on
+    // that write would otherwise come before the lines asserted below).
+    const { output } = runWithFake("pi", ["pi: fatal: bad config"], "exit 1", "IFS= read -r first_rpc_line");
     expect(output).toContain("[pi:err] pi: fatal: bad config");
     expect(output).toContain("[pi-runner] EXITED pi exited (code 1)");
     expect(output).not.toContain("[omp-runner]");
