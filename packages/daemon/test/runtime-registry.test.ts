@@ -298,7 +298,7 @@ describe("runtime registry: a registered runtime reaches every generic site", ()
     expect(classifyPaneRuntimeMatch("example-cli", "example-cli")).toBe("match");
     expect(classifyPaneRuntimeMatch("zsh", "example-cli")).toBe("mismatch");
     expect(classifyPaneRuntimeMatch("node", "example-cli")).toBe("match");
-    expect(classifyPaneRuntimeMatch("zsh", "pi")).toBe("match"); // unchanged built-in leniency
+    expect(classifyPaneRuntimeMatch("zsh", "pi")).toBe("mismatch"); // upstream #1391: a Pi seat at a bare shell is a mismatch
 
     const draft = generateDraftRig([{ tmuxSession: "s", runtimeHint: "example-cli", cwd: "/w" } as unknown as DiscoveredSession]);
     expect(draft.yaml).toContain("runtime: example-cli");
@@ -371,6 +371,13 @@ describe("restore dispatch to registered resume adapters", () => {
       nodeId: node.id, sessionName: "dev@r1", resumeType: "example_session_id", resumeToken: "sess_1", cwd: "/w",
       codexConfigProfile: null, model: "m1", resolvedPosture: "floor", permissionMode: undefined,
     });
+  });
+
+  it("resumes an auto-policy seat at the floor, never from OPENRIG_YOLO", async () => {
+    const node = rigRepo.addNode(rigRepo.createRig("r-auto").id, "dev", { runtime: "example-cli" });
+    const adapter = fakeResume({ ok: true });
+    await (orchestrator([adapter]) as any).attemptResume(node.id, "dev@r-auto", "example_session_id", "sess_1", "/w", null, "m1", "auto");
+    expect(adapter.resume).toHaveBeenCalledWith(expect.objectContaining({ resolvedPosture: "floor" }));
   });
 
   it("maps retry_fresh and attention_required like the built-ins", async () => {

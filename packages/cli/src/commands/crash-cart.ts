@@ -1,8 +1,10 @@
 import { Command } from "commander";
 import { copyFileSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
+import { getOpenRigHome } from "../openrig-compat.js";
 import { join } from "node:path";
 import { ConfigStore } from "../config-store.js";
+import { formatDaemonHostForUrl } from "../client.js";
 
 // `rig crash-cart --json` — the daemon-DOWN recovery verdict emit (plan c015d9ed §C3, coupling ruling
 // option A). Prints ONE JSON = the 3-state detector verdict + (on DOWN) the discovery — READ-ONLY, a
@@ -28,10 +30,6 @@ export interface CrashCartCommandDeps {
   emit: () => Promise<CrashCartEmit>;
   /** Emit one line (default: stdout). */
   write: (line: string) => void;
-}
-
-function openrigHome(): string {
-  return process.env.OPENRIG_HOME ?? join(homedir(), ".openrig");
 }
 
 /** Read daemon.json returning the FULL record incl. `db` (loadCrashCartDiscovery needs the db path;
@@ -64,7 +62,7 @@ function existsOrThrow(path: string): boolean {
  */
 async function realEmit(): Promise<CrashCartEmit> {
   const cc = await import("@openrig/daemon/crash-cart");
-  const home = openrigHome();
+  const home = getOpenRigHome();
   const openrigUrl = process.env.OPENRIG_URL;
   const probeClassified = (url: string) =>
     cc.probeHealthz(url, { fetch: (u, init) => fetch(u, init as RequestInit), timeoutMs: 700 });
@@ -87,7 +85,7 @@ async function realEmit(): Promise<CrashCartEmit> {
         : "no daemon.json";
       const url = openrigUrl
         ? `${openrigUrl.replace(/\/$/, "")}/healthz`
-        : `http://${state?.host ?? "127.0.0.1"}:${state?.port ?? 7433}/healthz`;
+        : `http://${formatDaemonHostForUrl(state?.host ?? "127.0.0.1")}:${state?.port ?? 7433}/healthz`;
       const probeResult = await probeClassified(url);
       return { pidState, probeResult, failedSignal: `healthz ${probeResult} at ${url}` };
     },

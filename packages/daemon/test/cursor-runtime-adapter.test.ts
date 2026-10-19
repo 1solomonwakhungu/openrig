@@ -24,6 +24,11 @@ import {
   serializeCursorChatSnapshot, parseCursorChatSnapshot, type ReadOnlyFs,
 } from "../src/adapters/cli/cursor/cursor-cli.js";
 
+// The adapters under test run with env {} (harnessDeps); the shared hermetic setup sets
+// XDG_* in process.env, which the expected paths below would otherwise pick up.
+delete process.env["XDG_CONFIG_HOME"];
+delete process.env["CURSOR_CONFIG_DIR"];
+
 const ID = "9e8f977d-c5b6-4f2b-82e5-2c1c1164b977";
 const OTHER_ID = "1b2c3d4e-0000-4a4a-8b8b-123456789abc";
 const CWD = "/home/user/work";

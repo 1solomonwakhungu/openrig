@@ -24,7 +24,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { WorkflowSpec, WorkflowExitKind, WorkflowAgentHarness, WorkflowGateSpec } from "./workflow-types.js";
-import type { WorkflowSpecCache } from "./workflow-spec-cache.js";
+import { RETAINED_STATUS, type WorkflowSpecCache } from "./workflow-spec-cache.js";
 import type { EventBus } from "./event-bus.js";
 
 export interface SpecLibraryWorkflowEntry {
@@ -155,6 +155,8 @@ export function scanWorkflowSpecs(opts: ScanWorkflowSpecsOpts): SpecLibraryWorkf
 
   const out: SpecLibraryWorkflowEntry[] = [];
   for (const row of rows) {
+    // A version kept only for unfinished work after its file was deleted is not discoverable (#511).
+    if (row.status === RETAINED_STATUS) continue;
     const status: "valid" | "error" = row.status === "error" ? "error" : "valid";
     const isBuiltIn = opts.workflowBuiltinSpecsDir
       ? isUnderDir(row.source_path, opts.workflowBuiltinSpecsDir)
@@ -232,7 +234,7 @@ export function getWorkflowReview(opts: ScanWorkflowSpecsOpts & { name: string; 
   } catch {
     return null;
   }
-  if (!row) return null;
+  if (!row || row.status === RETAINED_STATUS) return null;
 
   let roles: WorkflowSpec["roles"];
   let steps: WorkflowSpec["steps"];
@@ -329,13 +331,27 @@ export function getWorkflowReview(opts: ScanWorkflowSpecsOpts & { name: string; 
 }
 
 export function workflowLibraryId(name: string, version: string): string {
+  // Legacy IDs round-trip every name, but only versions without a colon.
+  // An opaque tuple keeps colon-bearing versions distinct without changing
+  // any already-unambiguous ID. Legacy valid IDs always contain another colon.
+  if (version.includes(":")) return `workflow:@${Buffer.from(JSON.stringify([name, version])).toString("base64url")}`;
   return `workflow:${name}:${version}`;
 }
 
 export function parseWorkflowLibraryId(id: string): { name: string; version: string } | null {
   if (!id.startsWith("workflow:")) return null;
   const rest = id.slice("workflow:".length);
-  // version may be numeric or an arbitrary string; split on the LAST `:`.
+  if (rest.startsWith("@") && !rest.includes(":")) {
+    try {
+      const encoded = rest.slice(1);
+      const bytes = Buffer.from(encoded, "base64url");
+      if (!encoded || bytes.toString("base64url") !== encoded) return null;
+      const pair: unknown = JSON.parse(bytes.toString("utf8"));
+      if (!Array.isArray(pair) || pair.length !== 2 || pair.some(value => typeof value !== "string")) return null;
+      return { name: pair[0], version: pair[1] };
+    } catch { return null; }
+  }
+  // Preserve legacy names (including literal percent sequences and colons).
   const lastColon = rest.lastIndexOf(":");
   if (lastColon === -1) return null;
   return { name: rest.slice(0, lastColon), version: rest.slice(lastColon + 1) };
@@ -361,11 +377,12 @@ function isUnderDir(childPath: string, parentDir: string): boolean {
 // disappear since the last scan get removed via removeBySourcePath
 // (OQ-4 decision; deletion + audit log).
 //
-// OQ-3 mtime check: a file is skipped when its mtime is <= the cache row's
-// cached_at (no parse work needed). Otherwise it's re-parsed via the cache
-// (which itself hashes the content and returns the prior row when the
-// hash matches — second layer of skip for content-stable files whose
-// mtime nonetheless advanced, e.g., touch).
+// OQ-3 timestamp check: a file is skipped when both its mtime/ctime are <=
+// the cache row's cached_at. A file can be restored or copied with an older
+// mtime, so ctime keeps the stat-only fast path honest. Files in the same
+// timestamp second still use the content hash, and other newer files are
+// re-parsed via the cache (which itself hashes the content and returns the
+// prior row when the hash matches).
 
 export interface ScanWorkflowSpecFolderOpts {
   /** SQLite handle (used for direct lookups). */
@@ -395,7 +412,7 @@ export interface ScanWorkflowSpecFolderResult {
   errors: number;
   /** Cache rows removed because their source_path no longer exists. */
   removed: number;
-  /** Files skipped via mtime check (unchanged since last scan). */
+  /** Files skipped via timestamp check (unchanged since last scan). */
   skipped: number;
 }
 
@@ -426,36 +443,54 @@ export function scanWorkflowSpecFolder(
   for (const entry of entries) {
     if (!isWorkflowYamlFile(entry)) continue;
     const filePath = path.join(opts.folder, entry);
-    let mtimeMs = 0;
+    let changeMs = 0;
     try {
       const stat = statSync(filePath);
       if (!stat.isFile()) continue;
-      mtimeMs = stat.mtimeMs;
+      changeMs = Math.max(stat.mtimeMs, stat.ctimeMs);
     } catch {
       continue;
     }
     seenPaths.add(filePath);
     result.scanned += 1;
 
-    // mtime check (OQ-3): if the cache has a row at this source_path
-    // whose cached_at is at or after the file's mtime, the file is
-    // unchanged since last scan — skip the re-parse work entirely.
+    // Timestamp check (OQ-3): ctime protects the stat-only skip when a
+    // restored or copied file has an older mtime even though its content
+    // changed. Only the same timestamp second needs a content-hash check.
     //
     // Compare at second-resolution because some filesystems (HFS+, FAT)
-    // round mtime down to whole seconds while cached_at carries ms
-    // precision; without this floor a freshly-written file whose mtime
-    // is `T - 999ms` would always look "newer" than its cached_at at
+    // round mtime/ctime down to whole seconds while cached_at carries ms
+    // precision; without this floor a freshly-written file whose change
+    // time is `T - 999ms` would always look "newer" than its cached_at at
     // exactly `T` and never skip.
+    // A path can hold several cached versions plus a diagnostic row (#503); the most
+    // recently written row is the one that reflects the file's last scan.
     const cachedAt = opts.db
-      .prepare(`SELECT cached_at FROM workflow_specs WHERE source_path = ?`)
-      .get(filePath) as { cached_at: string } | undefined;
+      .prepare(`SELECT cached_at, source_hash FROM workflow_specs WHERE source_path = ? AND status != '${RETAINED_STATUS}' ORDER BY cached_at DESC, rowid DESC LIMIT 1`)
+      .get(filePath) as { cached_at: string; source_hash: string } | undefined;
     if (cachedAt) {
       const cachedAtMs = Date.parse(cachedAt.cached_at);
       const cachedAtSec = Math.floor(cachedAtMs / 1000);
-      const mtimeSec = Math.floor(mtimeMs / 1000);
-      if (Number.isFinite(cachedAtMs) && cachedAtSec >= mtimeSec) {
-        result.skipped += 1;
-        continue;
+      const changeSec = Math.floor(changeMs / 1000);
+      if (Number.isFinite(cachedAtMs) && Number.isFinite(changeMs)) {
+        if (cachedAtSec > changeSec) {
+          result.skipped += 1;
+          continue;
+        }
+        if (cachedAtSec === changeSec) {
+          // Consult the cache's existing content hash before treating the file
+          // as unchanged. Hash the UTF-8 text exactly the way the cache
+          // hashes it on write (not the raw bytes): for files that are not
+          // clean UTF-8 the two digests differ and every scan re-parses.
+          let unchanged = false;
+          try {
+            unchanged = createHash("sha256").update(readFileSync(filePath, "utf-8")).digest("hex") === cachedAt.source_hash;
+          } catch { /* The existing readThrough path records the diagnostic. */ }
+          if (unchanged) {
+            result.skipped += 1;
+            continue;
+          }
+        }
       }
     }
 
@@ -478,11 +513,16 @@ export function scanWorkflowSpecFolder(
         // empty hash so the next scan re-evaluates
         sourceHash = "";
       }
-      opts.cache.writeDiagnostic({
-        sourcePath: filePath,
-        sourceHash,
-        errorMessage: message,
-      });
+      try {
+        opts.cache.writeDiagnostic({
+          sourcePath: filePath,
+          sourceHash,
+          errorMessage: message,
+        });
+      } catch (writeErr) {
+        // One file's diagnostic must not end the scan of the rest of the folder (#511).
+        console.error(`workflow spec scan: could not record the parse error for ${filePath}: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`);
+      }
       result.errors += 1;
     }
   }
@@ -503,8 +543,19 @@ export function scanWorkflowSpecFolder(
       version: string | null;
     }>;
   for (const row of cachedUnderFolder) {
+    // LIKE treats _ and % in real folder names as patterns. Only this
+    // literal directory owns deletion; neighboring cache rows must survive.
+    if (!row.source_path.startsWith(folderPrefix)) continue;
     if (seenPaths.has(row.source_path)) continue;
-    const removed = opts.cache.removeBySourcePath(row.source_path);
+    if (!row.spec_id) continue;
+    // #511: a version that unfinished work is pinned to stays readable until that work ends;
+    // a later scan removes it. Every other row of the vanished file goes, one event per version.
+    const identity = opts.cache.storedIdentity(row.spec_id);
+    if (identity && opts.cache.isPinnedByUnfinishedWork(identity.name, identity.version)) {
+      opts.cache.retain(row.spec_id);
+      continue;
+    }
+    const removed = opts.cache.removeBySpecId(row.spec_id);
     if (removed > 0) {
       result.removed += removed;
       // OQ-4 audit-log: record the disappearance so operators can trace

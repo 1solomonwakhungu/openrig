@@ -1,8 +1,8 @@
 import type { RigRepository } from "./rig-repository.js";
-import { getNodeInventory } from "./node-inventory.js";
+import { deriveCanonicalFromEntry, getNodeInventory } from "./node-inventory.js";
 import { parseSessionName } from "./session-name.js";
-import type { NodeInventoryEntry } from "./types.js";
-import { NativePermissionStore, type StoredNativePermissionSelection } from "./native-permission-store.js";
+import type { NodeInventoryEntry, SeatIdentityVerdict } from "./types.js";
+import { NativePermissionStore, type StoredNativePermissionSelection, type ResolvedSeatPermission } from "./native-permission-store.js";
 import { AppliedLaunchObservationStore, type StoredAppliedLaunchObservation } from "./applied-launch-observation-store.js";
 import { readSeatTrustAnswers, type SeatTrustAnswer } from "./seat-trust-answers.js";
 
@@ -18,8 +18,11 @@ export interface SeatStatus {
   pod_id: string | null;
   pod_namespace: string | null;
   runtime: string | null;
+  /** Configured cwd for future launches; an existing process can still use its old cwd. */
+  launch_cwd: string | null;
   current_occupant: string | null;
   session_status: string | null;
+  session_reason: SeatIdentityVerdict["reason"];
   startup_status: NodeInventoryEntry["startupStatus"];
   occupant_lifecycle: NodeInventoryEntry["occupantLifecycle"];
   continuity_outcome: NodeInventoryEntry["continuityOutcome"];
@@ -33,6 +36,7 @@ export interface SeatStatus {
     lastLaunchArguments: StoredAppliedLaunchObservation | null;
     nativeEffect: "unverified";
     error?: string;
+    effective?: ResolvedSeatPermission;
   };
   /** Dialogs OpenRig answered for the seat's current launch (TuiCliGateAnswer,
    *  recorded in the seat's launch.json). Empty when none were answered or the
@@ -93,9 +97,11 @@ export class SeatStatusService {
     if (parsed.kind === "canonical") {
       const localRef = parsed.member;
       const rigName = parsed.rig;
-      const rigs = this.rigRepo.findRigsByName(rigName);
+      const rigs = this.rigRepo.findUnarchivedRigsByName(rigName);
       return rigs.flatMap((rig) => this.entriesForRig(rig.id).filter((entry) =>
-        entry.canonicalSessionName === ref || entry.logicalId === localRef
+        entry.canonicalSessionName === ref
+        || deriveCanonicalFromEntry(entry) === ref
+        || entry.logicalId === localRef
       ).map((entry) => ({ entry })));
     }
 
@@ -119,8 +125,10 @@ export class SeatStatusService {
       pod_id: entry.podId,
       pod_namespace: entry.podNamespace ?? null,
       runtime: entry.runtime,
+      launch_cwd: entry.cwd,
       current_occupant: entry.canonicalSessionName,
       session_status: entry.sessionStatus,
+      session_reason: entry.identityVerdict?.reason ?? null,
       startup_status: entry.startupStatus,
       occupant_lifecycle: entry.occupantLifecycle,
       continuity_outcome: entry.continuityOutcome,
@@ -128,16 +136,23 @@ export class SeatStatusService {
       previous_occupant: entry.previousOccupant,
       handover_at: entry.handoverAt,
       restore_outcome: entry.restoreOutcome,
-      permissions: this.permissionStatus(entry.nodeId),
+      permissions: this.permissionStatus(entry.nodeId, entry.runtime),
       trust_answers: readSeatTrustAnswers(entry.runtime, entry.canonicalSessionName, this.stateRoot),
     };
   }
 
-  private permissionStatus(nodeId: string): SeatStatus["permissions"] {
+  private permissionStatus(nodeId: string, runtime?: string | null): SeatStatus["permissions"] {
     const lastLaunchArguments = new AppliedLaunchObservationStore(this.rigRepo.db).readCurrent(nodeId);
     try {
-      const desired = new NativePermissionStore(this.rigRepo.db).read(nodeId);
-      return { selectionState: desired ? "explicit" : "inherit", desired, lastLaunchArguments, nativeEffect: "unverified" };
+      const store = new NativePermissionStore(this.rigRepo.db);
+      const desired = store.read(nodeId);
+      // A seat on one of its fallback runtimes carries its selection over (overrideFor
+      // still throws for a runtime the seat doesn't declare); resolve() only fits the
+      // runtime the selection was made for.
+      const onFallback = Boolean(runtime && desired && desired.runtime !== runtime);
+      if (onFallback) store.overrideFor(nodeId, runtime!);
+      const effective = runtime && !onFallback ? store.resolve(nodeId, runtime) : undefined;
+      return { selectionState: desired ? "explicit" : "inherit", desired, lastLaunchArguments, nativeEffect: "unverified", ...(effective ? { effective } : {}) };
     } catch (error) {
       return { selectionState: "unknown", desired: null, lastLaunchArguments, nativeEffect: "unverified", error: (error as Error).message };
     }

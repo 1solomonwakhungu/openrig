@@ -13,7 +13,7 @@ import nodePath from "node:path";
 import * as tar from "tar";
 import { verifyIntegrity, type IntegrityFsOps } from "./bundle-integrity.js";
 // TODO: AS-T12 — migrate to pod-aware bundle types
-import { parseLegacyBundleManifest as parseBundleManifest, normalizeLegacyBundleManifest as normalizeBundleManifest } from "./bundle-types.js";
+import { parseLegacyBundleManifest as parseBundleManifest, normalizeLegacyBundleManifest as normalizeBundleManifest, normalizeIncludedLoginFiles } from "./bundle-types.js";
 
 /**
  * Pack a staging directory into a .rigbundle archive (deterministic tar.gz).
@@ -25,6 +25,11 @@ export async function pack(stagingDir: string, outputPath: string): Promise<stri
     throw new Error("Output path must end with .rigbundle");
   }
 
+  const outDir = nodePath.dirname(outputPath);
+  if (outDir && !fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+  }
+
   // Collect all files in deterministic order (alphabetical)
   const allFiles = walkFilesSync(stagingDir).sort();
 
@@ -34,7 +39,7 @@ export async function pack(stagingDir: string, outputPath: string): Promise<stri
       gzip: { level: 9 },
       file: outputPath,
       cwd: stagingDir,
-      portable: true, // Normalizes uid/gid/mode
+      portable: true, // Omits machine-specific owner metadata
       mtime: new Date("2026-01-01T00:00:00Z"), // Fixed mtime for determinism
     },
     allFiles,
@@ -48,12 +53,63 @@ export async function pack(stagingDir: string, outputPath: string): Promise<stri
 }
 
 /**
+ * Normalize a tar entry path for safety checks: Windows backslashes to
+ * forward slashes so a `..\\escape` or `C:\\…` entry cannot slip past a
+ * POSIX-only check.
+ */
+export function normalizeArchiveEntryPath(entryPath: string): string {
+  return entryPath.replace(/\\/g, "/");
+}
+
+/**
+ * The single unsafe-entry verdict shared by bundle extraction and inspection.
+ * Returns a human-readable reason when the entry must be refused, or `null`
+ * when the entry is safe. Rejects symlinks/hardlinks, POSIX-absolute and
+ * Windows drive-absolute paths, and dot-dot traversal (POSIX or backslash).
+ *
+ * One source of truth: `unpack()` and the `/api/bundles/inspect` route both
+ * call this so a bundle cannot be refused by one and reported safe by the
+ * other. The labels (`SymbolicLink:`, `absolute path:`, `path traversal:`)
+ * are part of the refusal contract.
+ */
+export function unsafeArchiveEntryReason(entryPath: string, entryType?: string): string | null {
+  if (entryType === "SymbolicLink" || entryType === "Link") {
+    return `${entryType}: ${entryPath}`;
+  }
+  const normalizedPath = normalizeArchiveEntryPath(entryPath);
+  if (normalizedPath.startsWith("/") || /^[a-zA-Z]:/.test(normalizedPath)) {
+    return `absolute path: ${entryPath}`;
+  }
+  if (normalizedPath.split("/").some((segment) => segment === "..")) {
+    return `path traversal: ${entryPath}`;
+  }
+  return null;
+}
+
+/**
+ * Pre-scan an archive and return every unsafe entry reason (empty when clean).
+ * Shared by `unpack()` and the `/api/bundles/inspect` route so both apply the
+ * same boundary before any extraction happens.
+ */
+export async function collectUnsafeArchiveEntries(archivePath: string): Promise<string[]> {
+  const unsafeEntries: string[] = [];
+  await tar.list({
+    file: archivePath,
+    onReadEntry: (entry) => {
+      const reason = unsafeArchiveEntryReason(entry.path, entry.type);
+      if (reason) unsafeEntries.push(reason);
+    },
+  });
+  return unsafeEntries;
+}
+
+/**
  * Unpack a .rigbundle archive to a directory.
  * Requires sibling .sha256 digest file. Verifies archive integrity before extraction.
  * Rejects symlinks, hardlinks, path traversal, and absolute paths.
  * Runs content integrity verification after extraction.
  */
-export async function unpack(archivePath: string, outputDir: string): Promise<void> {
+export async function unpack(archivePath: string, outputDir: string): Promise<{ warnings: string[] } | undefined> {
   // Step 1: Verify archive-level digest
   const digestResult = verifyArchiveDigest(archivePath);
   if (!digestResult.valid) {
@@ -61,32 +117,23 @@ export async function unpack(archivePath: string, outputDir: string): Promise<vo
   }
 
   // Step 2: Pre-scan archive for unsafe entries BEFORE extraction
-  const unsafeEntries: string[] = [];
-  await tar.list({
-    file: archivePath,
-    onReadEntry: (entry) => {
-      const entryPath = entry.path;
-      const entryType = entry.type;
-      if (entryType === "SymbolicLink" || entryType === "Link") {
-        unsafeEntries.push(`${entryType}: ${entryPath}`);
-      }
-      if (entryPath.startsWith("/")) {
-        unsafeEntries.push(`absolute path: ${entryPath}`);
-      }
-      const segments = entryPath.split("/");
-      if (segments.some((s: string) => s === "..")) {
-        unsafeEntries.push(`path traversal: ${entryPath}`);
-      }
-    },
-  });
+  const unsafeEntries = await collectUnsafeArchiveEntries(archivePath);
 
   if (unsafeEntries.length > 0) {
     throw new Error(`Unsafe archive entries rejected: ${unsafeEntries.join("; ")}`);
   }
 
-  // Step 3: Extract (safe — pre-scanned)
+  // Step 3: Extract (safe — pre-scanned and defensively filtered)
   fs.mkdirSync(outputDir, { recursive: true });
-  await tar.extract({ file: archivePath, cwd: outputDir });
+  await tar.extract({
+    file: archivePath,
+    cwd: outputDir,
+    filter: (p, entry) => {
+      if ("isSymbolicLink" in entry && typeof entry.isSymbolicLink === "function" && entry.isSymbolicLink()) return false;
+      const type = "type" in entry ? (entry as { type?: string }).type : undefined;
+      return unsafeArchiveEntryReason(p, type) === null;
+    },
+  });
 
   // Step 3: Verify content integrity
   const manifestPath = nodePath.join(outputDir, "bundle.yaml");
@@ -126,8 +173,8 @@ export async function unpack(archivePath: string, outputDir: string): Promise<vo
       walkFiles: (dir) => walkFilesSync(dir),
     };
 
-    // verifyIntegrity only reads manifest.integrity — safe to cast
-    const result = verifyIntegrity(outputDir, { integrity } as unknown as Parameters<typeof verifyIntegrity>[1], fsOps);
+    const includedLoginFiles = normalizeIncludedLoginFiles(raw["included_login_files"]);
+    const result = verifyIntegrity(outputDir, { integrity, includedLoginFiles } as unknown as Parameters<typeof verifyIntegrity>[1], fsOps);
     if (!result.passed) {
       const details = [
         ...result.mismatches.map((f) => `tampered: ${f}`),
@@ -137,6 +184,7 @@ export async function unpack(archivePath: string, outputDir: string): Promise<vo
       ];
       throw new Error(`Content integrity verification failed: ${details.join("; ")}`);
     }
+    if (result.warnings) return { warnings: result.warnings };
   }
 }
 

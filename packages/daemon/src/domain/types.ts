@@ -1,3 +1,5 @@
+import type { StartupSubmissionDiagnostic } from "./startup-submission-evidence.js";
+
 export interface Rig {
   id: string;
   name: string;
@@ -31,6 +33,9 @@ export interface Node {
   role: string | null;
   runtime: string | null;
   model: string | null;
+  effort?: string | null;
+  /** OPR.0.7.0.7: the seat's explicit effort choice (rig seat set-effort); null = none. */
+  effortChoice?: string | null;
   codexConfigProfile?: string | null;
   /** Per-seat launch readiness window in ms (rig spec readiness_timeout_ms);
    *  null/absent = the built-in defaults. */
@@ -43,6 +48,8 @@ export interface Node {
   /** OPR.0.4.8.3 Seam B: attached permission_policy REF (builtin:<name> or spec-relative custom
    *  path), or null when none is attached (= the floor). */
   permissionPolicy?: string | null;
+  /** The member's own declared launch environment (not merged with the rig's), or null. */
+  env?: Record<string, string> | null;
   cwd: string | null;
   surfaceHint: string | null;
   workspace: string | null;
@@ -106,6 +113,8 @@ export interface Session {
   origin: "launched" | "claimed";
   startupStatus: "pending" | "ready" | "attention_required" | "failed";
   startupCompletedAt: string | null;
+  /** The community agent app this session was launched for (selected through its preset); absent otherwise. */
+  agentApp?: string;
 }
 
 // -- Event types --
@@ -136,13 +145,20 @@ export type RigEvent =
   // S5 (OPR.0.5.4.7) — seat-lifecycle audit trail: the three supported seat verbs each persist
   // their mutation with actor + reason in the same transaction as the mutation itself.
   | { type: "node.model_changed"; rigId: string; nodeId: string; logicalId: string; from: string | null; to: string; reason: string; operator: string | null }
+  | { type: "node.cwd_changed"; rigId: string; nodeId: string; logicalId: string; from: string | null; to: string; reason: string; operator: string | null }
+  | { type: "node.effort_changed"; rigId: string; nodeId: string; logicalId: string; from: string | null; to: string | null; reason: string; operator: string | null }
   | { type: "node.permissions_changed"; rigId: string; nodeId: string; from: unknown; to: unknown; actor: string; reason: string; source: "seat_selection"; effect: "future_launches_only" }
+  | { type: "node.policy_changed"; rigId: string; nodeId: string; logicalId: string; from: string | null; to: string; launchPosture: "floor" | "full_bypass" | "auto"; reason: string; operator: string }
   | { type: "session.stopped"; rigId: string; nodeId: string; sessionName: string; reason: string; operator: string | null }
   | { type: "session.cleaned"; rigId: string; nodeId: string; sessionName: string | null; reason: string; operator: string | null; actions: { sessionsExited: string[]; bindingCleared: boolean } }
   | { type: "node.launched"; rigId: string; nodeId: string; logicalId: string; sessionName: string }
   | { type: "topology.roster_recorded"; rigId: string; intendedNodeIds: string[]; source: "materialized_topology" }
-  | { type: "seat.fresh_launched"; rigId: string; nodeId: string; logicalId: string; sessionName: string; sessionId: string; supersededSessionIds: string[]; retiringGeneration: string | null; newGeneration: string; nativeSessionId: string | null; nativeSessionIdReason?: string; model: string | null; startupPolicyHash: string; reason: string; operator: string | null; status: "ready" | "attention_required" }
-  | { type: "seat.fresh_launch_failed"; rigId: string; nodeId: string; logicalId: string; sessionName: string; sessionId: string; supersededSessionIds: string[]; retiringGeneration: string | null; newGeneration: string | null; model: string | null; startupPolicyHash: string; reason: string; operator: string | null; errors: string[] }
+  // OPR.0.7.0.5 — in-place restart (same conversation, same pane). Started is persisted before any signal, so
+  // a request that waited behind it, or a restart that never recorded a result, is refused rather than repeated.
+  | { type: "seat.restart_in_place_started"; rigId: string; nodeId: string; logicalId: string; sessionName: string; pane: string; paneShape: "shell_backed" | "direct_native"; oldPid: number; oldStartedAt: string | null; codexHome: string; reason: string; operator: string | null }
+  | { type: "seat.restart_in_place_finished"; rigId: string; nodeId: string; logicalId: string; sessionName: string; outcome: "restarted_account_unverified" | "not_started" | "incomplete" | "native_unknown"; newPid: number | null; newStartedAt: string | null; codexHome: string; paneHeld: boolean; accountLinesAtRestart: Record<string, number> | null; finishedAt: string }
+  | { type: "seat.fresh_launched"; rigId: string; nodeId: string; logicalId: string; sessionName: string; sessionId: string; supersededSessionIds: string[]; retiringGeneration: string | null; newGeneration: string; nativeSessionId: string | null; nativeSessionIdReason?: string; model: string | null; effort?: string | null; startupPolicyHash: string; reason: string; operator: string | null; status: "ready" | "attention_required" }
+  | { type: "seat.fresh_launch_failed"; rigId: string; nodeId: string; logicalId: string; sessionName: string; sessionId: string; supersededSessionIds: string[]; retiringGeneration: string | null; newGeneration: string | null; model: string | null; effort?: string | null; startupPolicyHash: string; reason: string; operator: string | null; errors: string[] }
   | { type: "snapshot.created"; rigId: string; snapshotId: string; kind: string }
   | { type: "restore.started"; rigId: string; snapshotId: string; snapshotSelection?: RestoreSnapshotSelection; intendedRoster?: Array<{ nodeId: string; logicalId: string }>; excludedNodes?: RestoreExcludedNode[] }
   | { type: "restore.completed"; rigId: string; snapshotId: string; result: RestoreResult }
@@ -179,7 +195,7 @@ export type RigEvent =
   // token value is intentionally omitted; this is observability, NOT a
   // secret-boundary control — resume tokens are not treated as secret per the
   // 2026-07-02 founder ruling).
-  | { type: "session.resume_token_captured"; rigId: string; nodeId: string; sessionName: string; sessionId: string; runtime: string; outcome: "captured" | "preserved" | "skipped"; resumeType?: string; provenance?: "adoption"; reason?: "missing_sidecar" | "parse_error" | "probe_timeout" | "invalid_token" | "capture_error" | "ambiguous_seat" | "higher_rank_present"; redacted: true }
+  | { type: "session.resume_token_captured"; rigId: string; nodeId: string; sessionName: string; sessionId: string; runtime: string; outcome: "captured" | "preserved" | "skipped"; resumeType?: string; provenance?: "adoption"; reason?: "missing_sidecar" | "parse_error" | "probe_timeout" | "process_unreadable" | "invalid_token" | "stale_sidecar" | "capture_error" | "ambiguous_seat" | "higher_rank_present"; redacted: true }
   | { type: "seat.attention_cleared"; rigId: string; nodeId: string; sessionName: string; from: string; to: "ready"; clearedBy: "evidence" | "operator_attestation"; evidence?: { kind: string; state?: string; reason?: string }; reason?: string; previousError: string | null }
   | { type: "rig.imported"; rigId: string; specName: string; specVersion: string }
   // Package events (cross-rig, no rigId)
@@ -207,10 +223,12 @@ export type RigEvent =
        *  record (not just the command response) carries what primed the successor:
        *  fork provenance, or rebuild's exact primed set / gaps / empty-chain reason. */
       sourceOutcome?:
-        | { mode: "fork"; forkedFrom: string }
+        | { mode: "fork"; forkedFrom: string; forkId?: "captured" | "pending"; limit?: string }
         | { mode: "rebuild"; primedArtifacts: Array<{ address: string; label: string }>; gaps: string[]; emptyChainReason?: string } }
   // Bundle events (cross-rig)
   | { type: "bundle.created"; bundleName: string; bundleVersion: string; archiveHash: string }
+  // OPR.0.7.0.18 — a subscription move an agent made or attempted, as it reported it (fleet-wide, no rig).
+  | { type: "subscription.move_recorded"; move: import("./provider/subscription-moves.js").SubscriptionMoveEventPayload }
   // Teardown events
   | { type: "rig.stopped"; rigId: string }
   // OPR.0.3.3.19 - rig archive affordance (soft, reversible; NOT a delete)
@@ -220,8 +238,8 @@ export type RigEvent =
   | { type: "pod.created"; rigId: string; podId: string; namespace: string; label: string }
   | { type: "pod.deleted"; rigId: string; podId: string }
   | { type: "node.startup_pending"; rigId: string; nodeId: string; startupProof?: StartupProofSelection }
-  | { type: "node.startup_ready"; rigId: string; nodeId: string }
-  | { type: "node.startup_failed"; rigId: string; nodeId: string; error: string; sessionId?: string; freshContextPending?: boolean }
+  | { type: "node.startup_ready"; rigId: string; nodeId: string; previousStatus?: "failed" | "attention_required"; submission?: { status: "unverified" | "staged"; reasons: string[]; warning?: string; diagnostics?: StartupSubmissionDiagnostic[] } }
+  | { type: "node.startup_failed"; rigId: string; nodeId: string; error: string; sessionId?: string; freshContextPending?: boolean; forkContextPending?: { parentToken: string; isRestore: boolean }; submissionDiagnostics?: StartupSubmissionDiagnostic[]; stage?: StartupFailureStage; hasPendingWork?: boolean; requestedResumeToken?: string | null; requestedResumeType?: string | null }
   // Runtime fallback: the seat launched on a fallback runtime instead of its declared one.
   | { type: "node.runtime_fallback"; rigId: string; nodeId: string; declaredRuntime: string; runtime: string; attempts: string }
   // Runtime fallback: whether the seat's permission selection (made for its declared
@@ -314,12 +332,9 @@ export type RigEvent =
   // file disappears + audit-log entry. Clean Library + traceable.").
   | { type: "workflow_spec.removed"; sourcePath: string; specId: string | null; specName: string | null; specVersion: string | null; reason: "file_disappeared" }
   // PL-005 Phase A: Mission Control / Queue Observability events.
-  // Action audit + cross-CLI-version drift detection. view_refreshed
-  // is emitted when a Mission Control view is recomputed (SSE
-  // consumers can choose whether to re-fetch).
+  // Action audit + cross-CLI-version drift detection.
   | { type: "mission_control.action_executed"; actionId: string; actionVerb: string; qitemId: string | null; actorSession: string }
   | { type: "mission_control.cli_drift_detected"; rigName: string; missingField: string; observedAt: string }
-  | { type: "mission_control.view_refreshed"; viewName: string; cause: string }
   // PL-005 Phase B: notification dispatch events. Best-effort delivery;
   // failure does NOT interrupt the underlying action being notified about.
   | { type: "mission_control.notification_sent"; mechanism: string; target: string; qitemId: string | null; sentAt: string }
@@ -489,6 +504,9 @@ export interface RestoreNodeResult {
   error?: string;
   /** Pane evidence captured when status is `attention_required` (L3, optional). */
   attentionEvidence?: string | null;
+  /** Managed guidance block ids the seat's guidance file still lacks after restore. The seat keeps
+   *  its own status (a resumed session is still running); this only discloses the gap. */
+  guidanceGaps?: string[];
 }
 
 export type RestoreOutcome =
@@ -536,6 +554,8 @@ export type AgentActivityEvidenceSource =
   | "session_registry";
 
 export interface AgentActivity {
+  turnId?: string | null;
+
   state: AgentActivityState;
   reason: string;
   evidenceSource: AgentActivityEvidenceSource;
@@ -585,7 +605,8 @@ export type NodeLifecycleState = "running" | "detached" | "recoverable" | "atten
  * projection; `verified`, `binding_absent`, and `tmux_unavailable` (and an
  * absent verdict) leave it unchanged.
  */
-export type SeatIdentityVerdictKind = "verified" | "mismatch" | "pane_missing" | "binding_absent" | "tmux_unavailable";
+/** `unconfirmed`: the seat's pane is live, but nothing proves which session it runs (a community agent app). */
+export type SeatIdentityVerdictKind = "verified" | "unconfirmed" | "mismatch" | "pane_missing" | "binding_absent" | "tmux_unavailable";
 
 export interface SeatIdentityVerdict {
   nodeId: string;
@@ -596,6 +617,7 @@ export interface SeatIdentityVerdict {
   reason:
     | "process_identity_mismatch"
     | "process_identity_ambiguous"
+    | "process_identity_unconfirmed"
     | "pane_ambiguous"
     | "pane_pid_gone"
     | "binding_pane_missing"
@@ -610,6 +632,12 @@ export interface SeatIdentityVerdict {
   };
   sessionName: string | null;
   observedAt: string;
+}
+
+/** Only a confirmed missing session proves the seat is no longer running.
+ * Callers must first gate the verdict to the current session and binding. */
+export function identityVerdictConfirmsSessionMissing(verdict: SeatIdentityVerdict | null | undefined): boolean {
+  return verdict?.reason === "session_missing";
 }
 
 /**
@@ -652,8 +680,20 @@ export interface NodeInventoryEntry {
   runtime: string | null;
   /** The spec's runtime when a fallback runtime (`runtime`) runs instead; null otherwise. */
   declaredRuntime?: string | null;
+  /** Present only on a community agent app's seat: its label, maintainer and declared limits. */
+  agentApp?: import("./agent-app-presets.js").AgentAppLabel;
+  /** Effective current status; confirmed session absence projects as detached. */
   sessionStatus: string | null;
+  /** Persisted session status, retained for history and registry-based rollups. */
+  storedSessionStatus?: string | null;
+  /** The latest session was explicitly stopped and has no replacement binding.
+   * It remains non-running, but is not a missing member in the rig lifecycle. */
+  intentionallyStopped?: boolean;
+  // Current projection: an applicable identity failure down-ranks a running
+  // session to attention_required; the stored startup result stays unchanged.
   startupStatus: "pending" | "ready" | "attention_required" | "failed" | null;
+  /** Persisted startup outcome, before current identity projection. */
+  storedStartupStatus?: "pending" | "ready" | "attention_required" | "failed" | null;
   restoreOutcome: NodeRestoreOutcome;
   // OPR.0.4.3.06 — challenge-verified orientation, surfaced beside (never
   // folded into) startupStatus.
@@ -847,7 +887,10 @@ export interface NodeDetailEntry extends NodeInventoryEntry {
   binding: Binding | null;
   startupFiles: Array<{ path: string; deliveryHint: string; required: boolean }>;
   startupActions: Array<{ type: string; value: string }>;
-  installedResources: Array<{ id: string; category: string; targetPath: string }>;
+  /** `targetPath` is where a resource is known to be installed, or "" when that isn't shown. For guidance, it is the
+   *  file the runtime merges into, and only while that file holds a complete block with this id; `declaredTarget` is the spec's `target`
+   *  (parsed, never used to write), and `effectiveTarget` the file the runtime would merge into. */
+  installedResources: Array<{ id: string; category: string; targetPath: string; declaredTarget?: string; effectiveTarget?: string }>;
   recentEvents: Array<{ type: string; createdAt: string; payload: Record<string, unknown> }>;
   infrastructureStartupCommand: string | null;
   peers: NodeDetailPeer[];
@@ -864,6 +907,8 @@ export interface ImportSpec {
 }
 
 export interface StartupFile {
+  /** Explicit per-seat role orientation; never inferred from the filename. */
+  orientation?: "role";
   /** Startup artifacts are files; context packs are composed separately. */
   kind?: "file";
   path: string;
@@ -892,6 +937,22 @@ export interface StartupBlock {
   files: StartupFile[];
   actions: StartupAction[];
 }
+
+export type StartupFailureStage =
+  | "permission_selection"
+  | "proof_selection"
+  | "projection"
+  | "pre_launch_files"
+  | "persistence"
+  | "harness_launch"
+  | "readiness_check"
+  | "initial_prompt"
+  | "restore_preload"
+  | "post_launch_files"
+  | "after_files"
+  | "after_ready"
+  | "post_delivery_readiness"
+  | "identity_verification";
 
 export interface LifecycleDefaults {
   executionMode: "interactive_resident";
@@ -930,7 +991,7 @@ export interface AgentResources {
 
 export interface ProfileSpec {
   summary?: string;
-  preferences?: { runtime?: string; model?: string };
+  preferences?: { runtime?: string; model?: string; effort?: string };
   startup?: StartupBlock;
   lifecycle?: LifecycleDefaults;
   uses: {
@@ -960,6 +1021,7 @@ export interface AgentSpec {
   defaults?: {
     runtime?: string;
     model?: string;
+    effort?: string;
     lifecycle?: LifecycleDefaults;
   };
   startup: StartupBlock;
@@ -983,6 +1045,7 @@ export interface LegacyRigSpecNode {
   runtime: string;
   role?: string;
   model?: string;
+  effort?: string;
   cwd?: string;
   surfaceHint?: string;
   workspace?: string;
@@ -1095,6 +1158,7 @@ export interface RigSpecPodMember {
   /** Runtimes tried in order when `runtime`'s CLI is missing or not signed in at a
    *  fresh launch (rigspec fallback_runtimes; see domain/runtime-fallback.ts). */
   fallbackRuntimes?: string[];
+  effort?: string;
   /**
    * OPR.0.4.6.FAC1: optional seat-side role declaration (writes the
    * existing `nodes.role` column via createMemberNode → addNode). The
@@ -1106,6 +1170,8 @@ export interface RigSpecPodMember {
   /** OPR.0.4.8.3 Seam B: optional per-seat permission_policy REF (builtin:<name> or a spec-relative
    *  custom path). Absent = the floor. Overrides the rig-level ref. */
   permissionPolicy?: string;
+  /** Non-secret launch environment for this seat; overrides the rig-level `env`. */
+  env?: Record<string, string>;
   cwd: string;
   restorePolicy?: string;
   /** OPR.0.5.6.20 — per-member continuity override (most-specific-wins; canonical or
@@ -1187,6 +1253,8 @@ export interface WorkspaceSpec {
 }
 
 export interface RigSpec {
+  /** Authored launch-warning choice; an explicit launch option takes precedence. */
+  nonInterruptive?: boolean;
   version: string;
   name: string;
   summary?: string;
@@ -1194,6 +1262,8 @@ export interface RigSpec {
   /** OPR.0.4.8.3 Seam B: optional rig-level permission_policy REF (builtin:<name> or a
    *  spec-relative custom path). Absent = the floor. A per-member ref overrides this. */
   permissionPolicy?: string;
+  /** Non-secret launch environment for every seat in the rig; a member's `env` overrides it. */
+  env?: Record<string, string>;
   /** #25: per-runtime managed-block destination. Absent = CLAUDE.md. */
   managedBlocks?: { "claude-code"?: import("./managed-blocks.js").ClaudeManagedBlockFile };
   /** What managed guidance does when a runtime's guidance file is tracked by git
@@ -1304,11 +1374,15 @@ export type InstantiateOutcome =
   | { ok: false; code: "instantiate_error"; message: string }
   | { ok: false; code: "cycle_error"; message: string }
   | { ok: false; code: "service_boot_failed"; message: string }
+  | { ok: false; code: "compose_project_conflict"; message: string }
   // S5b (OPR.0.5.4.11) — the running-name guard refusal: a same-name rig is
   // RUNNING, so instantiation refuses before any create/launch. The message
   // teaches the running rig's identity and the supported alternatives.
   // (Additive variant per orch-lead territory ruling on row r054-s5b-build.)
   | { ok: false; code: "rig_name_running"; message: string; runningRig: { id: string; name: string; runningSessionCount: number } }
+  // #141: an unarchived same-name rig exists but could not be confirmed stopped, so the YAML import
+  // neither archives it nor creates another same-name generation beside it.
+  | { ok: false; code: "generation_unconfirmed"; message: string }
   // OPR.0.3.2.CT (conveyor-trust-minimal-fix):
   // When every launched node reaches a recoverable attention_required
   // state (e.g., workspace-trust prompt), do NOT tear the rig down.
@@ -1322,6 +1396,8 @@ export type InstantiateOutcome =
       message: string;
       rigId: string;
       attentionNodes: AttentionNode[];
+      /** #141: notices that must reach the user even though the import stopped for attention. */
+      warnings?: string[];
     };
 
 export interface AttentionNode {
@@ -1454,4 +1530,6 @@ export interface ContextUsage {
   sessionName: string | null;
   sampledAt: string | null;
   fresh: boolean;
+  /** Claude only: the statusline's cumulative client-side cost estimate for `sessionId` (USD); null when not reported. */
+  clientCostEstimateUsd?: number | null;
 }

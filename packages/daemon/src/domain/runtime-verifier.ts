@@ -1,12 +1,27 @@
 import type Database from "better-sqlite3";
 import { ulid } from "ulid";
 import type { ExecFn } from "../adapters/tmux.js";
+import { ProbeStoppedError, ProbeTimeoutError } from "../adapters/bounded-probe-exec.js";
 import type { RuntimeVerification, RuntimeStatus } from "./bootstrap-types.js";
 import { getRuntimeDescriptor, parseRuntimeVersion, type RuntimeDescriptor } from "./runtime-registry.js";
 
 interface RuntimeVerifierDeps {
   exec: ExecFn;
   db: Database.Database;
+  /** Runs the `--version` / `--help` probes (default: exec). The daemon passes boundedProbeExec, so a hung
+   *  runtime binary is ended after a bound instead of holding up startup or bootstrap. */
+  probeExec?: ExecFn;
+}
+
+/** What a probe that didn't answer within its bound records: status "error" with what happened. The binary
+ *  exists but hangs, so it isn't "not found", and after a `--version` timeout `--help` isn't tried (it would
+ *  usually hang too, doubling the wait). */
+export function probeTimeoutOutcome(
+  _binary: string,
+  _probe: "version" | "help",
+  timeout: ProbeTimeoutError,
+): { fallBackToHelp: true } | { status: RuntimeStatus; error: string } {
+  return { status: "error", error: timeout.message };
 }
 
 // OPR.0.4.6.PI1: the Pi Node engine floor now lives on Pi's registry
@@ -20,10 +35,12 @@ export { PI_NODE_ENGINE_FLOOR, meetsPiNodeEngineFloor } from "./runtime-registry
 export class RuntimeVerifier {
   readonly db: Database.Database;
   private exec: ExecFn;
+  private probeExec: ExecFn;
 
   constructor(deps: RuntimeVerifierDeps) {
     this.db = deps.db;
     this.exec = deps.exec;
+    this.probeExec = deps.probeExec ?? deps.exec;
   }
 
   /** Verify tmux: `tmux -V`, parse version from output. */
@@ -92,6 +109,11 @@ export class RuntimeVerifier {
     return result;
   }
 
+  /** OMP is an independent executable; do not inherit Pi's Node engine check
+   *  (its descriptor declares no verify hook). */
+  async verifyOmp(): Promise<RuntimeVerification> {
+    return this.verifyRegistered(getRuntimeDescriptor("omp")!);
+  }
 
   /**
    * Verify multiple runtimes. Returns results in input order.
@@ -129,15 +151,26 @@ export class RuntimeVerifier {
   ): Promise<RuntimeVerification> {
     // Try --version first
     try {
-      const output = await this.exec([binary, ...versionArgs].join(" "));
+      const output = await this.probeExec([binary, ...versionArgs].join(" "));
       const version = this.parseVersion(output);
       return this.buildVerification(canonicalName, "verified", version ?? null, null, null);
-    } catch {
+    } catch (err) {
+      // The daemon is stopping: this probe says nothing about the runtime, so no --help and no row.
+      if (err instanceof ProbeStoppedError) throw err;
+      if (err instanceof ProbeTimeoutError) {
+        const outcome = probeTimeoutOutcome(binary, "version", err);
+        if (!("fallBackToHelp" in outcome)) return this.buildVerification(canonicalName, outcome.status, null, null, outcome.error);
+      }
       // Fall back to --help
       try {
-        await this.exec(`${binary} --help`);
+        await this.probeExec(`${binary} --help`);
         return this.buildVerification(canonicalName, "verified", null, null, null);
-      } catch {
+      } catch (helpErr) {
+        if (helpErr instanceof ProbeStoppedError) throw helpErr;
+        if (helpErr instanceof ProbeTimeoutError) {
+          const outcome = probeTimeoutOutcome(binary, "help", helpErr);
+          if (!("fallBackToHelp" in outcome)) return this.buildVerification(canonicalName, outcome.status, null, null, outcome.error);
+        }
         return this.buildVerification(canonicalName, "not_found", null, null, `${binary} not found`);
       }
     }

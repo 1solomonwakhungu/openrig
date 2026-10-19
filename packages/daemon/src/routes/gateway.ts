@@ -10,11 +10,13 @@
 import { connectionsProjection } from "../domain/gateway/connections-projection.js";
 import type { SettingsStore } from "../domain/user-settings/settings-store.js";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import path from "node:path";
 import type { QueueRepository } from "../domain/queue-repository.js";
 import { loadConfig, saveConfig } from "../domain/gateway/slack/config.js";
 import { SeenStore } from "../domain/gateway/slack/state-store.js";
 import { makeQueuePorts, seedBacklogAsHistory } from "../domain/gateway/slack/queue-access.js";
+import { DispatchBuffer } from "../domain/gateway/dispatch-buffer.js";
 import { OPENRIG_HOME } from "../openrig-compat.js";
 import { loadHumanRegistry } from "../domain/gateway/human-registry.js";
 import { resolveSecret } from "../domain/gateway/slack/secrets.js";
@@ -22,17 +24,36 @@ import { resolveHumanDeliveryReadiness, type HumanDeliveryReadiness } from "../d
 import { requireSenderIdentity } from "./require-sender-identity.js";
 import { runChannelOperation } from "../domain/gateway/channel-operations.js";
 import { buildSlackAppManifest } from "../domain/gateway/slack/manifest.js";
+import { authBearerTokenMiddleware } from "../middleware/auth-bearer-token.js";
 
 interface SubsystemHandle {
   restart: () => void;
   status: () => Record<string, unknown>;
+  connectorStatus?: () => Record<string, unknown>;
+  acceptForwarded?: (env: unknown) => Promise<{ status: string; reason?: string } | null>;
 }
 
 export function gatewayRoutes(opts: {
   home?: string;
   readiness?: (entityId: string, gatewayState: string) => Promise<HumanDeliveryReadiness | null>;
+  /** The daemon's auth bearer (OPENRIG_AUTH_BEARER_TOKEN, the one `rig host pair` issues); a relay from a
+   *  shared app's hub must carry it. Null: no bearer configured, so the route trusts the bind (loopback or tailnet). */
+  relayBearerToken?: string | null;
 } = {}): Hono {
   const app = new Hono();
+
+  // A shared Slack app across machines: the hub relays an event or click for a channel this machine
+  // owns, and it runs through this machine's own inbound router. 503 keeps it in the hub's retry.
+  // Registered before /slack/:operation, which would otherwise answer it with 404.
+  app.post("/slack/forwarded", authBearerTokenMiddleware({ expectedToken: opts.relayBearerToken ?? null }), async (c) => {
+    const body = await c.req.json<{ envelope?: unknown }>().catch(() => null);
+    const envelope = body?.envelope;
+    if (!envelope || typeof envelope !== "object") return c.json({ error: "envelope_required" }, 400);
+    const subsystem = c.get("gatewaySubsystem" as never) as SubsystemHandle | undefined;
+    const result = await subsystem?.acceptForwarded?.(envelope);
+    if (!result) return c.json({ error: "slack_inbound_unavailable", message: "This machine's Slack connector isn't enabled with a token, so it can't take relayed events yet." }, 503);
+    return c.json({ ok: true, ...result });
+  });
   let adminTail: Promise<unknown> = Promise.resolve();
 
   app.get("/connections", (c) => {
@@ -44,6 +65,12 @@ export function gatewayRoutes(opts: {
   });
 
   // OPR.0.6.0.5 — read-only: the same manifest `rig slack manifest` prints. No config, no secrets.
+  app.get("/slack/status", (c) => {
+    const subsystem = c.get("gatewaySubsystem" as never) as SubsystemHandle | undefined;
+    const snapshot = subsystem?.connectorStatus?.();
+    return c.json({ observedAt: new Date().toISOString(), ...(snapshot ?? { state: "unavailable", connector: null }) });
+  });
+
   app.get("/slack/manifest", (c) => c.json(buildSlackAppManifest()));
 
   app.get("/human/:entityId/readiness", async (c) => {
@@ -89,11 +116,16 @@ export function gatewayRoutes(opts: {
           if (cfg.enabled === enabled) return { value, after: state(), effect: "no-op" };
           if (enabled) {
             const registry = loadHumanRegistry(home);
-            if (!registry.ok) throw new Error(`Cannot seed the existing delivery backlog: ${registry.error}`);
+            if (!registry.ok) throw new HTTPException(503, { res: c.json({
+              error: "human_registry_unavailable",
+              message: `Cannot seed the existing delivery backlog: ${registry.error}. ` +
+                "Register a human with rig gateway human add, or repair and re-project the existing human registry before enabling delivery.",
+            }, 503) });
             const seen = new SeenStore(path.join(home, "state", "slack-outbound-seen.jsonl"));
             value = await seedBacklogAsHistory({
               queue: makeQueuePorts(queueRepo!, { loadHumanRegistry: () => registry }), seen,
               filter: { minimumLevel: cfg.minimumLevelThatPosts },
+              buffer: new DispatchBuffer(home),
             });
           } else value.onlineStatus = "slack connector disabled";
           saveConfig({ ...cfg, enabled }, home);

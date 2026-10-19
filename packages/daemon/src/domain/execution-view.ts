@@ -1,8 +1,10 @@
+import { resolveNodeFile } from "./scope/node-file.js";
 import { belongsToProject } from "./workspace/project-catalog.js";
 import { inspectGraph } from "./workflow-reconciliation.js";
 import { createProofPolicyRead, readMissionReadiness, readProjectReadiness } from "./proof/judgments.js";
 import { lifecycleObligations, requiredLifecycleSteps } from "./lifecycle-obligations.js";
 import { QueueWakeRepository } from "./queue-wake-repository.js";
+import { isTypedGateBlocker } from "./queue-repository.js";
 // S27 (OPR.0.5.6.27) — the execution view: one JSON document answering the six
 // execution questions (who-where, sequencing, care-dial, done-ness-by-rung, park
 // honesty, parallelism health), EVERY field derived at read time.
@@ -30,7 +32,8 @@ import { QueueWakeRepository } from "./queue-wake-repository.js";
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { parse as parseYaml } from "yaml";
 import type Database from "better-sqlite3";
 import { shellQuote } from "../adapters/shell-quote.js";
@@ -67,8 +70,8 @@ export interface ExecutionViewDeps {
   };
   now?: () => Date;
   buildInfo?: BuildInfo;
-  /** Injectable for tests. Same signature subset as node's execFileSync. */
-  exec?: (cmd: string, args: string[]) => string;
+  /** Injectable for tests; synchronous fakes are also accepted. */
+  exec?: (cmd: string, args: string[]) => string | Promise<string>;
   /** Injectable rigs root for review-artifact scanning (tests). */
   rigsRoot?: () => string;
 }
@@ -89,8 +92,11 @@ interface QueueRowLite {
   post_claim_motion?: number;
 }
 
-function defaultExec(cmd: string, args: string[]): string {
-  return execFileSync(cmd, args, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] }).trim();
+const execFileAsync = promisify(execFile);
+
+async function defaultExec(cmd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync(cmd, args, { encoding: "utf8", timeout: 5000 });
+  return stdout.trim();
 }
 
 function parseTags(raw: string | null): string[] {
@@ -127,6 +133,11 @@ function parseArrayField(v: unknown): string[] | Indeterminate {
 
 const SLICE_TAG = /^slice:(.+)$/;
 const CANDIDATE_TAG = /^candidate:(.+)$/;
+/** A recorded merge report: `merged:<pr-number>` on a row bound to the slice. */
+const MERGED_TAG = /^merged:(\d+)$/;
+/** `recorded_at` is when the row recorded the merge, not when it happened. `linked`
+ *  is true when the same row's `candidate:<sha>` resolves to the slice's built commit. */
+interface MergeReport { pr: string; row: string; recorded_at: string; linked: boolean }
 
 /** Candidate identity is a COMMIT, not a string. Production carries mixed forms —
  *  abbreviated tags (`dced9edb0`), full 40-hex artifact fields, and annotated
@@ -142,16 +153,16 @@ function extractShaToken(raw: string | null): string | null {
 /** Resolve a (possibly abbreviated) sha token to its full commit id via the repo
  *  context. Ambiguous or non-resolving tokens return null — raw prefix string
  *  equality is never accepted as commit identity. */
-function resolveCommit(
-  exec: (cmd: string, args: string[]) => string,
+async function resolveCommit(
+  exec: NonNullable<ExecutionViewDeps["exec"]>,
   repoCtx: string,
   token: string,
   cache: Map<string, string | null>,
-): string | null {
+): Promise<string | null> {
   if (cache.has(token)) return cache.get(token) ?? null;
   let full: string | null = null;
   try {
-    full = exec("git", ["-C", repoCtx, "rev-parse", "--verify", `${token}^{commit}`]).toLowerCase();
+    full = (await exec("git", ["-C", repoCtx, "rev-parse", "--verify", `${token}^{commit}`])).toLowerCase();
   } catch {
     full = null; // ambiguous, unknown, or malformed at the object store — floors honestly
   }
@@ -175,12 +186,34 @@ function missionReferences(missionsRoot: string | null, mission: string): string
   const references = new Set([mission]);
   if (!missionsRoot) return [...references];
   try {
-    const fm = parseFrontmatter(fs.readFileSync(path.join(missionsRoot, mission, "SPEC.md"), "utf8"));
+    const nodeFile = resolveNodeFile(path.join(missionsRoot, mission));
+    if (!nodeFile) return [...references];
+    const fm = parseFrontmatter(fs.readFileSync(nodeFile, "utf8"));
     if (typeof fm["id"] === "string") references.add(fm["id"] as string);
   } catch {
-    // A missing mission SPEC is valid legacy state; the directory name still binds.
+    // A missing authored node is valid legacy state; the directory name still binds.
   }
   return [...references];
+}
+
+/** The mission: tags a row carries, as written. */
+function missionTags(raw: string | null): string[] {
+  return parseTags(raw).filter((t) => t.startsWith("mission:")).map((t) => t.slice("mission:".length));
+}
+
+/** A row that carries a mission: tag binds only to the mission that tag names, by exact
+ *  match; a body mention binds only a row with no mission: tag at all. The SQL LIKE that
+ *  selects candidates is a substring match, so `mission:AB` and a body that merely
+ *  mentions `A` both reach this check and are decided here. */
+function rowBindsToMission(raw: string | null, references: readonly string[]): boolean {
+  const tagged = missionTags(raw);
+  return tagged.length === 0 || tagged.some((t) => namesMission(t, references));
+}
+
+/** Exact match, folding ASCII case the way the SQL LIKE that selects candidates does. */
+function namesMission(tag: string, references: readonly string[]): boolean {
+  const fold = (value: string): string => value.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  return references.some((reference) => fold(reference) === fold(tag));
 }
 
 interface SliceFacts {
@@ -201,7 +234,8 @@ function readMissionSlices(missionsRoot: string, mission: string): SliceFacts[] 
   }
   const out: SliceFacts[] = [];
   for (const dir of entries.sort()) {
-    const specPath = path.join(slicesDir, dir, "SPEC.md");
+    const specPath = resolveNodeFile(path.join(slicesDir, dir));
+    if (!specPath) continue;
     let raw: string;
     try {
       raw = fs.readFileSync(specPath, "utf8");
@@ -260,15 +294,28 @@ interface ArrangementSlice {
   dependsOn?: string[];
 }
 
+function isValidGitRef(ref: string): boolean {
+  if (typeof ref !== "string" || !ref || ref.startsWith("-") || ref === "@") return false;
+  if (ref.startsWith("/") || ref.endsWith("/") || ref.includes("//")) return false;
+  if (ref.includes("..") || ref.includes("@{") || ref.endsWith(".")) return false;
+  if (/[\s\x00-\x1f\x7f~^:?*\[\\]/.test(ref)) return false;
+  const parts = ref.split("/");
+  for (const part of parts) {
+    if (part.startsWith(".") || part.endsWith(".lock") || part === "") return false;
+  }
+  return true;
+}
+
 type ArrangementData =
   | { state: "missing"; missionPath: string }
-  | { state: "malformed"; missionPath: string; warning: string }
+  | { state: "malformed"; missionPath: string; warning: string; declaredIntegrationRef?: string }
   | {
       state: "valid";
       missionPath: string;
       byId: Map<string, ArrangementSlice>;
       byDir: Map<string, ArrangementSlice>;
       guidance: Array<{ label: string; text: string; source: string; wave?: string }>;
+      integrationRef?: string;
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -446,9 +493,17 @@ function readArrangement(missionsRoot: string, mission: string, slices: SliceFac
   const missionRoot = path.join(missionsRoot, mission);
   const missionPath = path.join(missionRoot, "mission.yaml");
   if (!fs.existsSync(missionPath)) return { state: "missing", missionPath };
+  let declaredIntegrationRef: string | undefined;
   try {
     const manifest = parseYaml(fs.readFileSync(missionPath, "utf8")) as unknown;
     if (!isRecord(manifest)) throw new Error("root is not a mapping");
+    const arrangement = manifest["arrangement"];
+    if (isRecord(arrangement) && isRecord(arrangement["source"])) {
+      const raw = arrangement["source"]["integration_ref"];
+      if (raw !== undefined) {
+        declaredIntegrationRef = typeof raw === "string" ? raw : String(raw);
+      }
+    }
     const compositionMembers = validateMissionComposition(manifest, missionPath);
     const waveReview = new Map<string, string>();
     const waveBySlice = new Map<string, string>();
@@ -459,15 +514,25 @@ function readArrangement(missionsRoot: string, mission: string, slices: SliceFac
         ...(wave ? { wave } : {}),
       });
     };
-    const arrangement = manifest["arrangement"];
-    if (isRecord(arrangement)) for (const [field, label, key] of [
-      ["source", "Integration decision", "rule"],
-      ["planning_posture", "Planning posture", "rule"],
-      ["execution_posture", "Execution posture", "parallelism"],
-      ["integration_exit", "Shared acceptance", "rule"],
-    ] as const) {
-      const value = arrangement[field];
-      if (isRecord(value)) addGuidance(label, value[key], `${field}.${key}`);
+    let integrationRef: string | undefined;
+    if (isRecord(arrangement)) {
+      for (const [field, label, key] of [
+        ["source", "Integration decision", "rule"],
+        ["planning_posture", "Planning posture", "rule"],
+        ["execution_posture", "Execution posture", "parallelism"],
+        ["integration_exit", "Shared acceptance", "rule"],
+      ] as const) {
+        const value = arrangement[field];
+        if (isRecord(value)) addGuidance(label, value[key], `${field}.${key}`);
+      }
+      const source = arrangement["source"];
+      if (isRecord(source) && source["integration_ref"] !== undefined) {
+        const raw = source["integration_ref"];
+        if (typeof raw !== "string" || !isValidGitRef(raw.trim())) {
+          throw new Error("arrangement.source.integration_ref must be a valid Git ref name not starting with '-'");
+        }
+        integrationRef = raw.trim();
+      }
     }
     if (isRecord(arrangement) && arrangement["waves"] != null) {
       if (!Array.isArray(arrangement["waves"])) throw new Error("arrangement.waves is not a list");
@@ -535,12 +600,13 @@ function readArrangement(missionsRoot: string, mission: string, slices: SliceFac
       byDir.set(dir, entry);
       if (facts && facts.id !== INDETERMINATE) byId.set(facts.id, entry);
     }
-    return { state: "valid", missionPath, byId, byDir, guidance };
+    return { state: "valid", missionPath, byId, byDir, guidance, ...(integrationRef ? { integrationRef } : {}) };
   } catch (err) {
     return {
       state: "malformed",
       missionPath,
       warning: err instanceof Error ? err.message : String(err),
+      ...(declaredIntegrationRef !== undefined ? { declaredIntegrationRef } : {}),
     };
   }
 }
@@ -554,7 +620,7 @@ function readWaveMap(db: Database.Database, missions: string[], project?: string
         ORDER BY ts_created DESC`,
     )
     .all(...missions.map((mission) => `%mission:${mission}%`)) as Array<{ qitem_id: string; body: string | null; tags: string | null }>;
-  const selectedRow = row.find(r => !project || belongsToProject(r.tags, project));
+  const selectedRow = row.find(r => missionTags(r.tags).some((t) => namesMission(t, missions)) && (!project || belongsToProject(r.tags, project)));
   if (!selectedRow?.body) return { rowId: INDETERMINATE, waves: [] };
   const block = selectedRow.body.match(WAVE_MAP_BLOCK);
   if (!block) return { rowId: INDETERMINATE, waves: [] };
@@ -576,73 +642,68 @@ interface ReviewArtifactFact {
   artifactType: string | null;
 }
 
-/** Scan rigs/<rig>/state/review… dirs for review artifacts naming this slice.
- *  Root resolution follows the shipped shared-docs precedent. */
-function scanReviewArtifacts(rigsRoot: string, sliceDirOrId: string[]): ReviewArtifactFact[] | Indeterminate {
-  let rigs: string[];
-  try {
-    rigs = fs.readdirSync(rigsRoot);
-  } catch {
-    return INDETERMINATE;
-  }
+/** Read review drops co-located with this slice, plus the legacy global registry
+ * when no catalogued project was selected. Both sources keep the same slice and
+ * built-commit join; unbound global artifacts cannot establish project review. */
+function scanReviewArtifacts(rigsRoot: string, sliceDirOrId: string[], proofDir: string, includeGlobal: boolean): ReviewArtifactFact[] | Indeterminate {
   const out: ReviewArtifactFact[] = [];
-  for (const rig of rigs) {
-    const stateDir = path.join(rigsRoot, rig, "state");
-    let stateEntries: string[];
+  let readable = false;
+  const scanDirectory = (dir: string, local: boolean) => {
+    let files: string[];
     try {
-      stateEntries = fs.readdirSync(stateDir);
-    } catch {
-      continue;
+      files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+      readable = true;
+    } catch { return; }
+    for (const f of files) {
+      let raw: string;
+      try { raw = fs.readFileSync(path.join(dir, f), "utf8"); }
+      catch { continue; }
+      const fm = parseFrontmatter(raw);
+      const sliceVal = typeof fm["slice"] === "string" ? fm["slice"] : null;
+      if (!sliceVal || !sliceDirOrId.includes(sliceVal)) continue;
+      const artifactType = typeof fm["artifact_type"] === "string" ? fm["artifact_type"] : null;
+      // A local QA/guard drop does not become a review leg merely by living in proof/.
+      if (local && !["rev1-r1", "rev1-r2", "adjudication"].includes(artifactType ?? "")) continue;
+      out.push({ path: path.join(dir, f),
+        verdict: typeof fm["verdict"] === "string" ? fm["verdict"] : INDETERMINATE,
+        candidateSha: typeof fm["candidate_sha"] === "string" ? fm["candidate_sha"] : null,
+        artifactType });
     }
-    for (const entry of stateEntries.filter((e) => e.startsWith("review"))) {
-      const dir = path.join(stateDir, entry);
-      let files: string[];
-      try {
-        files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
-      } catch {
-        continue;
-      }
-      for (const f of files) {
-        let raw: string;
-        try {
-          raw = fs.readFileSync(path.join(dir, f), "utf8");
-        } catch {
-          continue;
-        }
-        const fm = parseFrontmatter(raw);
-        const sliceVal = typeof fm["slice"] === "string" ? (fm["slice"] as string) : null;
-        if (!sliceVal || !sliceDirOrId.includes(sliceVal)) continue;
-        out.push({
-          path: path.join(dir, f),
-          verdict: typeof fm["verdict"] === "string" ? (fm["verdict"] as string) : INDETERMINATE,
-          candidateSha: typeof fm["candidate_sha"] === "string" ? (fm["candidate_sha"] as string) : null,
-          artifactType: typeof fm["artifact_type"] === "string" ? (fm["artifact_type"] as string) : null,
-        });
-      }
+  };
+  scanDirectory(proofDir, true);
+  if (includeGlobal) {
+    let rigs: string[] = [];
+    try { rigs = fs.readdirSync(rigsRoot); readable = true; } catch { /* Local proof remains usable. */ }
+    for (const rig of rigs) {
+      const stateDir = path.join(rigsRoot, rig, "state");
+      let entries: string[];
+      try { entries = fs.readdirSync(stateDir); } catch { continue; }
+      for (const entry of entries.filter((e) => e.startsWith("review"))) scanDirectory(path.join(stateDir, entry), false);
     }
   }
-  return out;
+  return readable ? out : INDETERMINATE;
 }
 
 type Rung =
   | { value: boolean; basis: string }
-  | { value: Indeterminate; basis: string };
+  | { value: Indeterminate | "NOT_APPLICABLE"; basis: string };
 
-function gitAncestor(exec: ExecutionViewDeps["exec"], repoCtx: string, sha: string, ref: string): Rung {
+async function gitAncestor(exec: ExecutionViewDeps["exec"], repoCtx: string, sha: string, ref: string, declaredRef?: string): Promise<Rung> {
   const run = exec ?? defaultExec;
   try {
-    run("git", ["-C", repoCtx, "merge-base", "--is-ancestor", sha, ref]);
+    await run("git", ["-C", repoCtx, "merge-base", "--is-ancestor", sha, ref]);
     return { value: true, basis: `git -C ${repoCtx} merge-base --is-ancestor ${sha} ${ref} (exit 0)` };
   } catch (err) {
-    const status = (err as { status?: number }).status;
-    if (status === 1) {
+    const { code, status } = err as { code?: string | number; status?: number };
+    if (code === 1 || status === 1) {
       return { value: false, basis: `git -C ${repoCtx} merge-base --is-ancestor ${sha} ${ref} (exit 1)` };
     }
-    return { value: INDETERMINATE, basis: `merge-base failed in ${repoCtx}: ${(err as Error).message?.slice(0, 120)}` };
+    const refContext = declaredRef ? ` (${declaredRef})` : "";
+    return { value: INDETERMINATE, basis: `merge-base failed in ${repoCtx}${refContext}: ${(err as Error).message?.slice(0, 120)}` };
   }
 }
 
-export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: string; rig?: string; project?: string }): Record<string, unknown> {
+export async function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: string; rig?: string; project?: string }): Promise<Record<string, unknown>> {
   const now = deps.now ?? (() => new Date());
   const exec = deps.exec ?? defaultExec;
   const buildInfo = deps.buildInfo ?? BUILD_INFO;
@@ -694,10 +755,9 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
   const sliceIds = slices.map((s) => s.id).filter((x): x is string => x !== INDETERMINATE);
   const depCache = new Map<string, SliceFacts | null>();
 
-  // ---- queue rows bound to this mission (tag or body mention, per the binding law) ----
-  const missionLikes = mission === INDETERMINATE
-    ? ["%"]
-    : missionReferences(missionsRoot, mission).map((reference) => `%${reference}%`);
+  // ---- queue rows bound to this mission: its mission: tag by exact match, a body mention only for untagged rows ----
+  const missionRefs = mission === INDETERMINATE ? [] : missionReferences(missionsRoot, mission);
+  const missionLikes = mission === INDETERMINATE ? ["%"] : missionRefs.map((reference) => `%${reference}%`);
   const missionWhere = missionLikes.map(() => "(tags LIKE ? OR body LIKE ?)").join(" OR ");
   const candidateRows = deps.db
     .prepare(
@@ -712,7 +772,9 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
     )
     .all(...missionLikes.flatMap((like) => [like, like])) as QueueRowLite[];
 
-  const rows = candidateRows.filter(row => !opts?.project || belongsToProject(row.tags, opts.project));
+  const rows = candidateRows
+    .filter(row => mission === INDETERMINATE || rowBindsToMission(row.tags, missionRefs))
+    .filter(row => !opts?.project || belongsToProject(row.tags, opts.project));
 
   const sliceOfRow = (r: QueueRowLite): string | null => {
     for (const t of parseTags(r.tags)) {
@@ -736,14 +798,27 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
     const m = r.body?.match(WORKTREE_LINE);
     if (!m?.[1]) continue;
     try {
-      exec("git", ["-C", m[1], "rev-parse", "--git-dir"]);
+      await exec("git", ["-C", m[1], "rev-parse", "--git-dir"]);
       repoCtx = m[1];
       break;
     } catch {
       /* unreachable candidate — keep scanning */
     }
   }
-  for (const r of rows.filter((r) => r.state === "in-progress")) {
+  // A lane is a row doing the slice's work. A row parked on `external:<what>`
+  // is also listed, as a waiting lane: `external:` records an outside dependency
+  // (a review, a decision, a capacity limit, a lifecycle step). It does not mean an
+  // outside party owns the work, or that the parked seat is the slice's builder.
+  // It stays marked `waiting` so it is never mistaken for active work, and it
+  // yields to an in-progress lane on the same slice. Rows parked on a qitem, a
+  // human seat, or a fold:/auth: gate are not lanes.
+  const sliceKey = (slice: string): string => slices.find((s) => s.id === slice || s.dir === slice)?.dir ?? slice;
+  const activeSlices = new Set(
+    rows.filter((r) => r.state === "in-progress").flatMap((r) => sliceOfRow(r) ?? []).map(sliceKey),
+  );
+  const isExternalPark = (r: QueueRowLite): boolean =>
+    r.state === "blocked" && isTypedGateBlocker(r.blocked_on) && r.blocked_on!.startsWith("external:");
+  for (const r of rows.filter((r) => r.state === "in-progress" || (isExternalPark(r) && !activeSlices.has(sliceKey(sliceOfRow(r) ?? ""))))) {
     const slice = sliceOfRow(r);
     if (!slice) continue;
     const wtMatch = r.body?.match(WORKTREE_LINE);
@@ -756,8 +831,8 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
       worktreePath = wtMatch[1];
       joinBasis = "EC-3 worktree_path field on the row body";
       try {
-        branch = exec("git", ["-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"]);
-        headSha = exec("git", ["-C", worktreePath, "rev-parse", "HEAD"]);
+        branch = await exec("git", ["-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"]);
+        headSha = await exec("git", ["-C", worktreePath, "rev-parse", "HEAD"]);
         if (!repoCtx) repoCtx = worktreePath;
       } catch {
         branch = INDETERMINATE;
@@ -801,6 +876,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
             source: "SeatActivityService arbitrated seat state (no answer floors INDETERMINATE, never idle/dead)",
           },
       pickup,
+      waiting: r.state === "blocked" ? { on: r.blocked_on } : null,
       source: { qitem_id: r.qitem_id },
     });
   }
@@ -812,6 +888,15 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
   const arrangement = missionsRoot && mission !== INDETERMINATE
     ? readArrangement(missionsRoot, mission, slices)
     : null;
+  const declaredRef = arrangement?.state === "valid"
+    ? arrangement.integrationRef
+    : arrangement?.state === "malformed"
+      ? arrangement.declaredIntegrationRef
+      : undefined;
+  const isUnusableDeclaration = arrangement?.state === "malformed" && arrangement.declaredIntegrationRef !== undefined;
+  const targetRef = arrangement?.state === "valid" && arrangement.integrationRef
+    ? arrangement.integrationRef
+    : "main";
   const lifecycleExecutions = mission === INDETERMINATE ? [] : readLifecycleExecutions(deps.db, mission, opts?.project);
   const arrangementSlice = (id: string, dir?: string): ArrangementSlice | null => {
     if (arrangement?.state !== "valid") return null;
@@ -843,7 +928,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
   // ---- Q4 ladder (also feeds Q2's deps-folded) ----
   const rigsRoot = (deps.rigsRoot ?? resolveLegacyTopologyRigsRoot)();
   const commitCache = new Map<string, string | null>();
-  const ladderOf = (facts: SliceFacts): Record<string, unknown> => {
+  const ladderOf = async (facts: SliceFacts): Promise<Record<string, unknown>> => {
     const fm = facts.frontmatter;
     const locked: Rung = typeof fm["approved-spec-at"] === "string"
       ? { value: true, basis: `frontmatter approved-spec-at=${fm["approved-spec-at"]}` }
@@ -855,6 +940,8 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
     let candidateSha: string | null = null;
     let candidateRow: string | null = null;
     for (const r of candRows) {
+      // A row carrying a merged: tag reports a merge; it is not a build, so it never picks the built candidate.
+      if (parseTags(r.tags).some((t) => MERGED_TAG.test(t))) continue;
       for (const t of parseTags(r.tags)) {
         const m = t.match(CANDIDATE_TAG);
         if (m?.[1]) {
@@ -869,7 +956,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
     // commit id through the repo context; raw prefix string equality is never
     // commit identity.
     const builtToken = extractShaToken(candidateSha);
-    const builtResolved = builtToken && repoCtx ? resolveCommit(exec, repoCtx, builtToken, commitCache) : null;
+    const builtResolved = builtToken && repoCtx ? await resolveCommit(exec, repoCtx, builtToken, commitCache) : null;
     const built = candidateSha
       ? {
           candidate_sha: builtToken ?? candidateSha,
@@ -882,10 +969,10 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
     // tags, full shas, annotated fields) join by RESOLVED commit; malformed,
     // ambiguous, or non-resolving inputs are excluded with the reason carried —
     // they neither clear nor poison.
-    const artifacts = opts?.project ? INDETERMINATE : scanReviewArtifacts(rigsRoot, [facts.dir, ...(typeof facts.id === "string" ? [facts.id] : [])]);
+    const artifacts = scanReviewArtifacts(rigsRoot, [facts.dir, ...(typeof facts.id === "string" ? [facts.id] : [])], path.join(path.dirname(facts.specPath), "proof"), !opts?.project);
     let reviewed: Record<string, unknown>;
     if (artifacts === INDETERMINATE) {
-      reviewed = { value: INDETERMINATE, basis: opts?.project ? "Global review artifacts have no project identity binding" : `review-artifact root unreadable (${rigsRoot})`, legs: [] };
+      reviewed = { value: INDETERMINATE, basis: opts?.project ? `slice-local review-artifact root unreadable (${path.dirname(facts.specPath)}/proof)` : `review-artifact roots unreadable (slice proof/ and ${rigsRoot})`, legs: [] };
     } else if (!candidateSha || !builtToken) {
       reviewed = { value: INDETERMINATE, basis: "no built candidate token to scope review legs to", legs: [] };
     } else if (!builtResolved) {
@@ -898,19 +985,20 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
       };
     } else {
       const excluded: { path: string; reason: string }[] = [];
-      const atCommit = artifacts.filter((a) => {
+      const atCommit: ReviewArtifactFact[] = [];
+      for (const a of artifacts) {
         const token = extractShaToken(a.candidateSha);
         if (!token) {
           excluded.push({ path: a.path, reason: "malformed candidate_sha (no sha token)" });
-          return false;
+          continue;
         }
-        const resolved = resolveCommit(exec, repoCtx!, token, commitCache);
+        const resolved = await resolveCommit(exec, repoCtx!, token, commitCache);
         if (!resolved) {
           excluded.push({ path: a.path, reason: `token ${token} did not resolve to a commit` });
-          return false;
+          continue;
         }
-        return resolved === builtResolved;
-      });
+        if (resolved === builtResolved) atCommit.push(a);
+      }
       reviewed = atCommit.length === 0
         ? { value: INDETERMINATE, basis: `no review artifact resolves to the built commit ${builtResolved.slice(0, 9)} on the registry surface checked`, legs: [], excluded }
         : {
@@ -920,35 +1008,71 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
             excluded,
           };
     }
-    // folded / adopted need a repo context — any reachable EC-3 worktree shares refs.
-    let folded: Rung;
-    let adopted: Rung;
-    if (!candidateSha) {
-      folded = { value: INDETERMINATE, basis: "no candidate sha to test" };
-      adopted = { value: INDETERMINATE, basis: "no candidate sha to test" };
-    } else if (!repoCtx) {
-      folded = { value: INDETERMINATE, basis: "no reachable repo context (no EC-3 worktree on the board)" };
-      adopted = { value: INDETERMINATE, basis: "no reachable repo context (no EC-3 worktree on the board)" };
-    } else {
-      folded = gitAncestor(exec, repoCtx, builtResolved ?? candidateSha, "main");
-      adopted = buildInfo.commit
-        ? gitAncestor(exec, repoCtx, builtResolved ?? candidateSha, buildInfo.commit)
-        : { value: INDETERMINATE, basis: "daemon build stamp absent (dev run) — adopted rung underivable" };
+    // The selected project has no binding to the OpenRig daemon's source.
+    // Missing Git objects cannot establish applicability. Keep daemon ancestry
+    // only on the legacy unscoped view, with its existing unknown/false rules.
+    const ancestry: Rung = isUnusableDeclaration
+      ? { value: INDETERMINATE, basis: `declared integration_ref unusable (${declaredRef})` }
+      : !candidateSha
+        ? { value: INDETERMINATE, basis: "no candidate sha to test" }
+        : !repoCtx
+          ? { value: INDETERMINATE, basis: "no reachable repo context (no EC-3 worktree on the board)" }
+          : await gitAncestor(exec, repoCtx, builtResolved ?? candidateSha, targetRef, declaredRef);
+    // A merge report (`merged:<pr-number>` on a row bound to the slice) is recorded,
+    // not verified: it carries no repository, commit or landed commit. So it is
+    // always shown as its own signal and never turns the answer ancestry gave. It
+    // changes the answer only when the SAME row also carries a `candidate:<sha>`
+    // that resolves, through the repo context and a usable integration ref, to the
+    // slice's built commit. Squash and rebase merges leave the candidate off the
+    // integration ref, so only that link reads such a merge as merged, and only
+    // from ancestry's false: an answer ancestry could not give is never turned true.
+    const reports: MergeReport[] = [];
+    for (const r of candRows) { // newest first
+      const tags = parseTags(r.tags);
+      const pr = tags.map((t) => t.match(MERGED_TAG)?.[1]).find((n): n is string => !!n);
+      if (!pr) continue;
+      const token = extractShaToken(tags.map((t) => t.match(CANDIDATE_TAG)?.[1]).find((n): n is string => !!n) ?? null);
+      const resolved = token && repoCtx ? await resolveCommit(exec, repoCtx, token, commitCache) : null;
+      reports.push({ pr, row: r.qitem_id, recorded_at: r.ts_created, linked: !!builtResolved && resolved === builtResolved });
     }
+    const report = reports.find((r) => r.linked) ?? reports[0] ?? null;
+    const reportNote = report
+      ? `merged:${report.pr} recorded on row ${report.row} at ${report.recorded_at}${report.linked ? "; that row is linked to the built candidate, but only a false from ancestry is turned true, so the answer stays as ancestry gives it" : "; that row is not linked to the built candidate, so it does not change this answer"}`
+      : null;
+    const folded: Rung & { merge_report?: MergeReport } = !report
+      ? ancestry
+      : report.linked && ancestry.value === false
+        ? {
+            value: true,
+            basis: `reported merged in #${report.pr} for candidate ${(builtResolved ?? "").slice(0, 9)}, recorded on row ${report.row} at ${report.recorded_at}; candidate is not an ancestor of ${targetRef} (${ancestry.basis})`,
+            merge_report: report,
+          }
+        : { ...ancestry, basis: `${ancestry.basis}; ${reportNote}`, merge_report: report };
+    const adopted: Rung = opts?.project
+      ? { value: "NOT_APPLICABLE", basis: "selected project has no binding to the OpenRig daemon source; daemon adoption is not project progress" }
+      : !candidateSha || !repoCtx
+        ? { value: INDETERMINATE, basis: ancestry.basis }
+        : buildInfo.commit
+          ? await gitAncestor(exec, repoCtx, builtResolved ?? candidateSha, buildInfo.commit)
+          : { value: INDETERMINATE, basis: "daemon build stamp absent (dev run) — adopted rung underivable" };
     return { slice_id: facts.id, dir: facts.dir, locked, built, reviewed, folded, adopted };
   };
 
   const ladderCache = new Map<string, Record<string, unknown>>();
-  const ladderFor = (facts: SliceFacts): Record<string, unknown> => {
+  const ladderFor = async (facts: SliceFacts): Promise<Record<string, unknown>> => {
     const key = facts.specPath;
-    if (!ladderCache.has(key)) ladderCache.set(key, ladderOf(facts));
+    if (!ladderCache.has(key)) ladderCache.set(key, await ladderOf(facts));
     return ladderCache.get(key)!;
   };
 
-  const q4 = slices.map((s) => ladderFor(s));
+  // Keep Git children serial and bounded per call; caches belong to this read,
+  // so mutable refs (HEAD/main) are observed again on the next request.
+  const q4: Record<string, unknown>[] = [];
+  for (const s of slices) q4.push(await ladderFor(s));
 
   // ---- Q2 sequencing ----
-  const q2 = slices.map((s) => {
+  const q2 = [];
+  for (const s of slices) {
     const fm = s.frontmatter;
     const arranged = typeof s.id === "string" ? arrangementSlice(s.id, s.dir) : null;
     const dependsOn = arranged?.dependsOn ?? parseArrayField(fm["depends_on"]);
@@ -961,6 +1085,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
         && ["pending", "in-progress", "blocked"].includes(r.state))
       .map((r) => ({ qitem_id: r.qitem_id, blocked_on: r.blocked_on }));
     const claimedLane = lanes.some((l) => l.slice === s.id || l.slice === s.dir);
+    const ownFolded = (await ladderFor(s))["folded"] as Rung;
     let nextUp: boolean | Indeterminate;
     let nextUpBasis: string;
     if (dependsOn === INDETERMINATE) {
@@ -972,14 +1097,14 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
     } else if (claimedLane) {
       nextUp = false;
       nextUpBasis = "already claimed in-progress";
-    } else if ((ladderFor(s)["folded"] as Rung).value === true) {
+    } else if (ownFolded.value === true) {
       nextUp = false;
-      nextUpBasis = "own candidate already folded to main — nothing left to dispatch";
-    } else if ((ladderFor(s)["folded"] as Rung).value === INDETERMINATE) {
+      nextUpBasis = `own candidate already folded to ${targetRef} — nothing left to dispatch`;
+    } else if (ownFolded.value === INDETERMINATE) {
       // Unknown own-completion must never read as dispatchable — INDETERMINATE
       // is the honest verdict, not true (the S24/S25 live false-green class).
       nextUp = INDETERMINATE;
-      nextUpBasis = `own completion rung INDETERMINATE (${(ladderFor(s)["folded"] as Rung).basis})`;
+      nextUpBasis = `own completion rung INDETERMINATE (${ownFolded.basis})`;
     } else {
       nextUp = true;
       nextUpBasis = "unblocked, unclaimed";
@@ -990,7 +1115,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
           nextUpBasis = `dep ${dep} unresolvable on this missions root`;
           break;
         }
-        const depLadder = ladderFor(depFacts);
+        const depLadder = await ladderFor(depFacts);
         const foldedRung = depLadder["folded"] as Rung;
         if (foldedRung.value === INDETERMINATE) {
           nextUp = INDETERMINATE;
@@ -1005,7 +1130,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
       }
     }
     const wave = typeof s.id === "string" ? waveOfSlice(s.id) : null;
-    return {
+    q2.push({
       slice_id: s.id,
       dir: s.dir,
       planned_owners: arranged?.plannedOwners ?? [],
@@ -1025,8 +1150,8 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
         wave_map_row: waveMap.rowId,
         ...(arranged ? { arrangement_path: arranged.path } : {}),
       },
-    };
-  });
+    });
+  }
 
   // ---- Q3 care dial ----
   const q3 = slices.map((s) => {
@@ -1141,7 +1266,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
     sequenced.next_up_basis = `Attributed proof readiness ${readiness!.revision}; dependency eligibility ${derived.eligible}`;
   }
   const q6 = {
-    lanes_live: lanes.length,
+    lanes_live: lanes.filter((l) => l.waiting === null).length,
     lanes_possible: q2.filter((s) => s.next_up === true).length,
     idle_seats_with_capacity: { value: idleSeats, basis: idleBasis },
     heavy_slot_holder: heavyRow
@@ -1186,7 +1311,7 @@ export function buildExecutionView(deps: ExecutionViewDeps, opts?: { mission?: s
             }
           : {}),
       git: { basis: repoCtx ? `per-lane git -C; repo context ${repoCtx}` : "no reachable repo context", asof: asof() },
-      build_info: { commit: buildInfo.commit ?? INDETERMINATE, asof: asof() },
+      build_info: { commit: buildInfo.commit ?? INDETERMINATE, asof: asof(), basis: "OpenRig daemon source build; not a selected project deployment" },
       review_artifacts: { root: rigsRoot, asof: asof() },
       disk: { asof: asof() },
       workflow_lifecycle: {

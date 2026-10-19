@@ -150,6 +150,10 @@ describe("PermissionDriftObserver", () => {
       const nodeOverride = seat("dev.b", "qwen", "yolo");
       rigs.setNodePolicyProvenance(nodeOverride.id, { origin: "builtin", resolvedTarget: null, declaringDir: null, launchPosture: "full_bypass" });
       expect(observer.diagnose(nodeOverride.id)?.enforcement).toMatchObject({ state: "aligned", expected: "full_bypass" });
+
+      const autoPolicy = seat("dev.c", "gemini", "auto_edit");
+      rigs.setNodePolicyProvenance(autoPolicy.id, { origin: "builtin", resolvedTarget: null, declaringDir: null, launchPosture: "auto" });
+      expect(observer.diagnose(autoPolicy.id)?.enforcement).toMatchObject({ state: "aligned", expected: "floor", effective: "floor" });
     } finally {
       db.close();
     }

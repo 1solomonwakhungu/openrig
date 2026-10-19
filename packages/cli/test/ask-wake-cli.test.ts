@@ -73,6 +73,30 @@ function makeCmd(deps: StatusDeps): Command {
 }
 
 describe("rig ask --wake (L3 CLI)", () => {
+  it("help distinguishes full seat targets from runtime IDs and titles", () => {
+    const runner: WakeRunner = vi.fn();
+    const cmd = askCommand(tokenDeps(runner));
+    let output = "";
+    cmd.configureOutput({ writeOut: text => { output += text; } });
+    cmd.outputHelp();
+    const help = output.replace(/\s+/g, " ");
+    expect(help).toContain("member@rig or member@rig@N (1 = newest tenure)");
+    expect(help).toContain("Values without @ go unchanged to the runtime as a session ID or title");
+    expect(help).toContain("a bare member name is not resolved within <rig>");
+    expect(help).toContain("--wake dev-planner@my-rig");
+    expect(help).toContain("--wake dev-planner@my-rig@2");
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("passes a bare session title unchanged to the runtime without seat resolution", async () => {
+    const runner: WakeRunner = vi.fn(async () => ({ stdout: "answer", stderr: "", code: 0, timedOut: false }));
+    const { exitCode } = await captureLogs(async () => {
+      await makeCmd(tokenDeps(runner)).parseAsync(["node", "rig", "ask", "my-rig", "q", "--wake", "dev-build"]);
+    });
+    expect(runner).toHaveBeenCalledWith("claude", ["-p", "--resume", "dev-build", expect.any(String)], expect.any(Object));
+    expect(exitCode).toBeUndefined();
+  });
+
   // B8-1b missed-site fix (census belt catch, 2026-08-07): the seat-resolve
   // precheck must route through the ONE chokepoint (daemonStatusGuard), not a
   // hand-rolled literal render — the epistemic 3-part lands, the wake-specific
@@ -132,6 +156,51 @@ describe("rig ask --wake (L3 CLI)", () => {
     const out = logs.join("\n");
     expect(out).toMatch(/did not return|bounded timeout/i);
     expect(exitCode).toBe(2);
+  });
+
+  it("rejects a non-numeric --wake-timeout before waking, instead of crashing in execFile", async () => {
+    // NaN reached execFile's timeout option, which throws ERR_OUT_OF_RANGE (a stack trace, no JSON).
+    const runner: WakeRunner = vi.fn(async () => ({ stdout: "x", stderr: "", code: 0, timedOut: false }));
+    const { logs, exitCode } = await captureLogs(async () => {
+      await makeCmd(tokenDeps(runner)).parseAsync(["node", "rig", "ask", "my-rig", "q", "--wake", "tok", "--wake-timeout", "abc"]);
+    });
+    expect(runner).not.toHaveBeenCalled();
+    expect(logs.join("\n")).toContain("--wake-timeout must be a number of seconds from 1 to 2147483; got 'abc'");
+    expect(exitCode).toBe(1);
+  });
+
+  it.each([
+    ["1e308", "overflows to Infinity ms, which execFile rejects"],
+    ["2147484", "exceeds 2^31-1 ms, which a Node timer runs after 1ms"],
+  ])("rejects --wake-timeout %s before resolving a seat (%s)", async (value) => {
+    const runner: WakeRunner = vi.fn(async () => ({ stdout: "x", stderr: "", code: 0, timedOut: false }));
+    const deps = seatDeps(runner, { resolved: true, token: "t", runtime: "claude", sessionId: 1 });
+    const { logs, exitCode } = await captureLogs(async () => {
+      await makeCmd(deps).parseAsync(["node", "rig", "ask", "my-rig", "q", "--wake", "dev@my-rig", "--wake-timeout", value]);
+    });
+    expect((deps as unknown as { __post: ReturnType<typeof vi.fn> }).__post).not.toHaveBeenCalled();
+    expect(runner).not.toHaveBeenCalled();
+    expect(logs.join("\n")).toContain(`--wake-timeout must be a number of seconds from 1 to 2147483; got '${value}'`);
+    expect(exitCode).toBe(1);
+  });
+
+  it("accepts the largest --wake-timeout a Node timer can honour", async () => {
+    const runner: WakeRunner = vi.fn(async () => ({ stdout: "x", stderr: "", code: 0, timedOut: false }));
+    await captureLogs(async () => {
+      await makeCmd(tokenDeps(runner)).parseAsync(["node", "rig", "ask", "my-rig", "q", "--wake", "tok", "--wake-timeout", "2147483"]);
+    });
+    const call = (runner as unknown as { mock: { calls: [string, string[], { timeoutMs: number }][] } }).mock.calls[0]!;
+    expect(call[2].timeoutMs).toBe(2_147_483_000);
+  });
+
+  it("passes a whole-millisecond timeout for fractional --wake-timeout seconds", async () => {
+    // execFile also rejects a fractional timeout: 1.0005s must not become 1000.5ms.
+    const runner: WakeRunner = vi.fn(async () => ({ stdout: "x", stderr: "", code: 0, timedOut: false }));
+    await captureLogs(async () => {
+      await makeCmd(tokenDeps(runner)).parseAsync(["node", "rig", "ask", "my-rig", "q", "--wake", "tok", "--wake-timeout", "1.0005"]);
+    });
+    const call = (runner as unknown as { mock: { calls: [string, string[], { timeoutMs: number }][] } }).mock.calls[0]!;
+    expect(Number.isInteger(call[2].timeoutMs)).toBe(true);
   });
 
   it("renders a FAILED wake honestly (exit N + stderr), non-zero exit — never a fake success", async () => {

@@ -11,11 +11,14 @@ import type {
   RungHealthEvent,
   RungTrust,
 } from "./activity-taxonomy.js";
-import { EVIDENCE_RUNG_RANK, runtimeRungInventory } from "./activity-taxonomy.js";
+import { AGENT_APP_RUNG_INVENTORY, EVIDENCE_RUNG_RANK, runtimeRungInventory } from "./activity-taxonomy.js";
+import { sessionAgentAppSelect } from "./session-registry.js";
 
 /** Default polling cadence: 1Hz. The default silence window is 3s, so
  *  1Hz polling gives at-most ~1s freshness lag on the cached observation. */
 export const DEFAULT_POLL_INTERVAL_MS = 1000;
+/** Allow automatic review to settle before checking the visible human prompt. */
+export const PERMISSION_REQUEST_GRACE_MS = 3_000;
 
 /**
  * Slice 15 — daemon owner of the `terminal-active` primitive.
@@ -35,12 +38,14 @@ export const DEFAULT_POLL_INTERVAL_MS = 1000;
  * ps/queue projection and never imports this service either.
  */
 export interface SeatActivityServiceDeps {
-  tmux: Pick<TmuxAdapter, "readPaneLastActivity">;
+  tmux: Pick<TmuxAdapter, "readPaneLastActivity"> & Partial<Pick<TmuxAdapter, "readAllSessionWindowActivity">>;
   defaultWindowSeconds: number;
   eventBus?: EventBus;
   now?: () => Date;
-  /** S19: the self-report rung producer (Claude pid.json). Consulted per sweep for seats
-   *  whose declared inventory staffs self-report; absent = the rung is absent. */
+  /** Visible prompt observation: null means capture could not establish a state. */
+  permissionPromptReader?: (sessionName: string) => Promise<boolean | null>;
+  permissionPromptChanged?: (sessionName: string, confirmed: boolean) => void;
+  /** Claude pid.json, consulted for seats declaring self-report. */
   selfReportReader?: (sessionName: string, seatNodeId: string) => ActivityEvidence | null;
   /** Registry CLI runtimes that classify their own pane (adapter.classifyActivity):
    *  `supports` picks the TUI CLI rung inventory, and each sweep reports the result
@@ -58,7 +63,7 @@ export interface PollSeatOptions {
 }
 
 export class SeatActivityService {
-  private readonly tmux: Pick<TmuxAdapter, "readPaneLastActivity">;
+  private readonly tmux: Pick<TmuxAdapter, "readPaneLastActivity"> & Partial<Pick<TmuxAdapter, "readAllSessionWindowActivity">>;
   private readonly defaultWindowSeconds: number;
   private readonly eventBus: EventBus | null;
   private readonly now: () => Date;
@@ -67,6 +72,8 @@ export class SeatActivityService {
   // seat-structural-activity-service (MUST-FIX 2). A slowed tmux can never accumulate
   // overlapping whole-fleet sweeps — at most one sweep's worth is ever in flight.
   private sweeping = false;
+  private readonly permissionPromptReader?: SeatActivityServiceDeps["permissionPromptReader"];
+  private readonly permissionPromptChanged?: SeatActivityServiceDeps["permissionPromptChanged"];
 
   private readonly selfReportReader: ((sessionName: string, seatNodeId: string) => ActivityEvidence | null) | null;
   private readonly paneClassifier: SeatActivityServiceDeps["paneClassifier"] | null;
@@ -75,6 +82,8 @@ export class SeatActivityService {
   private readonly paneSeqBySession = new Map<string, number>();
 
   constructor(deps: SeatActivityServiceDeps) {
+    this.permissionPromptReader = deps.permissionPromptReader;
+    this.permissionPromptChanged = deps.permissionPromptChanged;
     this.tmux = deps.tmux;
     this.defaultWindowSeconds = deps.defaultWindowSeconds;
     this.eventBus = deps.eventBus ?? null;
@@ -98,13 +107,22 @@ export class SeatActivityService {
    * activity indicators consult.
    */
   async pollSeat(paneId: string, opts?: PollSeatOptions): Promise<SeatActivity | null> {
+    return this.observeSeat(paneId, opts, null);
+  }
+
+  /** pollSeat with the sweep's batched read: the seat's timestamp comes from `batch` when it has one, and
+   *  only a seat missing from it is read per target, so a sweep costs one tmux spawn instead of one per seat. */
+  private async observeSeat(paneId: string, opts: PollSeatOptions | undefined, batch: Map<string, number> | null): Promise<SeatActivity | null> {
     const silenceWindowSeconds = opts?.silenceWindowSeconds ?? this.defaultWindowSeconds;
-    let lastActivityEpochSeconds: number | null = null;
-    try {
-      lastActivityEpochSeconds = await this.tmux.readPaneLastActivity(paneId);
-    } catch {
-      lastActivityEpochSeconds = null;
+    let lastActivityEpochSeconds: number | null = batch?.get(paneId) ?? null;
+    if (lastActivityEpochSeconds === null) {
+      try {
+        lastActivityEpochSeconds = await this.tmux.readPaneLastActivity(paneId);
+      } catch {
+        lastActivityEpochSeconds = null;
+      }
     }
+    await this.pollPermissionPrompt(paneId);
     if (lastActivityEpochSeconds === null) return null;
 
     const observedAt = this.now();
@@ -186,6 +204,40 @@ export class SeatActivityService {
     }
   }
 
+  private async pollPermissionPrompt(sessionName: string, canCapture = true): Promise<void> {
+    const seatNodeId = this.sessionToSeat.get(sessionName);
+    const seat = seatNodeId ? this.ladder.get(seatNodeId) : undefined;
+    if (!seat || seat.retired) return;
+    const nowMs = this.now().getTime();
+    const snapshot = [...seat.permissions].filter(([, request]) =>
+      nowMs - request.sinceMs >= PERMISSION_REQUEST_GRACE_MS && nowMs >= request.nextCheckMs);
+    if (snapshot.length === 0) return;
+    const permissionRevision = seat.permissionRevision;
+    const visible = canCapture && this.permissionPromptReader
+      ? await this.permissionPromptReader(sessionName).catch(() => null)
+      : null;
+    if (seat.retired || seat.sessionName !== sessionName) return;
+    if (visible === false && seat.permissionRevision !== permissionRevision) return;
+    let updated = false;
+    for (const [id, request] of snapshot) {
+      if (seat.permissions.get(id) !== request) continue;
+      request.confirmed = visible !== false;
+      request.nextCheckMs = this.now().getTime()
+        + (visible === false && this.now().getTime() - request.sinceMs >= 10_000 ? 5_000 : DEFAULT_POLL_INTERVAL_MS);
+      updated = true;
+    }
+    if (!updated) return;
+    seat.permissionObservedAt = this.now().toISOString();
+    const count = [...seat.permissions.values()].filter(request => request.confirmed).length;
+    const sourceId = "codex:permission-prompt";
+    this.reportEvidence({
+      seatNodeId: seatNodeId!, sessionName, rung: "needs-input-chrome", sourceId,
+      seq: (seat.sources.get(sourceId)?.latest.seq ?? 0) + 1,
+      observedAt: seat.permissionObservedAt,
+      needsInput: { count, reason: count ? (visible === null ? "permission_request_unverified" : "permission_prompt") : null },
+    });
+  }
+
   /**
    * Return the latest stored observation for a seat, or null when no
    * observation has been recorded yet (e.g. service hasn't polled this
@@ -195,9 +247,26 @@ export class SeatActivityService {
     return this.latestByPaneId.get(paneId) ?? null;
   }
 
-  /** Drop the latest stored observation for a seat (used on seat teardown). */
+  /** Retire a session's observation and oracle evidence (used on seat teardown).
+   *  Keep the durable seat's state/seq so readers and waiters see it become unknown. */
   forgetSeat(paneId: string): void {
     this.latestByPaneId.delete(paneId);
+    this.samplerSeqBySession.delete(paneId);
+    const seatNodeId = this.sessionToSeat.get(paneId);
+    this.sessionToSeat.delete(paneId);
+    const seat = seatNodeId ? this.ladder.get(seatNodeId) : undefined;
+    // An old session's teardown must never erase its successor's evidence.
+    if (!seat || seat.sessionName !== paneId) return;
+    seat.retired = true;
+    seat.sources.clear();
+    seat.permissions.clear();
+    seat.permissionObservedAt = null;
+    seat.pendingIdle = null;
+    seat.contradictionSinceMs = null;
+    seat.promotion.clear();
+    seat.trust.clear();
+    seat.inventory = null;
+    this.arbitrate(seat);
   }
 
   /**
@@ -214,37 +283,51 @@ export class SeatActivityService {
     this.sweeping = true;
     try {
       const rows = db.prepare(`
-        SELECT s.session_name as session_name, n.id as node_id, n.runtime as runtime
+        SELECT s.session_name as session_name, n.id as node_id, n.runtime as runtime,
+          COALESCE(b.attachment_type, 'tmux') as attachment_type, ${sessionAgentAppSelect(db)} as agent_app
         FROM nodes n
         JOIN sessions s ON s.node_id = n.id
           AND s.id = (SELECT s2.id FROM sessions s2 WHERE s2.node_id = n.id ORDER BY s2.id DESC LIMIT 1)
         LEFT JOIN bindings b ON b.node_id = n.id
         WHERE s.status = 'running'
           AND s.session_name IS NOT NULL
-          AND COALESCE(b.attachment_type, 'tmux') = 'tmux'
-      `).all() as Array<{ session_name: string; node_id: string; runtime: string | null }>;
+      `).all() as Array<{ session_name: string; node_id: string; runtime: string | null; attachment_type: string; agent_app: string | null }>;
+      const tmuxRows = rows.filter((r) => r.attachment_type === "tmux");
+      const liveTmux = new Set(tmuxRows.map((r) => r.session_name));
+      for (const pane of this.latestByPaneId.keys()) {
+        if (!liveTmux.has(pane)) this.latestByPaneId.delete(pane);
+      }
+
+      // Retire bindings as well as terminal observations: hook-only seats may
+      // have oracle evidence without ever producing a sampler observation.
+      // Running non-tmux seats retain their hook evidence; only sampling is tmux-only.
+      const live = new Set(rows.map((r) => r.session_name));
+      const observed = new Set([...this.latestByPaneId.keys(), ...this.sessionToSeat.keys()]);
+      for (const pane of observed) {
+        if (!live.has(pane)) this.forgetSeat(pane);
+      }
 
       // S19: every running tmux seat gets a ladder binding; undeclared seats are
       // auto-declared from their runtime's inventory (claude authoritative standing,
       // codex hooks-at-trial, generic sampling floor) — production-complete without
       // touching the launch machinery.
-      for (const r of rows) {
+      for (const r of tmuxRows) {
         if (r.runtime) this.runtimeBySession.set(r.session_name, r.runtime);
         else this.runtimeBySession.delete(r.session_name);
         const known = this.ladder.get(r.node_id);
-        if (!known || known.inventory === null) {
-          this.declareRungInventory(
-            { seatNodeId: r.node_id, sessionName: r.session_name },
-            runtimeRungInventory(r.runtime, !!r.runtime && (this.paneClassifier?.supports(r.runtime) ?? false)),
-          );
+        const inventory = runtimeRungInventory(r.runtime, r.agent_app, !!r.runtime && (this.paneClassifier?.supports(r.runtime) ?? false));
+        // A replacement occupant can keep the seat's session name; its own recorded app selection (or none) decides.
+        const agentAppChanged = !!known && (known.inventory === AGENT_APP_RUNG_INVENTORY) !== (inventory === AGENT_APP_RUNG_INVENTORY);
+        if (!known || known.inventory === null || known.sessionName !== r.session_name || agentAppChanged) {
+          this.declareRungInventory({ seatNodeId: r.node_id, sessionName: r.session_name }, inventory);
         }
       }
 
-      // Drop observations for seats that are no longer running (release
-      // memory + avoid stale reads from `getSeatActivity`).
-      const live = new Set(rows.map((r) => r.session_name));
-      for (const pane of Array.from(this.latestByPaneId.keys())) {
-        if (!live.has(pane)) this.latestByPaneId.delete(pane);
+      // One tmux call reads every session's window activity for this tick; a seat missing from it (or no
+      // batch at all) falls back to its own read, exactly as before.
+      let batch: Map<string, number> | null = null;
+      if (tmuxRows.length > 0 && this.tmux.readAllSessionWindowActivity) {
+        try { batch = await this.tmux.readAllSessionWindowActivity(); } catch { batch = null; }
       }
       for (const pane of Array.from(this.runtimeBySession.keys())) {
         if (!live.has(pane)) this.runtimeBySession.delete(pane);
@@ -252,7 +335,10 @@ export class SeatActivityService {
 
       // Best-effort: a single seat's failure does not crash the loop.
       await Promise.all(rows.map(async (r) => {
-        try { await this.pollSeat(r.session_name); } catch { /* swallow */ }
+        try {
+          if (r.attachment_type === "tmux") await this.observeSeat(r.session_name, undefined, batch);
+          else await this.pollPermissionPrompt(r.session_name, false);
+        } catch { /* swallow */ }
       }));
     } finally {
       this.sweeping = false;
@@ -299,8 +385,11 @@ export class SeatActivityService {
     binding: { seatNodeId: string; sessionName: string },
     inventory: AdapterRungInventory,
   ): void {
+    const prior = this.ladder.get(binding.seatNodeId);
+    if (prior && prior.sessionName !== binding.sessionName) this.forgetSeat(prior.sessionName);
     const seat = this.seatLadder(binding.seatNodeId, binding.sessionName);
     seat.sessionName = binding.sessionName;
+    seat.retired = false;
     this.sessionToSeat.set(binding.sessionName, binding.seatNodeId);
     seat.inventory = inventory;
     seat.trust.clear();
@@ -314,15 +403,32 @@ export class SeatActivityService {
    *  never revives an idle seat (the SubagentStop class at the service layer). */
   reportEvidence(evidence: ActivityEvidence): void {
     const seat = this.seatLadder(evidence.seatNodeId, evidence.sessionName);
+    if (seat.retired || seat.sessionName !== evidence.sessionName) return;
     this.sessionToSeat.set(evidence.sessionName, evidence.seatNodeId);
     const prior = seat.sources.get(evidence.sourceId);
     if (prior && evidence.seq <= prior.latest.seq) return; // stale/reordered — dropped
+    if (evidence.permissionRequest) {
+      seat.permissionRevision++;
+      const request = evidence.permissionRequest;
+      if (!seat.permissions.has(request.id)) {
+        seat.permissions.set(request.id, { sinceMs: this.now().getTime(), confirmed: false, nextCheckMs: 0 });
+      }
+    } else if (evidence.rung === "lifecycle-hooks" && evidence.activity === "idle-at-prompt") {
+      seat.permissions.clear();
+      seat.permissionObservedAt = null;
+      seat.sources.delete("codex:permission-prompt");
+    }
     seat.sources.set(evidence.sourceId, {
       latest: evidence,
       latestActivity: evidence.activity !== undefined ? evidence : prior?.latestActivity ?? null,
     });
     this.measureTrialAgreement(seat, evidence);
     this.arbitrate(seat);
+    // Recording another pending request must not hide an already confirmed
+    // outstanding prompt in the persisted activity consumer.
+    if (evidence.permissionRequest && seat.arbitrated.needsInput.count > 0) {
+      this.permissionPromptChanged?.(seat.sessionName, true);
+    }
   }
 
   /** A handover/generation swap: its OWN visible event, never an activity transition.
@@ -333,6 +439,8 @@ export class SeatActivityService {
     const seat = this.ladder.get(seatNodeId);
     if (!seat) return;
     seat.sources.clear();
+    seat.permissions.clear();
+    seat.permissionObservedAt = null;
     seat.pendingIdle = null;
     seat.contradictionSinceMs = null;
     seat.promotion.clear();
@@ -343,6 +451,7 @@ export class SeatActivityService {
       ...seat.arbitrated,
       activity: "unknown",
       needsInput: { count: 0, reason: null },
+      needsInputEvidence: null,
       decidedBy: null,
       seq: seat.arbitrated.seq + 1, // the swap IS a visible event
       changedAt: at,
@@ -354,9 +463,11 @@ export class SeatActivityService {
   }
 
   /** Whether this seat currently has a DECLARED rung inventory (a swap clears it —
-   *  the successor must re-declare before its rungs regain any trust). */
-  hasRungInventory(seatNodeId: string): boolean {
-    return this.ladder.get(seatNodeId)?.inventory != null;
+   *  the successor must re-declare before its rungs regain any trust). When supplied,
+   *  sessionName also verifies the inventory belongs to that current session. */
+  hasRungInventory(seatNodeId: string, sessionName?: string): boolean {
+    const seat = this.ladder.get(seatNodeId);
+    return seat?.inventory != null && (sessionName === undefined || seat.sessionName === sessionName);
   }
 
   /** Resolve by CURRENT session name (projection convenience) — state itself stays
@@ -408,8 +519,12 @@ export class SeatActivityService {
     if (!seat) {
       seat = {
         sessionName,
+        retired: false,
         inventory: null,
         sources: new Map(),
+        permissions: new Map(),
+        permissionRevision: 0,
+        permissionObservedAt: null,
         trust: new Map(),
         promotion: new Map(),
         contradictionSinceMs: null,
@@ -419,6 +534,7 @@ export class SeatActivityService {
           seatNodeId,
           activity: "unknown",
           needsInput: { count: 0, reason: null },
+          needsInputEvidence: null,
           decidedBy: null,
           seq: 0,
           changedAt: this.now().toISOString(),
@@ -493,9 +609,12 @@ export class SeatActivityService {
     const nowMs = this.now().getTime();
     for (const rung of EVIDENCE_RUNG_RANK) {
       if (rung === opts.excludeRung) continue;
-      if (this.rungTrust(seat, rung) !== "authoritative") continue;
+      const trust = this.rungTrust(seat, rung);
+      if (trust !== "authoritative" && trust !== "positive-only") continue;
       const evd = this.latestByRung(seat, rung, "activity");
       if (!evd || evd.activity === undefined) continue;
+      // A positive-only rung answers only "working"; its silence leaves the state to the rungs below, or unknown.
+      if (trust === "positive-only" && evd.activity !== "working") continue;
       if (rung === "lifecycle-hooks" && nowMs - Date.parse(evd.observedAt) > HOOK_AUTHORITY_WINDOW_MS) continue;
       return evd;
     }
@@ -608,29 +727,42 @@ export class SeatActivityService {
       }
     }
 
-    // needs-input: visible chrome outranks hook-carried evidence; hooks carry it when a
-    // PermissionRequest-class event fired and the next turn boundary clears it. NOT
-    // time-bounded like working/idle hook authority — an unanswered block persisting is
-    // exactly the founder-observed park cause and must stay visible.
+    // Codex permission hooks are pending observations. Only the visible prompt probe,
+    // after grace, can turn them into attention; unavailable capture fails safe.
+    // Other runtime prompts retain their existing rung arbitration.
     const chrome = this.latestByRung(seat, "needs-input-chrome");
     const hooksEv = this.latestByRung(seat, "lifecycle-hooks");
     const selfEv = this.latestByRung(seat, "self-report");
-    const needsInput: NeedsInputShape =
+    const decider =
       chrome?.needsInput && this.rungTrust(seat, "needs-input-chrome") === "authoritative"
-        ? chrome.needsInput
+        ? chrome
         : hooksEv?.needsInput && this.rungTrust(seat, "lifecycle-hooks") === "authoritative"
-          ? hooksEv.needsInput
+          ? hooksEv
           : selfEv?.needsInput && this.rungTrust(seat, "self-report") === "authoritative"
-            ? selfEv.needsInput
-            : { count: 0, reason: null };
+            ? selfEv
+            : null;
+    const confirmedCount = [...seat.permissions.values()].filter(p => p.confirmed).length;
+    const permissionTracked = seat.inventory?.runtime === "codex"
+      && (seat.permissions.size > 0 || seat.permissionObservedAt !== null);
+    const needsInput: NeedsInputShape = permissionTracked
+      ? { count: confirmedCount, reason: confirmedCount ? chrome?.needsInput?.reason ?? "permission_prompt" : null }
+      : decider?.needsInput ?? { count: 0, reason: null };
+    if (permissionTracked && Boolean(confirmedCount) !== Boolean(seat.arbitrated.needsInput.count)) {
+      this.permissionPromptChanged?.(seat.sessionName, Boolean(confirmedCount));
+    }
+    const needsInputEvidence = permissionTracked ? (seat.permissionObservedAt ? { rung: "needs-input-chrome" as const, observedAt: seat.permissionObservedAt } : null) : decider ? { rung: decider.rung, observedAt: decider.observedAt } : null;
 
+    // Which rung answers is part of the answer: default zero → observed zero changes what
+    // consumers may conclude, so it advances seq and pushes like a count change.
     const changed = nextActivity !== seat.arbitrated.activity
       || needsInput.count !== seat.arbitrated.needsInput.count
-      || needsInput.reason !== seat.arbitrated.needsInput.reason;
+      || needsInput.reason !== seat.arbitrated.needsInput.reason
+      || (needsInputEvidence?.rung ?? null) !== (seat.arbitrated.needsInputEvidence?.rung ?? null);
     seat.arbitrated = {
       ...seat.arbitrated,
       activity: nextActivity,
       needsInput,
+      needsInputEvidence,
       decidedBy,
       seq: changed ? seat.arbitrated.seq + 1 : seat.arbitrated.seq,
       changedAt: changed ? this.now().toISOString() : seat.arbitrated.changedAt,
@@ -677,7 +809,11 @@ interface NeedsInputShape {
 }
 
 interface SeatLadderState {
+  permissions: Map<string, { sinceMs: number; confirmed: boolean; nextCheckMs: number }>;
+  permissionRevision: number;
+  permissionObservedAt: string | null;
   sessionName: string;
+  retired: boolean;
   inventory: AdapterRungInventory | null;
   sources: Map<string, { latest: ActivityEvidence; latestActivity: ActivityEvidence | null }>;
   trust: Map<EvidenceRungId, RungTrust>;

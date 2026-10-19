@@ -27,7 +27,7 @@ import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import { kiroAuthStatus } from "../auth-status.js";
 import { KIRO_MODEL_SHAPE } from "../model-shapes.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
-import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
+import type { CliLaunchPosture, ResolvedLaunchPosture } from "../../yolo-mode.js";
 
 export const KIRO_RUNTIME_ID = "kiro";
 export const KIRO_BINARY = "kiro-cli";
@@ -47,14 +47,14 @@ export function verifyKiroVersionOutput(output: string): string | null {
  *  drift. Both come from `kiro-cli chat --help` (live): `--trust-tools=`
  *  trusts no tools, so Kiro asks before every tool call; `--trust-all-tools`
  *  runs every tool without asking. */
-export const KIRO_PERMISSION_VALUES: Readonly<Record<ResolvedLaunchPosture, string>> = Object.freeze({
+export const KIRO_PERMISSION_VALUES: Readonly<Record<CliLaunchPosture, string>> = Object.freeze({
   floor: "--trust-tools=",
   full_bypass: "--trust-all-tools",
 });
 
 /** argv for an interactive Kiro chat. Throws (refusing the launch) on a
  *  dash-led model, a resume token, or a fork request. */
-export function buildKiroArgv(input: { model?: string | null; posture: ResolvedLaunchPosture; resumeToken?: string; forkSource?: unknown }): string[] {
+export function buildKiroArgv(input: { model?: string | null; posture: CliLaunchPosture; resumeToken?: string; forkSource?: unknown }): string[] {
   if (input.resumeToken !== undefined) throw new Error("kiro: resume is not supported (the session store is unverified); restore with --fresh");
   if (input.forkSource) throw new Error("kiro has no fork support in OpenRig; remove session_source for kiro members");
   const argv = [KIRO_BINARY, "chat", KIRO_PERMISSION_VALUES[input.posture]];

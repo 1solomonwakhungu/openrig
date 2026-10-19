@@ -71,9 +71,8 @@ export function assertDestinationNamespaceContained(targetRoot: string, installN
 }
 
 // Kept in lockstep with the daemon parser's ALLOWED_FILE_SUFFIXES (manifest-parser.ts).
-// OPR.0.5.3.7 R2 added .sh/.ts (skill helper assets, served as text); the install
-// validator must accept what the daemon will serve.
-const ALLOWED_CONTEXT_PACK_SUFFIXES = new Set([".md", ".markdown", ".yaml", ".yml", ".txt", ".sh", ".ts"]);
+// Helper scripts are served as text, never executed by the install validator.
+const ALLOWED_CONTEXT_PACK_SUFFIXES = new Set([".md", ".markdown", ".yaml", ".yml", ".txt", ".sh", ".ts", ".mjs", ".py"]);
 
 export function validateContextPackManifestForInstall(manifestPath: string): void {
   let parsed: unknown;
@@ -123,7 +122,7 @@ export function validateContextPackManifestForInstall(manifestPath: string): voi
     if (typeof relPath !== "string" || relPath.length === 0) {
       throw new Error(`manifest at ${manifestPath} files[${i}] missing 'path' (string)`);
     }
-    if (relPath.includes("..") || isAbsolute(relPath) || relPath.startsWith("\\")) {
+    if (relPath.split(/[\\/]/).includes("..") || isAbsolute(relPath) || relPath.startsWith("\\")) {
       throw new Error(`manifest at ${manifestPath} files[${i}].path '${relPath}' must be a relative path inside the pack (no '..' segments, no leading '/')`);
     }
     if (!ALLOWED_CONTEXT_PACK_SUFFIXES.has(extname(relPath))) {
@@ -134,4 +133,3 @@ export function validateContextPackManifestForInstall(manifestPath: string): voi
     }
   }
 }
-

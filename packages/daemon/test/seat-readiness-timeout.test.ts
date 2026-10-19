@@ -192,7 +192,7 @@ describe("pi runner wait", () => {
         mkdirp: (p) => { dirs.add(p); },
         listFiles: () => [],
       };
-      const tmux = { sendText: vi.fn(async () => ({ ok: true })), sendKeys: vi.fn(async () => ({ ok: true })) } as unknown as TmuxAdapter;
+      const tmux = { sendText: vi.fn(async () => ({ ok: true })), sendShellCommand: vi.fn(async () => ({ ok: true })), sendKeys: vi.fn(async () => ({ ok: true })) } as unknown as TmuxAdapter;
       const pi = new PiRuntimeAdapter({ tmux, fsOps: fs, stateRoot: "/state/pi", runnerEntryPath: "/r.js", sleep: async () => {} });
       const result = await pi.launchHarness(
         { id: "b", nodeId: "n", tmuxSession: "dev-pi@r", tmuxWindow: null, tmuxPane: null, cmuxWorkspace: null, cmuxSurface: null, updatedAt: "", cwd: "/w", ...(readinessTimeoutMs ? { readinessTimeoutMs } : {}) },
@@ -263,7 +263,7 @@ describe("built-in resume adapters", () => {
     const plain = stuckTmux();
     expect((await new CodexResumeAdapter(plain.tmux, fast).resume("s", "codex_id", "uuid-1", "/w")).ok).toBe(false);
     const seat = stuckTmux();
-    expect((await new CodexResumeAdapter(seat.tmux, fast).resume("s", "codex_id", "uuid-1", "/w", undefined, undefined, undefined, 1_000)).ok).toBe(false);
+    expect((await new CodexResumeAdapter(seat.tmux, fast).resume("s", "codex_id", "uuid-1", "/w", undefined, undefined, undefined, undefined, undefined, undefined, undefined, 1_000)).ok).toBe(false);
     expect(seat.polls() - plain.polls()).toBe(5); // 11 polls of 100 ms vs 6
   });
 
@@ -271,7 +271,7 @@ describe("built-in resume adapters", () => {
     const plain = stuckTmux();
     expect((await new ClaudeResumeAdapter(plain.tmux, fast).resume("s", "claude_id", "abc-1", "/w")).ok).toBe(false);
     const seat = stuckTmux();
-    expect((await new ClaudeResumeAdapter(seat.tmux, fast).resume("s", "claude_id", "abc-1", "/w", undefined, undefined, undefined, undefined, 1_000)).ok).toBe(false);
+    expect((await new ClaudeResumeAdapter(seat.tmux, fast).resume("s", "claude_id", "abc-1", "/w", undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 1_000)).ok).toBe(false);
     expect(seat.polls() - plain.polls()).toBe(5);
   });
 });

@@ -21,6 +21,11 @@ import {
   HARNESS_HOME, HARNESS_SESSION, HARNESS_STATE_ROOT, atShell, harnessBinding, harnessDeps, memFs, mockTmux,
 } from "./helpers/tui-cli-adapter-harness.js";
 
+// The adapters under test run with env {} (harnessDeps); the shared hermetic setup sets
+// XDG_* in process.env, which the expected paths below would otherwise pick up.
+delete process.env["XDG_DATA_HOME"];
+delete process.env["GOOSE_PATH_ROOT"];
+
 const ID = "20261003_3";
 const MISSING_ID = "20261003_99";
 

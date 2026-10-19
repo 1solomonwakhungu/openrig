@@ -8,6 +8,7 @@ import type { ProjectionPlan } from "./projection-planner.js";
 export interface NodeBinding extends Binding {
   cwd: string;
   model?: string;
+  effort?: string;
   codexConfigProfile?: string;
   /** The seat's launch readiness window in ms (rig spec readiness_timeout_ms). When
    *  set it replaces each launch wait's built-in window (the startup readiness poll
@@ -17,9 +18,15 @@ export interface NodeBinding extends Binding {
    * attachment (member > rig precedence, resolved by the core resolver at materialize /
    * restore). Absent = no policy attached → the env-driven floor/YOLO decision stands.
    * Present = authoritative for this seat (overrides the env read in BOTH directions). */
-  launchPosture?: "floor" | "full_bypass";
+  launchPosture?: "floor" | "full_bypass" | "auto";
   /** Explicit Claude native mode; checked against the bound managed executable. */
   permissionMode?: string;
+  /** Persisted rig opt-in to per-launch warning acceptance, only at full_bypass. */
+  nonInterruptive?: boolean;
+  /** Launch-only operational default, derived from the persisted kernel rig and explicit selections. */
+  kernelAuthority?: boolean;
+  /** Derived at launch only when no authored policy, seat choice or native profile applies. */
+  teamPermissionDefault?: boolean;
   /** Reserved successor generation; current tenure remains the input fence until commit. */
   launchGeneration?: string;
   /** The rig's guidance.tracked_file policy (guidance-target.ts). Absent = managed_block. */
@@ -31,6 +38,8 @@ export interface NodeBinding extends Binding {
 // -- Resolved startup file with source-root provenance --
 
 export interface ResolvedStartupFile {
+  /** Explicit per-seat role orientation; never inferred from the filename. */
+  orientation?: "role";
   path: string;
   absolutePath: string;
   ownerRoot: string;
@@ -50,12 +59,14 @@ export interface InstalledResource {
 }
 
 export interface ProjectionResult {
+  warnings?: string[];
   projected: string[];
   skipped: string[];
   failed: Array<{ effectiveId: string; error: string }>;
 }
 
 export interface StartupDeliveryResult {
+  warnings?: string[];
   delivered: number;
   failed: Array<{ path: string; error: string }>;
 }
@@ -72,6 +83,7 @@ export const ATTENTION_REQUIRED_READINESS_CODES = new Set([
   "update_gate",
   "login_required",
   "mcp_gate",
+  "bypass_consent_gate",
   // Codex auth refusal (stored OAuth token can no longer be refreshed).
   // Defensive: row 6's verifyResumeLaunch patch propagates attention_required
   // through the launch path so the readiness fallback shouldn't see this code,
@@ -95,15 +107,35 @@ export function isAttentionRequiredReadinessCode(code: string | undefined): bool
 
 export type HarnessLaunchRecovery = "retry_fresh" | "attention_required";
 
+// `launchedProcess` (Claude resume launches): the first process the launch's own readiness check
+// pinned as the one it started, kept even when a later sample saw it replaced (#1077).
 export type HarnessLaunchResult =
-  | { ok: true; resumeToken?: string; resumeType?: string; appliedLaunch?: import("./permission-drift.js").AppliedLaunchObservation }
+  | { ok: true; resumeToken?: string; resumeType?: string; appliedLaunch?: import("./permission-drift.js").AppliedLaunchObservation;
+    launchedProcess?: import("./native-process-lineage.js").ClaudeLaunchedProcess }
   // `evidence` carries the last-N pane lines for `attention_required` outcomes
   // so the failure can flow honest evidence through to RestoreNodeResult's
   // attentionEvidence field. Omitted for non-attention recoveries.
+  // `missingConversation` is set only when the runtime itself reported that the requested
+  // conversation doesn't exist; other `retry_fresh` failures (such as a pane back at its shell)
+  // leave it unset.
   // `attentionCode` names why an attention_required launch stopped (a readiness
   // code such as login_required, or runtime_missing for an absent binary), so
   // callers such as runtime fallback can act on it without parsing text.
-  | { ok: false; error: string; recovery?: HarnessLaunchRecovery; evidence?: string; attentionCode?: string };
+  | { ok: false; error: string; recovery?: HarnessLaunchRecovery; evidence?: string; missingConversation?: true; attentionCode?: string;
+    /** The native resume probe's code for the startup gate that stopped the launch (for example `hook_trust_gate`),
+     *  when one did. Reporting only: it changes no recovery decision. */
+    gate?: string;
+    /** Reporting only, with `gate: "update_gate"`: whether that screen offered a choice (an update prompt with a skip
+     *  option) rather than an update already in progress. */
+    gateChoice?: boolean;
+    /** Reporting only: what the resume verification itself typed into the pane. */
+    verifierInput?: "none" | "update_skip_key_sent" | "update_skip_key_failed";
+    /** Reporting only: the reported screen is the last one seen before the verification's own input (`verifierInput`);
+     *  nothing after that input was observed. */
+    screenBeforeInput?: true;
+    /** The native fork command was sent, but its child identity is not yet available. */
+    forkIdentityPending?: boolean;
+    launchedProcess?: import("./native-process-lineage.js").ClaudeLaunchedProcess };
 
 // -- Shared concrete-hint resolver --
 
@@ -136,6 +168,10 @@ export function resolveConcreteHint(
 export interface ForkSource {
   kind: "native_id" | "artifact_path" | "name" | "last";
   value?: string;
+  /** Set only by a seat handover: a launch whose new id isn't captured yet still succeeds, with the id
+   *  pending, so the handover can commit the ready successor. Every other fork caller keeps the
+   *  refusal on a missed capture. */
+  pendingIdAllowed?: boolean;
 }
 
 /**
@@ -159,8 +195,9 @@ export interface RuntimeAdapter {
   /** Project resources from a projection plan to the runtime target locations. */
   project(plan: ProjectionPlan, binding: NodeBinding): Promise<ProjectionResult>;
 
-  /** Deliver startup files to the runtime. */
-  deliverStartup(files: ResolvedStartupFile[], binding: NodeBinding): Promise<StartupDeliveryResult>;
+  /** Deliver startup files. Claude's post-launch path can reuse the orchestrator's checked send.
+   * The adapter still owns file reads, ordering, provisioning and required/optional errors. */
+  deliverStartup(files: ResolvedStartupFile[], binding: NodeBinding, sendInteractiveText?: (text: string) => Promise<void>): Promise<StartupDeliveryResult>;
 
   /**
    * Launch the harness (claude/codex/terminal) inside the tmux session.
@@ -174,6 +211,11 @@ export interface RuntimeAdapter {
     binding: NodeBinding,
     opts: { name: string; resumeToken?: string; forkSource?: ForkSource },
   ): Promise<HarnessLaunchResult>;
+
+  /** Observe an already launched fork without sending input or starting another process. */
+  captureForkIdentity?(
+    binding: NodeBinding, parentToken: string,
+  ): Promise<{ resumeToken: string; resumeType: string } | null>;
 
   /** Check if the runtime harness is responsive and ready. */
   checkReady(binding: NodeBinding): Promise<ReadinessResult>;

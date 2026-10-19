@@ -115,18 +115,8 @@ export const PI_PROVIDER_ENV_VARS: Record<string, string> = {
   "openrouter": "OPENROUTER_API_KEY",
   "zai": "ZAI_API_KEY",
   "kimi-coding": "KIMI_API_KEY",
+  "minimax": "MINIMAX_API_KEY",
 };
-
-/** OMP's own output when it starts with no usable model (no provider key in
- *  its environment and no models.yml): "No models available. Use /login or
- *  set an API key environment variable. ..." (seen in a no-credentials
- *  smoke run). */
-export const OMP_NO_CREDENTIALS_RE = /No models available\. Use \/login or set an API key environment variable/;
-
-/** What an OMP seat with no model credentials needs (each seat has its own
- *  HOME, so the operator's default OMP sign-in is not shared). */
-export const OMP_SIGN_IN_HINT =
-  "OMP has no model credentials for this seat. Sign it in with HOME=<seat-root> PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login, or set the model provider's API key (for example ANTHROPIC_API_KEY) in the OpenRig daemon environment. Default OMP credentials are not shared.";
 
 /** Explicit OMP chat-provider credential names. Only the declared provider's
  *  key can cross into the child; arbitrary *_KEY variables are never forwarded. */
@@ -165,8 +155,39 @@ export const OMP_PROVIDER_ENV_VARS: Record<string, string> = {
   litellm: "LITELLM_API_KEY",
 };
 
+/** Providers whose credential is a (key, endpoint) PAIR. A gateway, proxy or
+ *  compatible endpoint issues a key that is only valid against one base URL, so
+ *  sending the key alone hands the seat an unusable credential. startup's
+ *  KNOWN_PROVIDER_AUTH_ENV already makes this pairing for ANTHROPIC_BASE_URL and
+ *  OPENAI_BASE_URL; those reach a seat's launch env but die at the child
+ *  boundary below without an entry here.
+ *
+ *  Each entry is the provider's key variable with _API_KEY swapped for _BASE_URL
+ *  (asserted in omp-runner tests). The bar for an entry is that OMP's CHAT
+ *  provider reads that variable as an endpoint override: a base URL OMP holds
+ *  as a fixed constant, or reads only in another package, earns none —
+ *  forwarding it would do nothing, or would mislead someone pointing chat at a
+ *  proxy. Extending this map is a reviewed change, never a convenience edit,
+ *  and the other OMP providers deliberately have none. */
+export const OMP_PROVIDER_EXTRA_ENV_VARS: Record<string, readonly string[]> = {
+  anthropic: ["ANTHROPIC_BASE_URL"],
+  openai: ["OPENAI_BASE_URL"],
+  litellm: ["LITELLM_BASE_URL"],
+};
+
+/** OMP's own output when it starts with no usable model (no provider key in
+ *  its environment and no models.yml): "No models available. Use /login or
+ *  set an API key environment variable. ..." (seen in a no-credentials
+ *  smoke run). */
+export const OMP_NO_CREDENTIALS_RE = /No models available\. Use \/login or set an API key environment variable/;
+
+/** What an OMP seat with no model credentials needs (each seat has its own
+ *  HOME, so the operator's default OMP sign-in is not shared). */
+export const OMP_SIGN_IN_HINT =
+  "OMP has no model credentials for this seat. Sign it in with HOME=<seat-root> PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login, or set the model provider's API key (for example ANTHROPIC_API_KEY) in the OpenRig daemon environment. Default OMP credentials are not shared.";
+
 // Baseline process needs. No host credential families or shell customization.
-export const PI_ENV_BASELINE_VARS = ["PATH", "HOME", "TERM", "LANG", "LC_ALL", "SHELL", "TMPDIR"] as const;
+export const PI_ENV_BASELINE_VARS = ["PATH", "HOME", "USER", "LOGNAME", "TERM", "LANG", "LC_ALL", "SHELL", "TMPDIR"] as const;
 
 // NodeLauncher supplies identity and instance routing on both fresh and resumed
 // seats. Pi's shell tools inherit this child env: dropping these values makes
@@ -205,6 +226,13 @@ export function buildPiChildEnv(
   if (providerVar && source[providerVar] !== undefined) {
     env[providerVar] = source[providerVar]!;
   }
+  // The declared provider's endpoint, for the providers whose key is scoped to one.
+  if (opts.runtime === "omp" && provider) {
+    for (const extra of OMP_PROVIDER_EXTRA_ENV_VARS[provider] ?? []) {
+      const value = source[extra];
+      if (value !== undefined) env[extra] = value;
+    }
+  }
   if (opts.runtime === "omp") {
     // The per-seat HOME prevents OMP from consulting the operator's ~/.omp
     // and ~/.env. Project cwd/.env remains an OMP discovery surface. The
@@ -241,6 +269,10 @@ export interface PiRunnerLaunchOpts {
   trust: "approve" | "no-approve";
   /** Exact session file to resume (FR-6). Mutually exclusive with forkRef. */
   sessionFile?: string;
+  /** OPR.0.7.0.2: Pi only — the runner reports usage facts from persisted entries (usage.pi_cost_facts). */
+  usageFacts?: boolean;
+  /** OPR.0.7.0.2 K4: Pi only, with usageFacts — the runner looks up OpenRouter's charge (usage.pi_openrouter_charge). */
+  openRouterCharge?: boolean;
   /** Session file path or id to fork from via CLI --fork (FR-6). */
   forkRef?: string;
   /** Launch-attempt scope stamped into every runner sidecar write. */
@@ -269,6 +301,10 @@ export function buildPiRunnerCommand(opts: PiRunnerLaunchOpts): string {
   }
   if (opts.forkRef) {
     parts.push("--fork", shellQuote(opts.forkRef));
+  }
+  if (opts.usageFacts && opts.runtime !== "omp") {
+    parts.push("--usage-facts");
+    if (opts.openRouterCharge) parts.push("--openrouter-charge");
   }
   return parts.join(" ");
 }

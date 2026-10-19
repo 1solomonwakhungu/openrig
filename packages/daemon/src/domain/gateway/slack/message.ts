@@ -4,6 +4,9 @@
 // 40,000 truncation; top-level text is the screen-reader/notification fallback)
 // https://docs.slack.dev/reference/block-kit/blocks/section-block/ (3,000)
 // https://docs.slack.dev/reference/block-kit/blocks/ (50 blocks)
+import { createHash } from "node:crypto";
+import { MAX_OPTION_LABEL, type HumanQuestion } from "../../human-questions.js";
+
 export const SLACK_TEXT_CAP = 3900; // Our conservative complete-fallback budget, not Slack’s hard limit.
 export const SLACK_SECTION_CAP = 3000;
 /** @deprecated Complete rendering ignores excerpt requests. */
@@ -14,6 +17,28 @@ export interface QitemLike {
   summary?: string | null;
   body?: string | null;
   destinationSession?: string | null;
+  /** #193 — structured questions, rendered as one button row per question. */
+  humanQuestions?: readonly HumanQuestion[] | null;
+  /** #1013 — row state + tags, so a workflow gate PARKED on a human seat can be
+   *  re-rendered for the person instead of posting the seat's agent packet. */
+  state?: string | null;
+  tags?: readonly string[] | null;
+  /** #1013 — the structured evidenceRef: for a parked gate it rides the evidence link/media
+   *  path when it is an https ref, else it renders as one Evidence line (never the packet). */
+  evidenceRef?: string | null;
+}
+
+/** #1013 — a workflow gate row parked on a human seat (the projector parks it
+ * `state=blocked, blocked_on=<human seat>` and tags it `gate`; every workflow gate also
+ * carries the `workflow` tag — the projector and the runtime both set it). Agents also
+ * put `gate` on rows they write by hand, so requiring both keeps a hand-tagged row's
+ * own body intact. A gate's body is the agent packet — instance/step/Continuation lines
+ * for the seat that resumes after sign-off — while the person needs only the headline
+ * (`gate.summary`, plain language per C6) and the evidence link. The row itself is
+ * untouched; this gates the OUTBOUND render only. */
+export function isHumanGatePacket(q: Pick<QitemLike, "state" | "tags">): boolean {
+  const tags = q.tags ?? [];
+  return q.state === "blocked" && tags.includes("gate") && tags.includes("workflow");
 }
 
 /** M1 A5b — an outbound image attachment. A media-bearing OutboundDecision carries these;
@@ -32,10 +57,18 @@ export interface OutboundMessageOpts {
   extraBlocks?: unknown[];
   /** M1 A5b: outbound image attachments, rendered as Block Kit `image` blocks (the wired seam). */
   mediaRefs?: SlackMediaRef[];
+  /** #47 — an https evidenceRef that is NOT an image (GitLab issue link, PROOF.md URL, …),
+   *  rendered as a plain link in the message text + a context block. NEVER a Block Kit
+   *  `image` block: Slack rejects the ENTIRE message with `invalid_blocks` when an image
+   *  block's URL is not a real image, silently and permanently breaking delivery. */
+  evidenceLink?: string | null;
   /** S10 / A1.2 — the structured seat-attribution header (rig/host/seat/session), rendered as
    *  one sender context line in ONE honest bot identity. Authorship lives in OUR record;
    *  Slack's transport actor stays the app. NEVER a per-message username/icon override. */
   attribution?: SeatAttribution;
+  /** The machine this post comes from, shown after the sender ("from lead@my-rig on vps04") when
+   *  the sender's session doesn't already name a host. Absent: the sender line is unchanged. */
+  machine?: string;
   /** S10 interim loudness rule: an escalation MENTIONS its human (`<@Uxxx>`); everything else
    *  stays quiet-threaded. The value is the Slack USER ID (mention semantics require the id,
    *  never a display name). */
@@ -76,7 +109,7 @@ export function buildImageBlocks(mediaRefs: readonly SlackMediaRef[] | undefined
   for (const m of mediaRefs) {
     const url = String(m.imageUrl || "");
     // Only forward a clean https URL that carries no secret (defense-in-depth, item 7).
-    if (!/^https:\/\/\S+$/.test(url) || containsSecret(url)) continue;
+    if (!isSafeHttpsUrl(url)) continue;
     blocks.push({
       type: "image",
       image_url: url,
@@ -85,6 +118,47 @@ export function buildImageBlocks(mediaRefs: readonly SlackMediaRef[] | undefined
     });
   }
   return blocks;
+}
+
+/** #193 — the block_id / action_id prefixes a click carries back. The inbound path parses
+ *  exactly these (one producer, one parser: see parseQuestionAction). */
+export const QUESTION_BLOCK_PREFIX = "or-q:";
+export const OPTION_ACTION_PREFIX = "or-opt:";
+const TYPED_REPLY_HINT = "Or reply in this thread with your own answer.";
+
+/** Parse a clicked button back into its question and option ids; null if it is not ours. */
+export function parseQuestionAction(blockId: unknown, actionId: unknown): { questionId: string; optionId: string } | null {
+  if (typeof blockId !== "string" || typeof actionId !== "string") return null;
+  if (!blockId.startsWith(QUESTION_BLOCK_PREFIX) || !actionId.startsWith(OPTION_ACTION_PREFIX)) return null;
+  const questionId = blockId.slice(QUESTION_BLOCK_PREFIX.length);
+  const optionId = actionId.slice(OPTION_ACTION_PREFIX.length);
+  return questionId && optionId ? { questionId, optionId } : null;
+}
+
+/** #193 — the questions as blocks (a section, then a button row, per question) plus the
+ *  complete text they must also appear as in the accessible fallback. */
+function buildQuestionBlocks(questions: readonly HumanQuestion[]): { blocks: unknown[]; text: string } {
+  const blocks: unknown[] = [];
+  const lines: string[] = [];
+  for (const q of questions) {
+    const question = bounded(`*${inert(q.question)}*`, SLACK_SECTION_CAP, "question");
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: question } });
+    blocks.push({
+      type: "actions",
+      block_id: `${QUESTION_BLOCK_PREFIX}${q.id}`,
+      elements: q.options.map((o) => ({
+        type: "button",
+        action_id: `${OPTION_ACTION_PREFIX}${o.id}`,
+        value: o.id,
+        ...(o.recommended ? { style: "primary" } : {}),
+        text: { type: "plain_text", text: bounded(inert(o.label), MAX_OPTION_LABEL, "option label") },
+      })),
+    });
+    lines.push(question, ...q.options.map((o) => `• ${inert(o.label)}${o.recommended ? " (recommended)" : ""}`));
+  }
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: TYPED_REPLY_HINT }] });
+  lines.push(TYPED_REPLY_HINT);
+  return { blocks, text: lines.join("\n") };
 }
 
 // Secret-looking patterns we refuse to forward (item 7 defense-in-depth).
@@ -103,10 +177,12 @@ export function containsSecret(text: string): boolean {
   });
 }
 
+const REDACTED_SECRET = "[redacted-secret]";
+
 export function redactSecrets(text: string): string {
   let out = text;
   for (const p of SECRET_PATTERNS) {
-    out = out.replace(p, "[redacted-secret]");
+    out = out.replace(p, REDACTED_SECRET);
   }
   return out;
 }
@@ -126,6 +202,31 @@ export function escapeSlackText(text: string): string {
 /** The untrusted-field pipeline: secrets redacted, then Slack control syntax neutralized. */
 function inert(text: string): string {
   return escapeSlackText(redactSecrets(text));
+}
+
+function isSafeHttpsUrl(url: string): boolean {
+  if (!/^https:\/\/\S+$/.test(url) || containsSecret(url)) return false;
+  try {
+    const parsed = new URL(url);
+    return !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+/** #47 — render a non-image https evidenceRef as a plain link instead of a Block Kit
+ *  `image` block. The URL arrives pre-validated as `^https://\S+$` from the delivery
+ *  layer; item-7 hygiene still applies (a secret-bearing URL is refused, never
+ *  forwarded), and a URL carrying mrkdwn-breaking `<`, `>`, `|` degrades to escaped
+ *  plain text rather than a link. Returns null when there is nothing safe to render. */
+function buildEvidenceLink(url: string | null | undefined): { text: string; block: unknown } | null {
+  const ref = typeof url === "string" ? url.trim() : "";
+  if (!ref || !isSafeHttpsUrl(ref)) return null;
+  const escapedRef = inert(ref);
+  const text = `Evidence: ${escapedRef}`;
+  const context = bounded(/[<>|]/.test(ref) ? text : `Evidence: <${escapedRef}|evidence>`, SLACK_SECTION_CAP, "evidence context");
+  const block = { type: "context", elements: [{ type: "mrkdwn", text: context }] };
+  return { text, block };
 }
 
 /** S10 fix-r3 (R2 exactly-once) — the STRUCTURAL reconciliation identity: a bounded,
@@ -149,6 +250,41 @@ export class HumanMessageShapeError extends Error {
   readonly code = "human_message_unrenderable";
 }
 
+/** #897 — split text into pieces that each fit `budgetFor(index)` once escaped, so a brief
+ *  over one message's limit is posted as several messages instead of refused. Secrets are
+ *  redacted before any cut, so a cut can never separate a secret from the pattern that finds
+ *  it. A cut prefers a blank line, then a line end, then a space, in the second half of the
+ *  room; it never falls inside a surrogate pair. The pieces join back to the redacted text
+ *  without its trailing whitespace. */
+export function splitForSlack(text: string, budgetFor: (index: number) => number): string[] {
+  const pieces: string[] = [];
+  let rest = redactSecrets(text).trimEnd();
+  while (rest) {
+    const budget = budgetFor(pieces.length);
+    let end = 0;
+    let width = 0;
+    while (end < rest.length) {
+      const code = rest.charCodeAt(end);
+      const step = code >= 0xd800 && code <= 0xdbff && end + 1 < rest.length ? 2 : 1;
+      const add = escapeSlackText(rest.slice(end, end + step)).length;
+      if (width + add > budget) break;
+      width += add;
+      end += step;
+    }
+    if (end === rest.length) {
+      pieces.push(rest);
+      break;
+    }
+    if (end === 0) throw new HumanMessageShapeError(`Message part ${pieces.length + 1} has no room for brief text. Shorten the subject.`);
+    const room = rest.slice(0, end);
+    const boundaries = [room.lastIndexOf("\n\n") + 2, room.lastIndexOf("\n") + 1, room.lastIndexOf(" ") + 1];
+    const cut = boundaries.find((at) => at > end / 2) ?? end;
+    pieces.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  return pieces;
+}
+
 function bounded(text: string, max: number, field: string): string {
   // Count the escaped wire string in UTF-16 units, conservatively. Never slice
   // an entity or surrogate pair; reject the whole request before any post.
@@ -158,23 +294,112 @@ function bounded(text: string, max: number, field: string): string {
   return text;
 }
 
+/** Longest tag value the gate context line shows, in characters, ellipsis included. */
+export const GATE_CONTEXT_VALUE_CAP = 80;
+
+/** Shorten a redacted tag value to GATE_CONTEXT_VALUE_CAP characters: its start and end around
+ * `…`, then the first 12 hex characters of the SHA-256 of the whole value. Labels that differ at
+ * the start or end stay visibly distinct; for labels that differ only in the cut middle, the
+ * digest makes a collision unlikely but doesn't rule it out. Counts code points, so no surrogate
+ * pair is split, and keeps a redaction marker whole or leaves it out, never cut. */
+function shortenGateValue(value: string): string {
+  const tokens: string[] = [];
+  value.split(REDACTED_SECRET).forEach((part, index) => {
+    if (index > 0) tokens.push(REDACTED_SECRET);
+    tokens.push(...Array.from(part));
+  });
+  const width = (token: string) => (token === REDACTED_SECRET ? REDACTED_SECRET.length : 1);
+  if (tokens.reduce((sum, token) => sum + width(token), 0) <= GATE_CONTEXT_VALUE_CAP) return value;
+  const hash = ` #${createHash("sha256").update(value).digest("hex").slice(0, 12)}`;
+  const room = GATE_CONTEXT_VALUE_CAP - hash.length - 1;
+  const take = (from: string[], budget: number): string[] => {
+    const kept: string[] = [];
+    let used = 0;
+    for (const token of from) {
+      if (used + width(token) > budget) break;
+      kept.push(token);
+      used += width(token);
+    }
+    return kept;
+  };
+  const head = take(tokens, Math.floor(room / 2));
+  const tail = take([...tokens.slice(head.length)].reverse(), room - Math.floor(room / 2)).reverse();
+  return `${head.join("")}…${tail.join("")}${hash}`;
+}
+
+/** PR #1143 review — the one-line workflow/instance context for a rendered human gate,
+ * built from the row's own `workflow:` / `instance:` / `step:` tags. The step rides along
+ * only when tagged. Missing tags render as `?` so the line never names the wrong workflow.
+ * A hand-made row can carry a tag of any length, so each value is redacted, then shortened
+ * (shortenGateValue), and only then is the line escaped, so no escape is split.
+ * `instanceOnly` gives the shorter line that still tells two instances apart. */
+export function buildGateContextLine(tags: readonly string[], instanceOnly = false): string {
+  const tagValue = (prefix: string): string => {
+    const raw = tags.find((t) => t.startsWith(`${prefix}:`))?.slice(prefix.length + 1);
+    return raw ? shortenGateValue(redactSecrets(raw)) : "?";
+  };
+  if (instanceOnly) return escapeSlackText(`instance ${tagValue("instance")}`);
+  const parts = [`Workflow ${tagValue("workflow")}`, `instance ${tagValue("instance")}`];
+  const step = tagValue("step");
+  if (step !== "?") parts.push(`step ${step}`);
+  return escapeSlackText(parts.join(" · "));
+}
+
 /** Pure, deterministic rendering. Queue metadata stays in the durable request;
  * the human sees one subject, complete body and one sender attribution. */
 export function buildOutboundMessage(q: QitemLike, opts: OutboundMessageOpts): SlackMessagePayload {
   const summary = inert(String(q.summary || "(no summary)"));
-  const body = bounded(inert(String(q.body || "")), SLACK_SECTION_CAP, "body");
+  // #1013 — a gate parked on a human renders from the structured fields: the headline IS
+  // the ask (gate.summary) and the evidenceRef rides the evidence link/media path. When
+  // that path won't carry it (a local path, not an https ref), the body falls to a single
+  // Evidence line — the raw agent packet (instance/step/Continuation lines for the seat
+  // that resumes after sign-off) never does. Without a plain-language summary there is
+  // nothing to show the person instead, so the packet stays as the fallback.
+  const humanGate = isHumanGatePacket(q) && String(q.summary ?? "").trim() !== "";
+  // PR #1143 review — two instances of the same workflow parked at the same gate otherwise
+  // render byte-identical messages. One short line from the row's own tags tells the person
+  // which workflow instance is asking (never the agent packet).
+  const gateContext = humanGate ? buildGateContextLine(q.tags ?? []) : null;
+  const gateEvidence = String(q.evidenceRef ?? "").trim();
+  // The Evidence path drops out only when the render already carries that same reference —
+  // an https ref riding as the evidence link, or a media attachment whose URL IS the ref.
+  // An image of a DIFFERENT artifact (the common screenshot case) keeps the Evidence line:
+  // without it the human cannot find the referenced document.
+  const gateEvidenceCarried = Boolean(opts.evidenceLink)
+    || (opts.mediaRefs ?? []).some((m) => m.imageUrl === gateEvidence);
+  const body = humanGate
+    ? (!gateEvidence || gateEvidenceCarried
+      ? ""
+      : bounded(`Evidence: ${inert(gateEvidence)}`, SLACK_SECTION_CAP, "body"))
+    : bounded(inert(String(q.body || "")), SLACK_SECTION_CAP, "body");
   const mention = opts.mentionUserId ? `<@${opts.mentionUserId}> :rotating_light: ` : "";
   const headline = bounded(`${mention}*${summary}*`, SLACK_SECTION_CAP, "subject");
-  const attr = bounded(`from ${inert(opts.attribution?.session || opts.sourceLabel)}`, 2000, "sender");
+  const machine = opts.attribution && !opts.attribution.host && opts.machine ? ` on ${inert(opts.machine)}` : "";
+  const attr = bounded(`from ${inert(opts.attribution?.session || opts.sourceLabel)}${machine}`, 2000, "sender");
   const imageBlocks = buildImageBlocks(opts.mediaRefs);
   const attachmentText = imageBlocks.map((b) => `Image: ${(b as { alt_text: string }).alt_text}`).join("\n");
+  const evidence = buildEvidenceLink(opts.evidenceLink);
+  const questionParts = q.humanQuestions?.length ? buildQuestionBlocks(q.humanQuestions) : null;
   if (opts.extraBlocks?.length) {
     throw new HumanMessageShapeError("Extra blocks have no complete accessible fallback. Use mediaRefs for images or author supplemental human detail.");
   }
-  const text = bounded([headline, body, attr, attachmentText, opts.reconcileMarker].filter(Boolean).join("\n"), SLACK_TEXT_CAP, "complete fallback");
+  const fallback = (context: string | null) => [headline, context, body, questionParts?.text, attr, evidence ? evidence.text : null, attachmentText, opts.reconcileMarker].filter(Boolean).join("\n");
+  // The gate context line is supplementary: when it alone would push the complete fallback over
+  // budget, the instance part alone is tried, and the line is left out only when even that
+  // doesn't fit, rather than refusing the gate.
+  let shownContext = gateContext;
+  if (gateContext && fallback(gateContext).length > SLACK_TEXT_CAP && fallback(null).length <= SLACK_TEXT_CAP) {
+    const instanceLine = buildGateContextLine(q.tags ?? [], true);
+    shownContext = fallback(instanceLine).length <= SLACK_TEXT_CAP ? instanceLine : null;
+  }
+  const text = bounded(fallback(shownContext), SLACK_TEXT_CAP, "complete fallback");
   const blocks: unknown[] = [{ type: "section", text: { type: "mrkdwn", text: headline } }];
+  if (shownContext) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: shownContext }] });
   if (body.trim()) blocks.push({ type: "section", text: { type: "mrkdwn", text: body } });
-  blocks.push(...imageBlocks, { type: "context", elements: [{ type: "mrkdwn", text: attr }] });
+  if (questionParts) blocks.push(...questionParts.blocks);
+  blocks.push(...imageBlocks);
+  if (evidence) blocks.push(evidence.block);
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: attr }] });
   if (blocks.length > 50) throw new HumanMessageShapeError("Message exceeds 50 Slack blocks. Reduce attachments before sending.");
   return { text, blocks };
 }

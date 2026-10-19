@@ -1,4 +1,6 @@
-import { observeCodexPaneProcess, listNativeProcesses, type NativeProcessLister, type CodexProcessObservation } from "./native-process-lineage.js";
+import { observeClaudePaneProcess, observeClaudePaneRuntime, observeCodexPaneProcess, listNativeProcesses, type NativeProcessLister, type NativeProcessObservation } from "./native-process-lineage.js";
+import { isShellForeground } from "./shell-classifier.js";
+import { claudeResumeRotation } from "./session-registry.js";
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { TmuxAdapter } from "../adapters/tmux.js";
@@ -6,6 +8,8 @@ import type { SeatIdentityVerdict } from "./types.js";
 import { getRuntimeDescriptor } from "./runtime-registry.js";
 import { SeatIdentityStore, SelfHostIdentityStore } from "./seat-identity-store.js";
 import { RESERVED_HOST_IDS, validateHostRegistry } from "./hosts/hosts-registry-reader.js";
+import { agentAppOf } from "./built-in-runtimes.js";
+import { sessionAgentAppSelect } from "./session-registry.js";
 
 /** Default identity-reconcile cadence: 5s. Process identity changes rarely
  *  (a seat's pane/process is stable for its whole life), and the check is
@@ -46,7 +50,11 @@ export function classifyPaneRuntimeMatch(
 ): "match" | "mismatch" {
   if (!command) return "match"; // no signal — never false-mismatch a present pane
   const cmd = command.trim().toLowerCase();
-  const expectsAgent = expectedRuntime === "claude-code" || expectedRuntime === "codex";
+  // Pi and OMP run their agent behind the OpenRig runner (`node`). Their supported launch shapes normally reach `node`
+  // by the time readiness succeeds, but any check can still see a shell: before the launch, or after the agent exits.
+  // Terminal seats deliberately run a shell and are not included.
+  const expectsAgent = expectedRuntime === "claude-code" || expectedRuntime === "codex"
+    || expectedRuntime === "pi" || expectedRuntime === "omp";
 
   // Positive same-runtime signal.
   if (expectedRuntime === "claude-code" && cmd.includes("claude")) return "match";
@@ -88,11 +96,18 @@ interface RunningSeatRow {
   session_name: string;
   tmux_pane: string | null;
   resume_token?: string | null;
+  resume_provenance?: string | null;
+  resume_rotated_from?: string | null;
+  resume_rotated_process?: string | null;
+  resume_launch_process?: string | null;
+  agent_app?: string | null;
 }
+
+type PaneObservation = { pid: number | null; command: string | null };
 
 export interface SeatIdentityReconcilerDeps {
   db: Database.Database;
-  tmux: Pick<TmuxAdapter, "listSessions" | "getPanePid" | "getPaneCommand">;
+  tmux: Pick<TmuxAdapter, "listSessions" | "getPanePid" | "getPaneCommand"> & Partial<Pick<TmuxAdapter, "readAllPaneProcesses" | "listPanes">>;
   now?: () => Date;
   listProcesses?: NativeProcessLister;
 }
@@ -115,6 +130,8 @@ export class SeatIdentityReconciler {
   private readonly store: SeatIdentityStore;
   private readonly listProcesses: NativeProcessLister;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private reconciling = false;
+  private generation = 0;
 
   constructor(deps: SeatIdentityReconcilerDeps) {
     this.db = deps.db;
@@ -127,7 +144,12 @@ export class SeatIdentityReconciler {
   private runningSeats(): RunningSeatRow[] {
     return this.db.prepare(`
       SELECT n.id as node_id, n.runtime as runtime,
-             s.session_name as session_name, b.tmux_pane as tmux_pane, s.resume_token as resume_token
+             s.session_name as session_name, b.tmux_pane as tmux_pane, s.resume_token as resume_token,
+             s.resume_provenance as resume_provenance,
+             s.resume_rotated_from as resume_rotated_from,
+             s.resume_rotated_process as resume_rotated_process,
+             s.resume_launch_process as resume_launch_process,
+             ${sessionAgentAppSelect(this.db)} as agent_app
       FROM nodes n
       JOIN sessions s ON s.node_id = n.id
         AND s.id = (SELECT s2.id FROM sessions s2 WHERE s2.node_id = n.id ORDER BY s2.id DESC LIMIT 1)
@@ -140,6 +162,18 @@ export class SeatIdentityReconciler {
 
   /** Reconcile every running tmux-bound seat once and persist the verdicts. */
   async reconcileAll(): Promise<void> {
+    // Skip ticks while actual reads are pending; never release on a deadline
+    // that could leave subprocesses alive. Normal polling cost is unchanged.
+    if (this.reconciling) return;
+    this.reconciling = true;
+    try {
+      await this.reconcileSweep(this.generation);
+    } finally {
+      this.reconciling = false;
+    }
+  }
+
+  private async reconcileSweep(generation: number): Promise<void> {
     const seats = this.runningSeats();
     // Prune verdicts for nodes no longer running (keep the table bounded).
     this.store.pruneExcept(seats.map((s) => s.node_id));
@@ -158,6 +192,7 @@ export class SeatIdentityReconciler {
     } catch {
       liveSessions = null;
     }
+    if (generation !== this.generation) return;
     if (liveSessions === null || liveSessions.size === 0) {
       for (const seat of seats) {
         this.store.upsert(this.tmuxUnavailableVerdict(seat, observedAt));
@@ -165,24 +200,82 @@ export class SeatIdentityReconciler {
       return;
     }
 
-    // Two fresh process snapshots per sweep, not two ps calls per seat. Each
-    // phase observes every bound pane; the second begins after the first ends.
-    const codexSeats = seats.filter((seat) => seat.runtime === "codex" && seat.tmux_pane && liveSessions.has(seat.session_name));
-    const sample = async () => {
+    const readPanes = async (): Promise<Map<string, PaneObservation>> => {
+      try { return new Map(await this.tmux.readAllPaneProcesses?.() ?? []); }
+      catch { return new Map(); }
+    };
+    let panes = await readPanes();
+    if (generation !== this.generation) return;
+    // Cache the per-pane fallback, including absent PIDs. Selection and verdict
+    // share this observation; direct Claude seats need no additional subprocess.
+    const readPane = async (target: string): Promise<PaneObservation> => {
+      const existing = panes.get(target);
+      if (existing) return existing;
+      const pid = await this.tmux.getPanePid(target);
+      const observed = { pid, command: pid === null ? null : await this.tmux.getPaneCommand(target) };
+      panes.set(target, observed);
+      return observed;
+    };
+
+    // Only wrapped Claude seats need native proof. Tokenless proof also needs
+    // the sole-pane recheck below; do not sample when that capability is absent.
+    const nativeSeats: RunningSeatRow[] = [];
+    for (const seat of seats) {
+      if (!seat.tmux_pane || !liveSessions.has(seat.session_name)) continue;
+      if (seat.runtime === "codex") nativeSeats.push(seat);
+      else if (seat.runtime === "claude-code" && (seat.resume_token != null || this.tmux.listPanes)) {
+        try {
+          let command: string | null;
+          if (this.tmux.readAllPaneProcesses) {
+            const observed = await readPane(seat.tmux_pane);
+            if (observed.pid === null) continue;
+            command = observed.command;
+          } else {
+            // Legacy adapters have no batch. Preserve their independent early
+            // selection and final observation rather than caching an early label.
+            command = await this.tmux.getPaneCommand(seat.tmux_pane);
+          }
+          if (classifyPaneRuntimeMatch(command, seat.runtime) === "mismatch"
+            && isShellForeground(command?.trim().toLowerCase() ?? "")) nativeSeats.push(seat);
+        } catch { /* No proof selected; the final per-seat observation still runs. */ }
+        if (generation !== this.generation) return;
+      }
+    }
+    const sample = async (observations: Map<string, PaneObservation>) => {
       let snapshot: ReturnType<NativeProcessLister> | undefined;
-      return Promise.all(codexSeats.map((seat) => observeCodexPaneProcess({
-        target: seat.tmux_pane!, tmux: this.tmux, expectedToken: seat.resume_token,
+      // Two fresh process snapshots, each paired with its own pane observation.
+      // The first uses the selection batch; the second starts after it settles.
+      const tmux = Object.assign(Object.create(this.tmux) as typeof this.tmux, {
+        getPanePid: async (target: string) => {
+          const observed = observations.get(target);
+          return observed ? observed.pid : this.tmux.getPanePid(target);
+        },
+      });
+      return Promise.all(nativeSeats.map((seat) => (seat.runtime === "codex" ? observeCodexPaneProcess
+        : seat.resume_token !== null && seat.resume_token !== undefined ? observeClaudePaneProcess : observeClaudePaneRuntime)({
+        target: seat.tmux_pane!, tmux, expectedToken: seat.resume_token, rotation: claudeResumeRotation(seat),
         listProcesses: () => snapshot ??= this.listProcesses(),
       })));
     };
-    const first = await sample();
-    const second = await sample();
-    const codexProofs = new Map(codexSeats.map((seat, index) => [seat.node_id,
+    const first = await sample(panes);
+    if (generation !== this.generation) return;
+    const second = nativeSeats.length > 0 ? await sample(await readPanes()) : [];
+    if (generation !== this.generation) return;
+    const nativeProofs = new Map(nativeSeats.map((seat, index) => [seat.node_id,
       first[index] && first[index]?.fingerprint === second[index]?.fingerprint ? second[index]! : null]));
+    if (nativeSeats.length > 0) {
+      // Native proof crossed awaits: final verdicts must not reuse the initial
+      // command/PID (including a direct seat that became a shell meanwhile).
+      panes = await readPanes();
+      if (generation !== this.generation) return;
+    }
     for (const seat of seats) {
       try {
-        this.store.upsert(await this.computeVerdict(seat, liveSessions, observedAt, codexProofs.get(seat.node_id) ?? null));
+        const verdict = await this.computeVerdict(seat, liveSessions, observedAt, nativeProofs.get(seat.node_id) ?? null, panes);
+        if (generation !== this.generation) return;
+        this.store.upsert(verdict);
       } catch {
+        if (generation !== this.generation) return;
         // A single seat's tmux failure must not crash the loop; record it as
         // unavailable observation (non-green for Codex).
         this.store.upsert(this.tmuxUnavailableVerdict(seat, observedAt));
@@ -206,7 +299,8 @@ export class SeatIdentityReconciler {
     seat: RunningSeatRow,
     liveSessions: Set<string>,
     observedAt: string,
-    native: CodexProcessObservation | null,
+    native: NativeProcessObservation | null,
+    panes: Map<string, PaneObservation> | null = null,
   ): Promise<SeatIdentityVerdict> {
     const base = {
       nodeId: seat.node_id,
@@ -236,7 +330,9 @@ export class SeatIdentityReconciler {
       };
     }
 
-    const pid = await this.tmux.getPanePid(seat.tmux_pane);
+    // From the sweep's one batched list-panes when the pane is in it; otherwise read per pane as before.
+    const batched = panes?.get(seat.tmux_pane) ?? null;
+    const pid = batched ? batched.pid : await this.tmux.getPanePid(seat.tmux_pane);
     if (pid === null) {
       // The registered pane no longer resolves. Distinguish "the whole tmux
       // session is gone" from "the pane within a live session is gone".
@@ -250,13 +346,25 @@ export class SeatIdentityReconciler {
       };
     }
 
-    const command = await this.tmux.getPaneCommand(seat.tmux_pane);
-    if (seat.runtime === "codex") {
+    const command = batched ? batched.command : await this.tmux.getPaneCommand(seat.tmux_pane);
+    if (command === null && seat.runtime === "claude-code") {
+      return this.tmuxUnavailableVerdict(seat, observedAt);
+    }
+    if (seat.runtime === "codex" || (seat.runtime === "claude-code" && (seat.resume_token != null || native !== null)
+      && classifyPaneRuntimeMatch(command, seat.runtime) === "mismatch" && isShellForeground(command?.trim().toLowerCase() ?? ""))) {
+      let verified = native?.panePid === pid;
+      if (verified && seat.runtime === "claude-code" && seat.resume_token == null) {
+        // Runtime-only proof must still refer to the sole bound pane after the
+        // two shared process snapshots. It does not clear startup/restore state.
+        const currentPanes = await this.tmux.listPanes?.(seat.session_name).catch(() => []);
+        const currentPid = await this.tmux.getPanePid(seat.tmux_pane).catch(() => null);
+        verified = currentPanes?.length === 1 && currentPanes[0]?.id === seat.tmux_pane && currentPid === pid;
+      }
       return {
-        ...base, verdict: native?.panePid === pid ? "verified" : "mismatch",
-        evidenceSource: "pane_process", reason: native?.panePid === pid ? null : "process_identity_ambiguous",
+        ...base, verdict: verified ? "verified" : "mismatch",
+        evidenceSource: "pane_process", reason: verified ? null : "process_identity_ambiguous",
         evidence: { registeredPane: seat.tmux_pane, observedPid: native?.process.pid ?? pid,
-          observedCommand: native?.process.command ?? command, matchedLayer: native?.panePid === pid ? 1 : null },
+          observedCommand: native?.process.command ?? command, matchedLayer: verified ? 1 : null },
       };
     }
     const match = classifyPaneRuntimeMatch(command, seat.runtime);
@@ -267,6 +375,17 @@ export class SeatIdentityReconciler {
         evidenceSource: "pane_process",
         reason: "process_identity_mismatch",
         evidence: { registeredPane: seat.tmux_pane, observedPid: pid, observedCommand: command, matchedLayer: 1 },
+      };
+    }
+
+    // A community agent app's process doesn't prove which session it is: the pane is live, its identity unconfirmed.
+    if (agentAppOf(seat.agent_app, seat.runtime)) {
+      return {
+        ...base,
+        verdict: "unconfirmed",
+        evidenceSource: "pane_process",
+        reason: "process_identity_unconfirmed",
+        evidence: { registeredPane: seat.tmux_pane, observedPid: pid, observedCommand: command, matchedLayer: null },
       };
     }
 
@@ -292,6 +411,8 @@ export class SeatIdentityReconciler {
 
   /** Stop the scheduler. Safe to call before start or multiple times. */
   stop(): void {
+    // Fence old observations without releasing their flight before settlement.
+    this.generation++;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;

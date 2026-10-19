@@ -102,6 +102,8 @@ export class RigSpecCodec {
     if (spec.cultureFile) doc["culture_file"] = spec.cultureFile;
     // OPR.0.4.8.3 Seam B: rig-level permission_policy ref round-trips through serialization.
     if (spec.permissionPolicy) doc["permission_policy"] = spec.permissionPolicy;
+    if (spec.nonInterruptive !== undefined) doc["non_interruptive"] = spec.nonInterruptive;
+    if (spec.env) doc["env"] = { ...spec.env };
     if (spec.managedBlocks) doc["managed_blocks"] = { ...spec.managedBlocks };
     if (spec.guidance?.trackedFile) doc["guidance"] = { tracked_file: spec.guidance.trackedFile };
     if (spec.docs && spec.docs.length > 0) doc["docs"] = spec.docs.map((d) => ({ path: d.path }));
@@ -160,15 +162,19 @@ export class RigSpecCodec {
         if (m.model) member["model"] = m.model;
         if (m.readinessTimeoutMs !== undefined) member["readiness_timeout_ms"] = m.readinessTimeoutMs;
         if (m.fallbackRuntimes?.length) member["fallback_runtimes"] = [...m.fallbackRuntimes];
+        if (m.effort) member["effort"] = m.effort;
         // OPR.0.4.6.FAC1: role round-trips through spec serialization.
         if (m.role) member["role"] = m.role;
         // OPR.0.4.8.3 Seam B: per-seat permission_policy ref round-trips through spec serialization.
         if (m.permissionPolicy) member["permission_policy"] = m.permissionPolicy;
+        if (m.env) member["env"] = { ...m.env };
         if (m.restorePolicy) member["restore_policy"] = m.restorePolicy;
         if (m.startup) member["startup"] = serializeStartupBlock(m.startup);
         // OPR.0.5.6.20 field, OPR.0.5.6.23 fix: parse carries it (schema
         // normalize), so serialize must too — same silent-erasure class.
         if (m.compactionStrategy) member["compaction_strategy"] = m.compactionStrategy;
+        // Normalize carries the per-member continuity mechanic too; emit it beside its strategy.
+        if (m.mechanic) member["mechanic"] = m.mechanic;
         if (m.sessionSource) {
           member["session_source"] = serializeSessionSource(m.sessionSource);
         }
@@ -194,6 +200,7 @@ function serializeStartupBlock(startup: import("./types.js").StartupBlock): Reco
   return {
     files: startup.files.map((f) => {
       const file: Record<string, unknown> = { path: f.path };
+      if (f.orientation) file["orientation"] = f.orientation;
       if (f.deliveryHint !== "auto") file["delivery_hint"] = f.deliveryHint;
       if (!f.required) file["required"] = false;
       if (f.appliesOn.length !== 2 || !f.appliesOn.includes("fresh_start") || !f.appliesOn.includes("restore")) {
@@ -234,6 +241,7 @@ export class LegacyRigSpecCodec {
         const n: Record<string, unknown> = { id: node.id, runtime: node.runtime };
         if (node.role != null) n["role"] = node.role;
         if (node.model != null) n["model"] = node.model;
+        if (node.effort != null) n["effort"] = node.effort;
         if (node.cwd != null) n["cwd"] = node.cwd;
         if (node.surfaceHint != null) n["surface_hint"] = node.surfaceHint;
         if (node.workspace != null) n["workspace"] = node.workspace;

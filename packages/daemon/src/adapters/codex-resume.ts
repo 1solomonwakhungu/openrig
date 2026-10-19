@@ -1,12 +1,17 @@
+import { codexTeamWorkspaceArg, type PrepareCodexTeamWorkspace } from "../domain/codex-team-workspace.js";
+import { operationalLaunchArg } from "./kernel-authority.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { TmuxAdapter } from "./tmux.js";
+import type { SeatLaunchEnvironment } from "../domain/seat-launch-environment.js";
 import type { ResumeResult } from "./claude-resume.js";
 import { assessNativeResumeProbe, buildCodexResumeCore } from "../domain/native-resume-probe.js";
+import { verifyPaneIdleShell, type NativeProcessLister } from "../domain/native-process-lineage.js";
 import { runSyncSite } from "../domain/sync-site-wrap.js";
 import { shellQuote } from "./shell-quote.js";
 import { codexPostureArg } from "./yolo-mode.js";
 import { observeCodexSandbox } from "../domain/permission-drift.js";
 import { unknownDaemonSupportMessage, type CodexDaemonSupportDetector } from "../domain/codex-daemon-support.js";
+import { codexNetworkDefaultArg, type CodexNetworkDefaultReader } from "../domain/codex-network-default.js";
 
 const CODEX_TYPES = new Set(["codex_id", "codex_last"]);
 const SHELL_COMMANDS = new Set(["bash", "fish", "nu", "sh", "tmux", "zsh"]);
@@ -14,13 +19,22 @@ const SHELL_COMMANDS = new Set(["bash", "fish", "nu", "sh", "tmux", "zsh"]);
 export { type ResumeResult };
 
 interface CodexResumeOptions {
+  prepareTeamWorkspace?: PrepareCodexTeamWorkspace;
+  seatLaunchEnvironment?: SeatLaunchEnvironment;
   launchPath?: string;
+  codexHome?: string;
   pollMs?: number;
   maxWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
   exec?: (cmd: string) => Promise<string>;
   /** #69: whether the installed Codex supports --no-daemon; absent keeps the existing invocation. */
   detectDaemonSupport?: CodexDaemonSupportDetector;
+  /** #275: Codex's own answer on the plain floor's network default; absent keeps the existing invocation. */
+  readNetworkDefault?: CodexNetworkDefaultReader;
+  /** Ensure the managed Codex config (hooks, trust) just before a resume, as a runtime-adapter launch does. */
+  ensureManagedConfig?: () => Promise<void>;
+  /** Process rows for the idle-shell check; defaults to the OS listing. */
+  listProcesses?: NativeProcessLister;
 }
 
 export class CodexResumeAdapter {
@@ -45,11 +59,16 @@ export class CodexResumeAdapter {
     cwd: string,
     codexConfigProfile?: string | null,
     // OPR.0.4.8.3 Seam B: persisted resolved posture threaded from restore.
-    resolvedPosture?: "floor" | "full_bypass",
+    resolvedPosture?: "floor" | "full_bypass" | "auto",
     // 0.5.2-07: the seat's SPEC-pinned model. TRAILING param so existing positional callers that pass
     // resolvedPosture as the 6th arg stay correct; threaded so the legacy (non-pod-aware) restore boots
     // the resumed seat on its spec model, not the runtime default; absent → command byte-identical.
     model?: string | null,
+    // #75: optional reasoning effort for the seat.
+    effort?: string | null,
+    nonInterruptive?: boolean,
+    kernelAuthority?: boolean,
+    teamPermissionDefault?: boolean,
     /** The seat's readiness window (rig spec readiness_timeout_ms); replaces maxWaitMs. */
     readinessTimeoutMs?: number,
   ): Promise<ResumeResult> {
@@ -57,15 +76,19 @@ export class CodexResumeAdapter {
       return { ok: false, code: "no_resume", message: "Codex resume not available" };
     }
 
+    await this.options.ensureManagedConfig?.();
+
     if (codexConfigProfile?.trim()) {
       const { verifyCodexProfileLoads } = await import("../domain/codex-profile-preflight.js");
       const execFn = this.options.exec ?? (async (cmd: string) => {
         const { execSync } = await import("node:child_process");
         return runSyncSite("codex.resume.profile_preflight", () =>
-          execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 10_000 })
+          execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: 10_000,
+            ...(this.options.codexHome ? { cwd, env: { ...process.env, CODEX_HOME: this.options.codexHome, ...(this.options.launchPath ? { PATH: this.options.launchPath } : {}) } } : {}),
+          })
         );
       });
-      const probeResult = await verifyCodexProfileLoads(codexConfigProfile, execFn);
+      const probeResult = await verifyCodexProfileLoads(codexConfigProfile, execFn, undefined, this.options.codexHome);
       if (!probeResult.ok) {
         return {
           ok: false,
@@ -82,27 +105,36 @@ export class CodexResumeAdapter {
     }
 
     const profileArg = codexConfigProfile ? ` -p ${shellQuote(codexConfigProfile)}` : "";
-    const postureArg = codexPostureArg(profileArg, process.env, resolvedPosture);
-    const appliedLaunch = observeCodexSandbox(postureArg);
+    const posture = codexPostureArg(profileArg, process.env, resolvedPosture);
+    const appliedLaunch = observeCodexSandbox(posture);
+    const postureArg = posture + operationalLaunchArg("codex", { kernelAuthority, teamPermissionDefault, nonInterruptive, launchPosture: resolvedPosture });
+    const networkArg = await codexNetworkDefaultArg(this.options.readNetworkDefault, appliedLaunch, cwd, tmuxSessionName);
+    const workspaceArg = teamPermissionDefault && !codexConfigProfile?.trim()
+      && appliedLaunch.state === "observed" && appliedLaunch.value === "workspace-write"
+      ? codexTeamWorkspaceArg(this.options.prepareTeamWorkspace, tmuxSessionName) : "";
     const cmd = buildCodexResumeCore(
       resumeToken ?? "",
       codexConfigProfile,
       resumeType === "codex_last",
-      undefined,
+      workspaceArg.trim() || undefined,
       resolvedPosture,
       model,
-      postureArg,
+      `${postureArg}${networkArg}`,
       daemonSupport?.kind === "supported",
+      effort,
     );
 
-    const textResult = await this.tmux.sendShellCommand(tmuxSessionName, this.options.launchPath
-      ? `env PATH=${shellQuote(this.options.launchPath)} ${cmd}` : cmd);
+    const launchEnv = [this.options.launchPath ? `PATH=${shellQuote(this.options.launchPath)}` : "", this.options.codexHome ? `CODEX_HOME=${shellQuote(this.options.codexHome)}` : ""].filter(Boolean);
+    const textResult = await this.tmux.sendShellCommand(tmuxSessionName, this.options.seatLaunchEnvironment
+      ? await this.options.seatLaunchEnvironment.command(tmuxSessionName, cmd, { codexCwd: cwd, runtime: "codex" })
+      : launchEnv.length ? `env ${launchEnv.join(" ")} ${cmd}` : cmd);
     if (!textResult.ok) {
       return { ok: false, code: "resume_failed", message: textResult.message };
     }
 
     const result = await this.verifyResume(tmuxSessionName, readinessTimeoutMs);
-    return result.ok ? { ...result, appliedLaunch } : result;
+    const launchFacts = daemonSupport ? { ...appliedLaunch, daemonOptOut: daemonSupport.kind === "supported" } : appliedLaunch;
+    return result.ok ? { ...result, appliedLaunch: launchFacts } : result;
   }
 
   // Mirrors ClaudeResumeAdapter.verifyResume: poll the pane, run the native
@@ -163,15 +195,45 @@ export class CodexResumeAdapter {
       paneContent: finalContent,
     });
 
+    // The final native observation can carry the same positive evidence as a
+    // loop observation. Preserve it before the generic shell/timeout fallback.
+    if (finalProbe.code === "no_saved_session") {
+      return {
+        ok: false,
+        code: "retry_fresh",
+        message: "Codex resume failed: no saved session found for the requested token",
+      };
+    }
+
+    if (finalProbe.status === "attention_required") {
+      return {
+        ok: false,
+        code: "attention_required",
+        message: finalProbe.detail,
+        evidence: finalContent.split("\n").slice(-12).join("\n"),
+      };
+    }
+
     if (finalProbe.status === "resumed") {
       return { ok: true };
     }
 
     if (finalCommand && SHELL_COMMANDS.has(finalCommand)) {
+      // A shell label alone isn't a return to the shell: a launch script still starting Codex holds the pane the
+      // same way. Only a proven, stable idle shell ends the resume; anything else keeps the launch for attention.
+      if (await verifyPaneIdleShell({ target: tmuxSessionName, tmux: this.tmux,
+        ...(this.options.listProcesses ? { listProcesses: this.options.listProcesses } : {}) })) {
+        return {
+          ok: false,
+          code: "retry_fresh",
+          message: "Codex resume failed: pane returned to shell instead of entering Codex",
+        };
+      }
       return {
         ok: false,
-        code: "retry_fresh",
-        message: "Codex resume failed: pane returned to shell instead of entering Codex",
+        code: "attention_required",
+        message: "Codex resume could not be verified; launch retained: the pane shows a shell that isn't a proven idle shell, so a launch script may still be starting Codex.",
+        evidence: finalContent.split("\n").slice(-12).join("\n"),
       };
     }
 

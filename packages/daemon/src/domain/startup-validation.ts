@@ -18,6 +18,9 @@ const VALID_APPLIES_ON = new Set(["fresh_start", "restore"]);
  * @returns array of error strings
  */
 export function validateStartupFile(raw: Record<string, unknown>, index: number, prefix: string): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return [`${prefix}files[${index}]: must be an object`];
+  }
   const errors: string[] = [];
   // Slice-03 V3: startup artifacts are files only. Context packs are composed
   // by `rig context` and delivered only through dedicated delivery verbs.
@@ -27,6 +30,9 @@ export function validateStartupFile(raw: Record<string, unknown>, index: number,
     return errors;
   }
   if (kind !== "file") errors.push(`${prefix}files[${index}].kind: must be file (got "${kind}")`);
+  if (raw["orientation"] !== undefined && raw["orientation"] !== "role") {
+    errors.push(`${prefix}files[${index}].orientation: must be role`);
+  }
   const pathErr = validateSafePath(raw["path"] as string, `${prefix}files[${index}].path`);
   if (pathErr) errors.push(pathErr);
   if (raw["delivery_hint"] !== undefined && !VALID_DELIVERY_HINTS.has(raw["delivery_hint"] as string)) {
@@ -152,6 +158,7 @@ export function normalizeStartupBlock(raw: unknown): StartupBlock {
     ? (obj["files"] as Record<string, unknown>[]).map((f) => ({
           kind: "file" as const,
           path: f["path"] as string,
+          ...(f["orientation"] === "role" ? { orientation: "role" as const } : {}),
           deliveryHint: (f["delivery_hint"] as StartupFile["deliveryHint"]) ?? "auto",
           required: f["required"] !== false,
           appliesOn: Array.isArray(f["applies_on"])

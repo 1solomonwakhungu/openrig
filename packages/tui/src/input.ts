@@ -6,11 +6,15 @@ import type { Action, InputEvent, Screen, ViewState } from "./types.js";
 import { specDetailArrowsScroll } from "./state.js";
 import { StringDecoder } from "node:string_decoder";
 
-function parseText(text: string, final: boolean): { events: InputEvent[]; remainder: string } {
+function parseText(text: string, final: boolean, skipLF = false): { events: InputEvent[]; remainder: string; skipLF: boolean } {
   const events: InputEvent[] = [];
   let i = 0;
   while (i < text.length) {
     const ch = text[i] ?? "";
+    if (skipLF) {
+      skipLF = false;
+      if (ch === "\n") { i += 1; continue; }
+    }
     if (ch === "\x1b") {
       const tail = text.slice(i);
       if (!final && "\x1b[200~".startsWith(tail)) break;
@@ -70,13 +74,21 @@ function parseText(text: string, final: boolean): { events: InputEvent[]; remain
         if (!final && /^\x1b\[[0-?]*[ -/]*$/.test(tail)) break;
       }
       if (!final && tail === "\x1bO") break;
-      if (/^\x1bO[@-~]/.test(tail)) { i += 3; continue; }
+      if (/^\x1bO[@-~]/.test(tail)) {
+        // Application-cursor mode sends SS3 arrows instead of CSI arrows.
+        const code = text[i + 2];
+        const key = code === "A" ? "up" : code === "B" ? "down" : code === "C" ? "right" : code === "D" ? "left" : null;
+        if (key) events.push({ type: "key", key, action: { type: "select", delta: key === "down" ? 1 : key === "up" ? -1 : 0 } });
+        i += 3;
+        continue;
+      }
       events.push({ type: "key", key: "escape" });
       i += 1;
       continue;
     }
     if (ch === "\t") { events.push({ type: "key", key: "tab" }); i += 1; continue; }
     if (ch === "\r" || ch === "\n") {
+      skipLF = ch === "\r";
       events.push({ type: "key", key: "enter", action: { type: "activate" } });
       i += 1;
       continue;
@@ -90,7 +102,7 @@ function parseText(text: string, final: boolean): { events: InputEvent[]; remain
     if (char >= " ") events.push({ type: "char", ch: char });
     i += char.length;
   }
-  return { events, remainder: text.slice(i) };
+  return { events, remainder: text.slice(i), skipLF };
 }
 
 export interface InputDecoder {
@@ -106,16 +118,19 @@ export interface InputDecoder {
 export function createInputDecoder(): InputDecoder {
   const utf8 = new StringDecoder("utf8");
   let pending = "";
+  let skipLF = false;
   return {
     write(bytes) {
       pending += typeof bytes === "string" ? bytes : utf8.write(bytes);
-      const parsed = parseText(pending, false);
+      const parsed = parseText(pending, false, skipLF);
       pending = parsed.remainder;
+      skipLF = parsed.skipLF;
       return parsed.events;
     },
     flush() {
-      const parsed = parseText(pending, true);
+      const parsed = parseText(pending, true, skipLF);
       pending = parsed.remainder;
+      skipLF = parsed.skipLF;
       return parsed.events;
     },
     hasPending() {
@@ -203,7 +218,8 @@ export function resolveMouseAction(
   explorerCount: number,
 ): Action | null {
   void state;
-  if ((event.button & 64) === 0) return null;
+  // Bit 1 marks the horizontal wheel (66 left, 67 right); this pane only scrolls vertically.
+  if ((event.button & 64) === 0 || (event.button & 2) !== 0) return null;
   const delta = (event.button & 1) !== 0 ? 3 : -3;
   return event.x <= screen.explorerWidth
     ? { type: "select", delta, rowCount: explorerCount }

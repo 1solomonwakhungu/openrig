@@ -11,6 +11,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import type { TmuxAdapter } from "./tmux.js";
+import type { SeatLaunchEnvironment } from "../domain/seat-launch-environment.js";
 import type { ResumeResult } from "./claude-resume.js";
 import { piTrust, yoloEnabled } from "./yolo-mode.js";
 import {
@@ -28,12 +29,17 @@ export interface PiResumeFsOps {
 }
 
 interface PiResumeOptions {
+  seatLaunchEnvironment?: SeatLaunchEnvironment;
   pollMs?: number;
   maxWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
   trustPosture?: "approve" | "no-approve";
   /** Launch-attempt id minting (tests inject; defaults to randomUUID). */
   newLaunchId?: () => string;
+  /** OPR.0.7.0.2: whether usage.pi_cost_facts is on, read at each resume (absent = off). */
+  usageFactsEnabled?: () => boolean;
+  /** OPR.0.7.0.2 K4: whether usage.pi_openrouter_charge is on, read at each resume (absent = off). */
+  openRouterChargeEnabled?: () => boolean;
 }
 
 export class PiResumeAdapter {
@@ -58,7 +64,7 @@ export class PiResumeAdapter {
     cwd: string,
     model?: string | null,
     // OPR.0.4.8.3 Seam B: persisted resolved posture (resource-trust wording for Pi).
-    resolvedPosture?: "floor" | "full_bypass",
+    resolvedPosture?: "floor" | "full_bypass" | "auto",
     /** The seat's readiness window (rig spec readiness_timeout_ms); replaces maxWaitMs. */
     readinessTimeoutMs?: number,
   ): Promise<ResumeResult> {
@@ -108,20 +114,22 @@ export class PiResumeAdapter {
       trust,
       sessionFile,
       launchId,
+      usageFacts: this.runtime === "pi" && (this.options.usageFactsEnabled?.() ?? false),
+      openRouterCharge: this.runtime === "pi" && (this.options.openRouterChargeEnabled?.() ?? false),
     });
 
-    const textResult = await this.tmux.sendText(tmuxSessionName, cmd);
+    const command = this.runtime === "pi" && this.options.seatLaunchEnvironment
+      ? await this.options.seatLaunchEnvironment.command(tmuxSessionName, cmd, { runtime: this.runtime })
+      : cmd;
+    // Short commands retain the direct path; long commands exec from a private script.
+    let textResult = await this.tmux.sendShellCommand(tmuxSessionName, command, undefined, { stageIfLong: true, execInScript: true });
+    // This refusal precedes any input: retain the bare-command fallback when routing cannot fit.
+    if (!textResult.ok && textResult.code === "launch_path_too_long" && command !== cmd) {
+      textResult = await this.tmux.sendShellCommand(tmuxSessionName, cmd, undefined, { stageIfLong: true, execInScript: true });
+    }
     if (!textResult.ok) {
       return { ok: false, code: "resume_failed", message: textResult.message };
     }
-    const keyResult = await this.tmux.sendKeys(tmuxSessionName, ["Enter"]);
-    if (!keyResult.ok) {
-      // Partial failure: command text is in the buffer but Enter failed.
-      // Best-effort cleanup: send C-c to clear the typed command.
-      await this.tmux.sendKeys(tmuxSessionName, ["C-c"]);
-      return { ok: false, code: "resume_failed", message: keyResult.message };
-    }
-
     const result = await this.verifyResume(tmuxSessionName, sessionFile, launchId, readinessTimeoutMs);
     return result.ok ? { ...result, appliedLaunch } : result;
   }

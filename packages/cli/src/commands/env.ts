@@ -24,7 +24,12 @@ Examples:
   }
 
   async function resolveRigId(client: DaemonClient, rigRef: string): Promise<string> {
-    const summaries = await client.get<Array<{ id: string; name: string }>>("/api/rigs/summary");
+    const summaries = await client.get<Array<{ id: string; name: string }> | { error?: string }>("/api/rigs/summary");
+    if (summaries.status >= 400) {
+      const error = !Array.isArray(summaries.data) ? summaries.data?.error : undefined;
+      throw new Error(error ?? `Failed to list rigs (HTTP ${summaries.status})`);
+    }
+    if (!Array.isArray(summaries.data)) throw new Error("The daemon returned an invalid rig summary.");
     const match = summaries.data.find((r) => r.name === rigRef || r.id === rigRef);
     if (!match) throw new Error(`Rig '${rigRef}' not found`);
     return match.id;
@@ -47,6 +52,13 @@ Examples:
 
       const res = await client.get<Record<string, unknown>>(`/api/rigs/${encodeURIComponent(rigId)}/env`);
 
+      if (res.status >= 400) {
+        if (opts.json) console.log(JSON.stringify(res.data, null, 2));
+        else console.error(res.data?.["error"] ?? `Failed to get service status (HTTP ${res.status})`);
+        process.exitCode = res.status >= 500 ? 2 : 1;
+        return;
+      }
+
       if (opts.json) {
         console.log(JSON.stringify(res.data, null, 2));
         return;
@@ -58,6 +70,12 @@ Examples:
       }
 
       const receipt = res.data["receipt"] as Record<string, unknown> | null;
+      const probeStatus = res.data["probeStatus"];
+      if (probeStatus === "stale" || probeStatus === "no_orchestrator") {
+        const probeError = res.data["probeError"];
+        console.error(`Service status is ${probeStatus === "stale" ? "stale" : "unverified"} (probe: ${probeStatus}); ${receipt ? "showing the saved receipt" : "no saved receipt is available"}.${typeof probeError === "string" && probeError ? ` ${probeError}` : ""}`);
+      }
+
       if (!receipt) {
         console.log("Services configured but no receipt available yet.");
         return;
@@ -120,7 +138,7 @@ Examples:
         console.error((err as Error).message); process.exitCode = 1; return;
       }
 
-      const res = await client.post<{ ok: boolean; error?: string }>(
+      const res = await client.post<{ ok: boolean; error?: string; kept?: string }>(
         `/api/rigs/${encodeURIComponent(rigId)}/env/down`,
         { volumes: opts.volumes ?? false },
         { timeoutMs: LONG_RUNNING_TIMEOUT_MS },
@@ -132,7 +150,7 @@ Examples:
         return;
       }
 
-      console.log(`Services stopped for ${rig}.`);
+      console.log(res.data.kept ?? `Services stopped for ${rig}.`);
     });
 
   return cmd;

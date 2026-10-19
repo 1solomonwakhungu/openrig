@@ -3,11 +3,14 @@ import type Database from "better-sqlite3";
 import { createDb } from "../src/db/connection.js";
 import { migrate } from "../src/db/migrate.js";
 import { ALL_MIGRATIONS } from "../src/db/all-migrations.js";
+import { eventsNodeTypeIndexSchema } from "../src/db/migrations/047_events_node_type_index.js";
 import { inventoryEventIndexesSchema } from "../src/db/migrations/084_inventory_event_indexes.js";
+import { sessionStopIntentSchema } from "../src/db/migrations/103_session_stop_intent.js";
 import { getNodeInventory, getNodeInventoryForRigs } from "../src/domain/node-inventory.js";
 
-const THROUGH = ALL_MIGRATIONS.filter(m => m.name <= inventoryEventIndexesSchema.name);
-const BEFORE = THROUGH.filter(m => m.name < inventoryEventIndexesSchema.name);
+// Current readers need the stop-intent column; only the index under test differs.
+const THROUGH = [...ALL_MIGRATIONS.filter(m => m.name <= inventoryEventIndexesSchema.name), sessionStopIntentSchema];
+const BEFORE = THROUGH.filter(m => m.name !== inventoryEventIndexesSchema.name);
 const databases: Database.Database[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 function database() { const db = createDb(); databases.push(db); return db; }
@@ -63,10 +66,30 @@ function expectIndexed(db: Database.Database) {
   const restore = plans.filter(p => p.sql.includes("restore.outcome_reconciled"));
   expect(restore.find(p => !p.args.length)?.detail).toContain("idx_events_restore_seq");
   expect(restore.find(p => p.args.length)?.detail).toContain("idx_events_restore_rig_seq");
+  // Attempt binding must not reintroduce a scan of unrelated activity events.
+  expect(restore).toHaveLength(2); // Fleet and selected-rig reads.
+  for (const plan of restore) {
+    expect(plan.detail).toContain("idx_events_node_type_seq (node_id=? AND type=?)");
+    expect(plan.detail).not.toContain("idx_events_rig_seq");
+  }
   expect(plans.find(p => p.sql.includes("node.startup_challenged"))?.detail).toContain("idx_events_startup_node_seq");
 }
 
 describe("084 inventory event read indexes", () => {
+  it("preserves rig and fleet inventory when the optional node/type index is absent", () => {
+    const db = database();
+    migrate(db, THROUGH.filter(m => m.name !== eventsNodeTypeIndexSchema.name));
+    seed(db);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_events_node_type_seq'").get()).toBeUndefined();
+    const value = projection(db), history = rows(db);
+    expect(value.selected[0]?.restoreOutcome).toBe("operator_recovered");
+    expect(value.all).toHaveLength(2);
+    migrate(db, [eventsNodeTypeIndexSchema]);
+    expectIndexed(db);
+    expect(projection(db)).toEqual(value);
+    expect(rows(db)).toEqual(history);
+  });
+
   it("upgrades the actual read plans without changing history, membership or newest-event meaning", () => {
     const db = database(); migrate(db, BEFORE); seed(db);
     const value = projection(db), history = rows(db);

@@ -17,7 +17,7 @@ import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TmuxAdapter } from "../tmux.js";
 import { shellQuote } from "../shell-quote.js";
-import { effectiveLaunchPosture, type ResolvedLaunchPosture } from "../yolo-mode.js";
+import { effectiveLaunchPosture, type CliLaunchPosture, type ResolvedLaunchPosture } from "../yolo-mode.js";
 import { PI_ENV_BASELINE_VARS, PI_ENV_OPENRIG_VARS } from "../pi-runner-protocol.js";
 import {
   ATTENTION_REQUIRED_READINESS_CODES,
@@ -74,7 +74,7 @@ export const ACTIVITY_STATUS_LINES = 12;
 export interface TuiCliLaunchInput {
   binding: NodeBinding;
   /** Effective posture: the seat's resolved policy, else the OPENRIG_YOLO decision. */
-  posture: ResolvedLaunchPosture;
+  posture: CliLaunchPosture;
   /** Persisted token being resumed. */
   resumeToken?: string;
   forkSource?: ForkSource;
@@ -636,7 +636,10 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       return { ok: false, error: `${this.runtime} resume: could not check the resume target (${(err as Error).message})`, recovery: "attention_required" };
     }
     if (result.ok) return null;
-    return { ok: false, error: `${this.runtime} resume: ${result.reason}`, recovery: result.recovery ?? "retry_fresh" };
+    const recovery = result.recovery ?? "retry_fresh";
+    // retry_fresh here always means the resume target is gone: the runtime's own report of a
+    // missing conversation, which is what restore rolls back as unresumable.
+    return { ok: false, error: `${this.runtime} resume: ${result.reason}`, recovery, ...(recovery === "retry_fresh" ? { missingConversation: true as const } : {}) };
   }
 
   private async prepare(input: {
@@ -789,6 +792,8 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return {
       ok: false, error: `${this.runtime} launch: ${reason}`, recovery, evidence: this.evidence(content),
       ...(attentionCode ? { attentionCode } : {}),
+      // A TUI CLI reports retry_fresh only for a missing resume target (see errorPatterns).
+      ...(recovery === "retry_fresh" ? { missingConversation: true as const } : {}),
     };
   }
 
