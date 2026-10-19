@@ -357,6 +357,24 @@ describe("OMP RPC lifecycle", () => {
     expect(activity.at(-1)).toMatchObject({ hookEvent: "Stop" });
   });
 
+  it.each(["invalid-attempt", "new-turn", "new-agent", "success-summary", "terminal", "unmatched-then-matched"])(
+    "invalidates retry-summary correlation at %s", boundary => {
+      const { core, activity } = runner();
+      const emit = (event: Record<string, unknown>) => core.handlePiLine(JSON.stringify(event));
+      emit({ type: "agent_start" });
+      emit({ type: "auto_retry_start", attempt: boundary === "invalid-attempt" ? "3" : 3 });
+      emit({ type: "message_end", message: { role: "assistant", stopReason: "error", errorStatus: 529, errorMessage: "busy" } });
+      if (boundary === "new-turn") emit({ type: "turn_start" });
+      if (boundary === "new-agent") emit({ type: "agent_start" });
+      if (boundary === "success-summary") emit({ type: "auto_retry_end", success: true, attempt: 3 });
+      if (boundary === "terminal") emit({ type: "agent_end", isTerminal: true });
+      if (boundary === "unmatched-then-matched") emit({ type: "auto_retry_end", success: false, attempt: 2, finalError: "busy" });
+      emit({ type: "auto_retry_end", success: false, attempt: 3, finalError: "busy" });
+      emit({ type: "agent_end", isTerminal: true });
+      expect(activity.at(-1)).toMatchObject({ hookEvent: "Notification", subtype: "runtime_error" });
+    },
+  );
+
   it("keeps approval attention when it follows a typed transient failure", () => {
     const { core, activity } = runner();
     core.handlePiLine(JSON.stringify({ type: "turn_end", message: { role: "assistant", stopReason: "error", errorStatus: 529 } }));

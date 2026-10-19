@@ -392,6 +392,11 @@ export class RunnerCore {
   /** Whether the last activity posted is that attention. Later activity in
    *  the same turn (a tool call after a denied approval) replaces it. */
   private attentionIsLatest = false;
+  // Native OMP retry summaries have no message/status. Correlate only within
+  // the announced attempt, using the latest typed assistant failure's exact
+  // diagnostic as an identity check, never as a transient-error classifier.
+  private retryAttempt: number | null = null;
+  private retryFailure: string | null = null;
   /** Set once the daemon confirms it persisted the resume token. */
   private identityPersisted = false;
   private identityInFlight = false;
@@ -730,6 +735,14 @@ export class RunnerCore {
 
     if (this.runtime === "omp") {
       if (event.type === "agent_start") this.clearAttention();
+      if (event.type === "agent_start" || event.type === "turn_start"
+        || (event.type === "message_start" && message?.role === "assistant")
+        || ((event.type === "message_end" || event.type === "turn_end")
+          && message?.role === "assistant" && message.stopReason !== "error")) this.retryFailure = null;
+      if (event.type === "auto_retry_start") {
+        this.retryAttempt = Number.isInteger(event.attempt) && (event.attempt as number) > 0 ? event.attempt as number : null;
+        this.retryFailure = null;
+      }
       // A successful automatic retry supersedes the failed attempt.
       if (event.type === "auto_retry_start" && (this.attention === "runtime_error" || this.attention === "transient_turn_error")) this.clearAttention();
       // Some paths omit agent_start; turn_start still opens a new turn.
@@ -763,9 +776,27 @@ export class RunnerCore {
       // guard at agent_end. Unknown/auth/configuration failures stay attention;
       // diagnostic prose is never used to decide whether a retry is safe.
       const status = message?.errorStatus;
-      const transient = message?.role === "assistant" && message.stopReason === "error"
+      const transient = (event.type === "message_end" || event.type === "turn_end")
+        && message?.role === "assistant" && message.stopReason === "error"
         && typeof status === "number" && [408, 429, 500, 502, 503, 504, 529].includes(status);
-      if (this.runtime === "omp") this.raiseAttention(transient ? "transient_turn_error" : "runtime_error");
+      if (this.runtime === "omp") {
+        const retrySummary = event.type === "auto_retry_end" && event.success === false
+          && this.retryAttempt !== null && event.attempt === this.retryAttempt
+          && this.retryFailure !== null && event.finalError === this.retryFailure
+          && event.message === undefined && event.error === undefined;
+        if (event.type !== "auto_retry_end") {
+          this.retryFailure = transient && this.retryAttempt !== null && typeof message?.errorMessage === "string"
+            && message.errorMessage.length > 0 ? message.errorMessage : null;
+        } else if (!retrySummary) {
+          this.retryFailure = null;
+        }
+        this.raiseAttention(transient || retrySummary ? "transient_turn_error" : "runtime_error");
+      }
+    }
+    if (this.runtime === "omp" && (event.type === "auto_retry_end" && event.success === true
+      || event.type === "agent_end" && event.isTerminal !== false)) {
+      this.retryAttempt = null;
+      this.retryFailure = null;
     }
     if (!mapped.activity) return;
     if (event.type === "agent_end" && this.attention === "transient_turn_error") this.clearAttention();
