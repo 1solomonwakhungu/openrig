@@ -32,6 +32,7 @@ export class EventBus {
   private subscribers = new Set<Subscriber>();
   private activeEnvelope: ActiveEnvelope | null = null;
   private drainingNotifyRows = false;
+  private notifyingSubscribers = false;
   private notifyEnvelopeRuns = 0;
   private notifyDrainStatus: NotifyDrainStatus;
   readonly db: Database.Database;
@@ -163,13 +164,21 @@ export class EventBus {
    * Does NOT insert into DB. Subscriber errors are isolated.
    */
   notifySubscribers(event: PersistedEvent): void {
+    // A subscriber may persist another event. Finish this event's fanout
+    // before draining those rows, so all observers see each seq once in order.
+    if (this.notifyingSubscribers) return;
     const nestedRowsStartAfter = this.maxSeq();
-    for (const subscriber of this.subscribers) {
-      try {
-        subscriber(event);
-      } catch (err) {
-        console.error("EventBus subscriber error:", err);
+    this.notifyingSubscribers = true;
+    try {
+      for (const subscriber of this.subscribers) {
+        try {
+          subscriber(event);
+        } catch (err) {
+          console.error("EventBus subscriber error:", err);
+        }
       }
+    } finally {
+      this.notifyingSubscribers = false;
     }
     this.notifyDrainStatus.watermark = Math.max(this.notifyDrainStatus.watermark, event.seq);
     if (!this.drainingNotifyRows) {
@@ -200,8 +209,33 @@ export class EventBus {
     return rows.map((row) => this.rowToPersistedEvent(row));
   }
 
+  private pageStatements?: { all: Database.Statement; rig: Database.Statement };
+
+  /** Up to `limit` events after `seq` and up to `upTo`, oldest first, of one rig when `rigId` is given: a replay read a
+   *  page at a time, which events stored meanwhile never lengthen. */
+  replayPage(seq: number, upTo: number, limit: number, rigId?: string): PersistedEvent[] {
+    this.pageStatements ??= {
+      all: this.db.prepare("SELECT seq, rig_id, node_id, type, payload, created_at FROM events WHERE seq > ? AND seq <= ? ORDER BY seq LIMIT ?"),
+      rig: this.db.prepare("SELECT seq, rig_id, node_id, type, payload, created_at FROM events WHERE rig_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?"),
+    };
+    const rows = (rigId ? this.pageStatements.rig.all(rigId, seq, upTo, limit) : this.pageStatements.all.all(seq, upTo, limit)) as EventRow[];
+    return rows.map((row) => this.rowToPersistedEvent(row));
+  }
+
+  /** The seq after which the newest `count` events start (of one rig when `rigId` is given): 0 when there are no more
+   *  than `count`, the newest seq for 0. A count past a safe integer is more than any log holds: never an OFFSET SQLite
+   *  cannot take. */
+  seqBeforeNewest(count: number, rigId?: string): number {
+    if (count === 0) return this.maxSeq();
+    if (!Number.isSafeInteger(count)) return 0;
+    const row = (rigId
+      ? this.db.prepare("SELECT seq FROM events WHERE rig_id = ? ORDER BY seq DESC LIMIT 1 OFFSET ?").get(rigId, count)
+      : this.db.prepare("SELECT seq FROM events ORDER BY seq DESC LIMIT 1 OFFSET ?").get(count)) as { seq: number } | undefined;
+    return row?.seq ?? 0;
+  }
+
   private drainNotifyRowsToQuiescence(startAfter: number): void {
-    if (this.drainingNotifyRows) return;
+    if (this.drainingNotifyRows || this.notifyingSubscribers) return;
     this.drainingNotifyRows = true;
     let cursor = startAfter;
     try {
@@ -240,7 +274,8 @@ export class EventBus {
     }
   }
 
-  private maxSeq(): number {
+  /** The newest stored event's seq, 0 for an empty log. */
+  maxSeq(): number {
     const row = this.db.prepare("SELECT MAX(seq) AS seq FROM events").get() as {
       seq: number | null;
     };

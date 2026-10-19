@@ -108,6 +108,7 @@ describe("Session routes", () => {
     expect(body[0].sessionName).toBe("r01-dev1-impl");
   });
 
+
   it("POST clear-attention re-scopes a legacy attempt-zero reconciliation to the real restore attempt", async () => {
     const tmux = {
       ...mockTmuxAdapter(),

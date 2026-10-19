@@ -19,7 +19,7 @@ import type { CliRuntimeRegistration } from "../types.js";
 import { anyPanePhrase, panePhrase } from "../pane-phrase.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
-import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
+import type { CliLaunchPosture, ResolvedLaunchPosture } from "../../yolo-mode.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
 import { grokAuthStatus } from "../auth-status.js";
@@ -54,7 +54,7 @@ export function grokSessionExists(home: string, sessionId: string): boolean {
 /** The permission argument each posture emits, as recorded for permission
  *  drift: `--permission-mode acceptEdits` (floor) or `--always-approve`
  *  (full_bypass). Both postures pass one explicitly. */
-export const GROK_PERMISSION_VALUES: Readonly<Record<ResolvedLaunchPosture, string>> = Object.freeze({
+export const GROK_PERMISSION_VALUES: Readonly<Record<CliLaunchPosture, string>> = Object.freeze({
   floor: "acceptEdits",
   full_bypass: "always-approve",
 });

@@ -129,6 +129,39 @@ function executionKeys(lines: ReturnType<typeof executionContentLines>): string[
 }
 
 describe("mission execution story — readable rows over the shipped projections", () => {
+  it("keeps project daemon N/A out of lineage gaps and the SCOPES progress strip", () => {
+    const fixture = executionFixture(1);
+    fixture.q1_lanes = [];
+    fixture.q4_ladder[0] = {
+      slice_id: "OPR.0.5.8.1", dir: "01-slice",
+      locked: { value: true }, built: { candidate_sha: "abcdef123" },
+      reviewed: { value: true }, folded: { value: true },
+      adopted: { value: "NOT_APPLICABLE", basis: "selected project has no daemon-source binding" },
+    };
+    for (const width of [58, 120]) {
+      const detail = text(executionContentLines(fixture, executionScopes(1), [], "slice:OPR.0.5.8.1", width));
+      expect(detail).toContain("N/A");
+      expect(detail).toContain("daemon");
+      const gap = text(executionContentLines(fixture, executionScopes(1), [], "evidence", width));
+      expect(gap).not.toContain("live unconfirmed");
+      const strip = text(executionSliceStripLines(fixture, "OPR.0.5.8.1", "01-slice", width));
+      expect(strip).toContain("merged");
+      expect(strip).not.toContain("live");
+      expect(strip).not.toContain("unconfirmed");
+      const project = { id: "demo", root: "/projects/demo", name: "Demo", sourcePath: null, missionsRoot: "/projects/demo/missions" };
+      const snap: FleetSnapshot = { ...demoSnapshot(), execution: fixture, scopes: executionScopes(1),
+        projects: { catalogPath: "/projects/workspace.yaml", projects: [project] }, projectRead: project };
+      const view = createViewState({ instanceId: "projects", getSnapshot: () => snap });
+      view.dispatch(parseCommand("projects"));
+      view.dispatch({ type: "project-select", id: project.id });
+      view.dispatch({ type: "scopes-mission-open", mission: fixture.mission! });
+      view.dispatch({ type: "scopes-open", mission: fixture.mission!, slice: "01-slice" });
+      const screen = renderScreen(view.get(), snap, { cols: width + 32, rows: 220 }).lines.join("\n");
+      expect(screen).toContain("N/A");
+      expect(screen).not.toMatch(/live.*undetermined/);
+    }
+  });
+
   it("shows authored admission and partial acceptance with provenance on mission, wave and slice pages at narrow widths", () => {
     const fixture = executionFixture();
     fixture.planning_guidance = [
@@ -232,6 +265,21 @@ describe("mission execution story — readable rows over the shipped projections
     expect(body).toContain("○ declared done");
     expect(body).not.toMatch(GLYPH_BLOB);
     expect(executionKeys(lines).filter((key) => key.startsWith("slice:"))).toHaveLength(4);
+  });
+
+  it("distinguishes retired and deferred slices from planned in fallback state", () => {
+    const fixture = executionFixture();
+    fixture.q1_lanes = [];
+    const scopes = executionScopes(4, (index) => (index === 0 ? "active" : index === 1 ? "blocked" : "done"));
+    // Slice 2 has stage "retired"
+    scopes[0]!.slices[1]!.stage = "retired";
+    // Slice 3 has status "deferred"
+    scopes[0]!.slices[2]!.status = "closed-deferred";
+
+    const overview = text(executionContentLines(fixture, scopes, [], null, 160));
+    expect(overview).toContain("○ retired");
+    expect(overview).toContain("○ deferred");
+    expect(overview).not.toContain("2 planned");
   });
 
   it("qualifies slice completion while a release workflow is still waiting", () => {
@@ -481,6 +529,76 @@ describe("execution drill — one page from source, esc back", () => {
     expect(live).toContain("assignment  dev-1@rig · working (self-report)");
   });
 
+  describe("a lane parked on an external gate is a waiting row, not the slice's assignment", () => {
+    const park = (lane: Record<string, unknown>) => {
+      lane["waiting"] = { on: "external:capacity-limit" };
+      lane["pickup"] = { state: "parked" };
+    };
+
+    it("shows the seat, the blocker and the row in the strip, and keeps assignment for in-progress lanes", () => {
+      const execution = executionFixture();
+      expect(text(executionSliceStripLines(execution, "OPR.0.5.8.1", "01-slice", 120, "active"))).toContain("assignment  dev-1@rig · working (self-report)");
+      park(execution.q1_lanes[0]!);
+      const strip = text(executionSliceStripLines(execution, "OPR.0.5.8.1", "01-slice", 120, "active"));
+      expect(strip).toContain("waiting     dev-1@rig · external:capacity-limit · qitem-1");
+      expect(strip).not.toContain("assignment");
+      expect(strip).not.toContain("working (self-report)");
+      const line = executionSliceStripLines(execution, "OPR.0.5.8.1", "01-slice", 120, "active").find(l => l.text.includes("waiting     "))!;
+      expect(line.action).toEqual({ type: "execution-open", key: "lane:qitem-1" });
+    });
+
+    it("gives the next line waiting wording instead of 'in progress on the lane above'", () => {
+      const execution = executionFixture();
+      expect(text(executionSliceStripLines(execution, "OPR.0.5.8.1", "01-slice", 120, "active"))).toContain("next        in progress on the lane above");
+      park(execution.q1_lanes[0]!);
+      const strip = text(executionSliceStripLines(execution, "OPR.0.5.8.1", "01-slice", 120, "active"));
+      expect(strip).toContain("next        waiting on external:capacity-limit, see the waiting row above");
+      expect(strip).not.toContain("in progress on the lane above");
+    });
+
+    it("shows a lane named by the slice directory as a waiting row too", () => {
+      const execution = executionFixture();
+      const lane = execution.q1_lanes[0]!;
+      lane["slice"] = "01-slice";
+      expect(text(executionSliceStripLines(execution, "OPR.0.5.8.1", "01-slice", 120, "active"))).toContain("assignment  dev-1@rig · working (self-report)");
+      park(lane);
+      expect(text(executionSliceStripLines(execution, "OPR.0.5.8.1", "01-slice", 120, "active"))).toContain("waiting     dev-1@rig · external:capacity-limit · qitem-1");
+    });
+
+    it("shows the waiting row on the slice card's activity field and the lane page, not as the seat's activity", () => {
+      const execution = executionFixture();
+      park(execution.q1_lanes[0]!);
+      const card = text(executionContentLines(execution, [], [], "slice:OPR.0.5.8.1", 120));
+      expect(card).toContain("activity:     waiting row · dev-1@rig · external:capacity-limit · qitem-1");
+      expect(card).toContain("seat:         none — no in-progress lane");
+      expect(card).not.toContain("self-report");
+      const lane = text(executionContentLines(execution, [], [], "lane:qitem-1", 120));
+      expect(lane).toContain("waiting row");
+      expect(lane).toContain("waiting on");
+      expect(lane).toContain("external:capacity-limit");
+      expect(lane).not.toContain("decided by");
+      const working = text(executionContentLines(executionFixture(), [], [], "lane:qitem-1", 120));
+      expect(working).toContain("decided by");
+      expect(working).not.toContain("waiting on");
+    });
+
+    it("leaves a waiting lane out of 'activity unconfirmed', and keeps a real unconfirmed one", () => {
+      const execution = executionFixture();
+      const unknown = { activity: "INDETERMINATE", basis: "no arbitrated state for this seat", source: "oracle" };
+      for (const lane of execution.q1_lanes) lane["activity"] = unknown;
+      const both = text(executionContentLines(execution, [], [], "evidence", 120));
+      expect(both).toContain("activity unconfirmed for 2 slices");
+      park(execution.q1_lanes[0]!);
+      const one = text(executionContentLines(execution, [], [], "evidence", 120));
+      expect(one).toContain("activity unconfirmed for 1 slice");
+      const activitySection = one.slice(one.indexOf("activity unconfirmed"));
+      expect(activitySection).toContain("OPR.0.5.8.2");
+      expect(activitySection).not.toContain("OPR.0.5.8.1");
+      park(execution.q1_lanes[1]!);
+      expect(text(executionContentLines(execution, [], [], "evidence", 120))).not.toContain("activity unconfirmed");
+    });
+  });
+
   it("renders through a SCOPES mission selection, opens rich slice detail, and preserves source drills", () => {
     const demo = demoSnapshot();
     const scopes = [...demo.scopes!, ...executionScopes()];
@@ -582,5 +700,24 @@ describe("attributed proof provenance in the ordinary execution path", () => {
     expect(page).toContain("UNKNOWN");
     delete execution.readiness;
     expect(text(executionContentLines(execution, undefined, [], "evidence", 100))).toContain("built unconfirmed");
+  });
+});
+
+
+describe("slice source provenance", () => {
+  it("reports the authoritative arrangement when it supersedes the legacy wave map", () => {
+    const fixture = executionFixture();
+    fixture.sources.wave_map = { row_id: "INDETERMINATE", superseded_by: "/work/mission.yaml + referenced slice.yaml files" };
+    const body = text(executionContentLines(fixture, executionScopes(), [], "slice:OPR.0.5.8.1", 160));
+    expect(body).toContain("wave map:     superseded by /work/mission.yaml");
+    expect(body).not.toContain("wave map:     INDETERMINATE");
+  });
+
+  it("preserves the legacy row when no superseding source is served", () => {
+    const fixture = executionFixture();
+    fixture.q2_sequencing[0]!.source = { wave_map_row: "qitem-wave-map" };
+    const body = text(executionContentLines(fixture, executionScopes(), [], "slice:OPR.0.5.8.1", 160));
+    expect(body).toContain("wave map:     qitem-wave-map");
+    expect(body).not.toContain("superseded by");
   });
 });

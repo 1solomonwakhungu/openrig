@@ -15,7 +15,7 @@
 import { getRuntimeDescriptor, listRuntimeDescriptors, formatRuntimeIdList } from "./runtime-registry.js";
 
 /** Built-in resume types; registered runtimes may declare their own. */
-export type BuiltinResumeType = "claude_id" | "codex_id" | "pi_session_file";
+export type BuiltinResumeType = "claude_id" | "codex_id" | "pi_session_file" | "omp_session_file";
 export type ResumeType = BuiltinResumeType | (string & {});
 
 export interface ResumeTokenValidationOk {

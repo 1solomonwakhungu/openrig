@@ -358,11 +358,118 @@ describe("RunnerCore assistant reply mirror", () => {
   });
 });
 
+describe.each(["pi", "omp"] as const)("%s terminal diagnostic fallbacks", runtime => {
+  const notice = (detail: string) => `[${runtime}-runner] ERROR ${detail}`;
+  const unusable = ["", " \n\t ", "\u001b[2J\u001b]0;title\u0007\u202e", null, undefined, {}, 7];
+  const failure = (errorMessage: unknown, error: unknown, eventError: unknown) => ({
+    type: "message_end", error: eventError,
+    message: { role: "assistant", stopReason: "error", errorMessage, error },
+  });
+
+  it.each(unusable)(
+    "skips unusable diagnostic %j before later message and event details", detail => {
+      expect(mapPiEvent(failure(detail, "message detail", "event detail"), runtime).errorNotice)
+        .toBe(notice("message detail"));
+      expect(mapPiEvent(failure(detail, detail, "event detail"), runtime).errorNotice)
+        .toBe(notice("event detail"));
+      expect(mapPiEvent(failure(detail, detail, detail), runtime).errorNotice)
+        .toBe(notice("request failed"));
+    },
+  );
+
+  it.each(unusable)("skips unusable finalError %j before a later retry detail", detail => {
+    expect(mapPiEvent({ type: "auto_retry_end", success: false, finalError: detail, error: "retry detail" }, runtime).errorNotice)
+      .toBe(notice("retry detail"));
+    expect(mapPiEvent({ type: "auto_retry_end", success: false, finalError: detail, error: detail }, runtime).errorNotice)
+      .toBe(notice("request failed"));
+  });
+
+  it("keeps the first usable detail and ignores errors on successful events", () => {
+    expect(mapPiEvent(failure("first detail", "message detail", "event detail"), runtime).errorNotice)
+      .toBe(notice("first detail"));
+    expect(mapPiEvent(failure("request failed", "message detail", "event detail"), runtime).errorNotice)
+      .toBe(notice("request failed"));
+    expect(mapPiEvent({ type: "auto_retry_end", success: false, finalError: "final detail", error: "retry detail" }, runtime).errorNotice)
+      .toBe(notice("final detail"));
+    expect(mapPiEvent({ type: "auto_retry_end", success: true, finalError: "", error: "retry detail" }, runtime).errorNotice)
+      .toBeUndefined();
+    const event = failure("", "message detail", "event detail");
+    expect(mapPiEvent({ ...event, message: { ...event.message, stopReason: "stop" } }, runtime).errorNotice)
+      .toBeUndefined();
+    expect(mapPiEvent({ ...event, type: "turn_end" }, runtime).errorNotice)
+      .toBe(runtime === "omp" ? notice("message detail") : undefined);
+  });
+
+  it("cleans and bounds the selected fallback just like the primary detail", () => {
+    const detail = "\u001b[2J\u001b]0;title\u0007bad\r\nrequest\u0000\u202e" + "x".repeat(1000);
+    const expected = notice(("bad request " + "x".repeat(1000)).slice(0, 400));
+    expect(mapPiEvent(failure("", detail, "event detail"), runtime).errorNotice).toBe(expected);
+    expect(mapPiEvent({ type: "auto_retry_end", success: false, finalError: "", error: detail }, runtime).errorNotice)
+      .toBe(expected);
+  });
+
+  it("coalesces fallback failures and resets for a later turn", () => {
+    const { io, lines } = fakeIo();
+    const core = new RunnerCore(io, { sessionName: SESSION, nodeId: "node-1", launchId: "launch-77" }, { runtime });
+    const event = failure("", "message detail", "event detail");
+    const retry = { type: "auto_retry_end", success: false, finalError: "", error: "retry detail" };
+    for (const next of [event, { ...event, type: "turn_end" }, retry, retry]) core.handlePiLine(JSON.stringify(next));
+    expect(lines.filter(line => line.startsWith(notice("")))).toEqual([notice("message detail")]);
+    core.handlePiLine(JSON.stringify({ type: "agent_start" }));
+    core.handlePiLine(JSON.stringify(retry));
+    expect(lines.filter(line => line.startsWith(notice("")))).toEqual([notice("message detail"), notice("retry detail")]);
+  });
+});
+
 describe("RunnerCore terminal assistant failures", () => {
   const failure = (errorMessage?: unknown, content: unknown[] = []) => ({
     type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage, content },
   });
   const errors = (lines: string[]) => lines.filter(line => line.startsWith("[pi-runner] ERROR"));
+
+  it.each([
+    ["openrouter", "OPENROUTER_API_KEY"], ["zai", "ZAI_API_KEY"], ["kimi-coding", "KIMI_API_KEY"],
+  ])("explains the existing %s credential route at RPC and model failure", (provider, key) => {
+    const { core, lines } = readyCore();
+    const detail = `No API key found for ${provider}.`;
+    core.handlePiLine(JSON.stringify({ type: "response", command: "prompt", success: false, error: detail }));
+    core.handlePiLine(JSON.stringify(failure(detail)));
+    const notices = errors(lines);
+    expect(notices).toHaveLength(2);
+    for (const notice of notices) {
+      expect(notice).toContain(detail);
+      expect(notice).toContain(`set ${key} in the daemon environment`);
+      expect(notice).toContain(`add ${key} to recovery.provider_auth_env_allowlist`);
+      expect(notice).toContain(`model ${provider}/<id>`);
+      expect(notice).toContain("restart the daemon and relaunch the seat");
+      expect(notice).toContain("Default Pi logins are not automatically shared");
+    }
+  });
+
+  it("keeps missing-credentials get_state unready while giving the same route", () => {
+    const { core, lines, sidecars } = readyCore();
+    core.handlePiLine(JSON.stringify({ type: "response", id: "pi-runner-get-state", success: false, error: "No API key found for openrouter." }));
+    expect(errors(lines)[0]).toContain("recovery.provider_auth_env_allowlist");
+    expect(core.isReady()).toBe(false);
+    expect(sidecars.at(-1)?.ready).toBe(false);
+  });
+
+  it("does not suggest an unsupported provider environment key", () => {
+    const { core, lines } = readyCore();
+    core.handlePiLine(JSON.stringify(failure("No API key found for custom-provider.")));
+    expect(errors(lines)[0]).toContain("PI_CODING_AGENT_DIR (auth.json or models.json)");
+    expect(errors(lines)[0]).not.toContain("provider_auth_env_allowlist");
+    expect(errors(lines)[0]).not.toContain("CUSTOM_PROVIDER_API_KEY");
+  });
+
+  it("keeps unrelated errors, OMP diagnostics and successful Pi replies unchanged", () => {
+    for (const detail of ["401 Unauthorized", "No model found", "Network unavailable", "API key rejected"]) {
+      expect(mapPiEvent(failure(detail)).errorNotice).toBe(`[pi-runner] ERROR ${detail}`);
+    }
+    const detail = "No API key found for openrouter.";
+    expect(mapPiEvent(failure(detail), "omp").errorNotice).toBe(`[omp-runner] ERROR ${detail}`);
+    expect(mapPiEvent({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: detail }] } }).errorNotice).toBeUndefined();
+  });
 
   it("shows an empty native error and ends partial text without replaying its content", () => {
     const { core, lines, appends } = readyCore();
@@ -379,6 +486,34 @@ describe("RunnerCore terminal assistant failures", () => {
     const { core, lines } = readyCore();
     core.handlePiLine(JSON.stringify(failure(detail)));
     expect(errors(lines)).toEqual(["[pi-runner] ERROR request failed"]);
+  });
+
+  it("extracts fallback error detail from message.error or event.error when errorMessage is missing", () => {
+    const { core, lines } = readyCore();
+    // Fallback to message.error
+    core.handlePiLine(JSON.stringify({
+      type: "message_end",
+      message: { role: "assistant", stopReason: "error", error: "backend stream broke" },
+    }));
+    // Fallback to event.error
+    core.handlePiLine(JSON.stringify({ type: "agent_start" }));
+    core.handlePiLine(JSON.stringify({
+      type: "message_end",
+      error: "upstream service unavailable",
+      message: { role: "assistant", stopReason: "error" },
+    }));
+    // auto_retry_end fallback to event.error
+    core.handlePiLine(JSON.stringify({ type: "agent_start" }));
+    core.handlePiLine(JSON.stringify({
+      type: "auto_retry_end",
+      success: false,
+      error: "retry limit reached",
+    }));
+    expect(errors(lines)).toEqual([
+      "[pi-runner] ERROR backend stream broke",
+      "[pi-runner] ERROR upstream service unavailable",
+      "[pi-runner] ERROR retry limit reached",
+    ]);
   });
 
   it("ignores malformed message envelopes and does not dump thinking or tool arguments", () => {

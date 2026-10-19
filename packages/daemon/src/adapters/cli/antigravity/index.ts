@@ -21,7 +21,7 @@ import type { CliRuntimeRegistration } from "../types.js";
 import { anyPanePhrase, panePhrase, panePhraseSource } from "../pane-phrase.js";
 import type { RuntimeDescriptor } from "../../../domain/runtime-registry.js";
 import type { AppliedLaunchObservation } from "../../../domain/permission-drift.js";
-import type { ResolvedLaunchPosture } from "../../yolo-mode.js";
+import type { CliLaunchPosture, ResolvedLaunchPosture } from "../../yolo-mode.js";
 import { LAUNCH_RECORD_FILE } from "../../../domain/runtime-capture.js";
 import type { ResumeTokenFormatResult } from "../../../domain/resume-token-formats.js";
 import { antigravityAuthStatus } from "../auth-status.js";
@@ -99,7 +99,7 @@ export const ANTIGRAVITY_READY_RE = new RegExp(
 /** The permission argument each posture emits, as recorded for permission
  *  drift: `--mode accept-edits` (floor) or `--dangerously-skip-permissions`
  *  (full_bypass). Both postures pass one explicitly. */
-export const ANTIGRAVITY_PERMISSION_VALUES: Readonly<Record<ResolvedLaunchPosture, string>> = Object.freeze({
+export const ANTIGRAVITY_PERMISSION_VALUES: Readonly<Record<CliLaunchPosture, string>> = Object.freeze({
   floor: "accept-edits",
   full_bypass: "dangerously-skip-permissions",
 });

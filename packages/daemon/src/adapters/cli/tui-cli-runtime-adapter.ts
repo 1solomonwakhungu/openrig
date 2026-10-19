@@ -17,7 +17,7 @@ import nodePath from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TmuxAdapter } from "../tmux.js";
 import { shellQuote } from "../shell-quote.js";
-import { effectiveLaunchPosture, type ResolvedLaunchPosture } from "../yolo-mode.js";
+import { effectiveLaunchPosture, type CliLaunchPosture, type ResolvedLaunchPosture } from "../yolo-mode.js";
 import { PI_ENV_BASELINE_VARS, PI_ENV_OPENRIG_VARS } from "../pi-runner-protocol.js";
 import {
   ATTENTION_REQUIRED_READINESS_CODES,
@@ -74,7 +74,7 @@ export const ACTIVITY_STATUS_LINES = 12;
 export interface TuiCliLaunchInput {
   binding: NodeBinding;
   /** Effective posture: the seat's resolved policy, else the OPENRIG_YOLO decision. */
-  posture: ResolvedLaunchPosture;
+  posture: CliLaunchPosture;
   /** Persisted token being resumed. */
   resumeToken?: string;
   forkSource?: ForkSource;

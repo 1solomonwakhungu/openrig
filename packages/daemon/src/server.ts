@@ -80,9 +80,11 @@ import type { SkillLibraryDiscoveryService } from "./domain/skill-library-discov
 import { configRoutes } from "./routes/config.js";
 import { hostsRoutes } from "./routes/hosts.js";
 import { hostReadThrough } from "./domain/hosts/read-through.js";
+import { jsonBodyErrorHandler, trackJsonBodyParseErrors } from "./middleware/json-body-error.js";
 import { getSelfHostId, getSelfHostIdSource } from "./domain/hosts/fanout-contract.js";
 import { contextPacksRoutes } from "./routes/context-packs.js";
 import { agentImagesRoutes } from "./routes/agent-images.js";
+import { agentAppsRoutes } from "./routes/agent-apps.js";
 import type { SpecReviewService } from "./domain/spec-review-service.js";
 import type { SpecLibraryService } from "./domain/spec-library-service.js";
 import type { ChatRepository } from "./domain/chat-repository.js";
@@ -115,7 +117,7 @@ import { scopesRoutes } from "./routes/scopes.js";
 import { telemetryRoutes } from "./routes/telemetry.js";
 import { proofRoutes } from "./routes/proof.js";
 import { scopeApproveRoutes } from "./routes/scope-approve.js";
-import { registerTerminalWs } from "./routes/terminal-ws.js";
+import { registerTerminalAuthOnly, registerTerminalWs } from "./routes/terminal-ws.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { steeringRoutes } from "./routes/steering.js";
 import { healthSummaryRoutes } from "./routes/health-summary.js";
@@ -140,6 +142,7 @@ import { envRoutes } from "./routes/env.js";
 import type { RigLifecycleService } from "./domain/rig-lifecycle-service.js";
 import { seatRoutes } from "./routes/seat.js";
 import { createRouteTimingMiddleware } from "./domain/route-timing-recorder.js";
+import { browserBoundary, type BrowserBoundaryOptions } from "./middleware/browser-boundary.js";
 
 export interface AppDeps {
   proofSourceWatch?: import("./domain/proof/source-watch.js").ProofSourceWatch;
@@ -205,6 +208,7 @@ export interface AppDeps {
   chatRepo?: ChatRepository;
   streamStore?: StreamStore;
   slowOpRecorder?: SlowOperationInstrumentation;
+  requestPhaseObserver?: import("./domain/request-phase-observer.js").RequestPhaseObserver;
   queueRepo?: QueueRepository;
   /** S02 — the standing stuck sweep's observable heartbeat (ADDITIVE on healthz;
    *  absent = legacy body). Set by the index.ts scheduler when the loop starts. */
@@ -291,6 +295,13 @@ export interface AppDeps {
   missionControlBearerToken?: string | null;
   terminalBearerToken?: string | null;
   enableNodeWebSocket?: boolean;
+  /** `ui.enabled`: serve the web UI pages and its terminal WebSocket. Off unless true; /api routes are unaffected. */
+  webUiEnabled?: boolean;
+  /** This machine's own extra names for the /api browser boundary (createDaemon wires the
+   *  Tailscale MagicDNS self-name lookup). Absent: loopback, IP literals and OS names only. */
+  selfNameDiscovery?: () => Promise<string[]>;
+  /** Test hook: one call per /api browser-boundary decision. */
+  browserBoundaryObserver?: BrowserBoundaryOptions["onDecision"];
   specReviewService?: SpecReviewService;
   specLibraryService?: SpecLibraryService;
   /**
@@ -323,6 +334,7 @@ export interface AppDeps {
   /** Per-seat runtime state root (<OPENRIG_HOME>/state when absent); node
    *  detail reads trust answers from the seat launch records under it. */
   runtimeStateRoot?: string;
+  currentModelReader?: import("./domain/model-divergence/current-model-reader.js").CurrentModelReader;
   contextUsageStore?: import("./domain/context-usage-store.js").ContextUsageStore;
   /** 0.5.10 S04 — one on-demand, read-only health projection shared by consumers. */
   healthProjection?: import("./domain/health-detectors.js").HealthProjectionService;
@@ -399,6 +411,9 @@ const MIME_TYPES: Record<string, string> = {
 function resolveDefaultUiDistDir(): string {
   return nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), "..", "..", "ui", "dist");
 }
+
+export const WEB_UI_OFF_MESSAGE =
+  "The OpenRig web UI is off. To turn it on, run `rig config set ui.enabled true`, then stop and start the daemon (`rig daemon stop`, `rig daemon start`).\n";
 
 function safeResolveUiPath(uiDistDir: string, requestPath: string): string | null {
   const relativePath = requestPath.replace(/^\/+/, "") || "index.html";
@@ -484,6 +499,10 @@ export function createApp(deps: AppDeps): Hono {
   }
 
   const app = new Hono();
+  if (deps.requestPhaseObserver) app.use("*", deps.requestPhaseObserver.middleware());
+  // A malformed request body is a 400, not the default 500.
+  app.use("*", trackJsonBodyParseErrors);
+  app.onError(jsonBodyErrorHandler);
   const permissionDriftObserver = deps.permissionDriftObserver
     ?? new PermissionDriftObserver({ db: deps.rigRepo.db });
 
@@ -588,6 +607,7 @@ export function createApp(deps: AppDeps): Hono {
     c.set("permissionDriftObserver" as never, permissionDriftObserver);
     c.set("runtimeStateRoot" as never, deps.runtimeStateRoot);
     c.set("contextUsageStore" as never, deps.contextUsageStore);
+    c.set("currentModelReader" as never, deps.currentModelReader);
     c.set("healthProjection" as never, deps.healthProjection);
     c.set("healthDiagnosis" as never, deps.healthDiagnosis);
     c.set("healthPolicy" as never, deps.healthPolicy);
@@ -628,6 +648,17 @@ export function createApp(deps: AppDeps): Hono {
   if (deps.slowOpRecorder?.recordRequest) {
     app.use("*", createSlowOpRequestMiddleware(deps.slowOpRecorder));
   }
+
+  // Browser boundary: target name and browser Origin, checked once per /api request
+  // (WebSocket upgrades included), before the remote read-through and every route.
+  app.use("/api/*", browserBoundary({
+    webUiEnabled: deps.webUiEnabled === true,
+    bearerTokens: [deps.terminalBearerToken, deps.missionControlBearerToken],
+    allowedOrigins: process.env.OPENRIG_ALLOWED_ORIGINS,
+    allowedHosts: process.env.OPENRIG_ALLOWED_HOSTS,
+    discoverSelfNames: deps.selfNameDiscovery,
+    onDecision: deps.browserBoundaryObserver,
+  }));
 
   // OPR.0.4.6.MH2 FR-2/FR-7 — the single-host READ-THROUGH edge (the read
   // twin of the mission-control remote-forward). Consumes a `?host=<id>`
@@ -728,11 +759,14 @@ export function createApp(deps: AppDeps): Hono {
   app.route("/api/compaction", compactionRoutes({ bearerToken: deps.terminalBearerToken ?? null }));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let injectWebSocket: (server: any) => void = () => {};
-  if (deps.enableNodeWebSocket) {
+  // The terminal WebSocket only serves the web UI, so it exists only while the web UI is on.
+  if (deps.enableNodeWebSocket && deps.webUiEnabled === true) {
     const ws = createNodeWebSocket({ app });
     injectWebSocket = ws.injectWebSocket as never;
     _lastInjectWebSocket = injectWebSocket;
     registerTerminalWs(app, ws.upgradeWebSocket as never, { bearerToken: deps.terminalBearerToken ?? null });
+  } else if (deps.enableNodeWebSocket) {
+    registerTerminalAuthOnly(app, { bearerToken: deps.terminalBearerToken ?? null });
   }
   app.route("/api/activity", activityRoutes);
   app.route("/api/ask", askRoutes);
@@ -747,6 +781,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route("/api/agent-images", agentImagesRoutes({
     specRoots: deps.agentImageSpecRoots ?? (() => []),
   }));
+  app.route("/api/agent-apps", agentAppsRoutes());
   app.route("/api/whoami", whoamiRoutes());
   // Slice-04 OPR.0.5.0.4: registered so the endpoints exist and 503 honestly; the providerService
   // is not set in context until the collection/service seam (C) wires it (until then -> 503).
@@ -792,7 +827,8 @@ export function createApp(deps: AppDeps): Hono {
   // SCOPES VIEW (d64d2f5c): the store-direct TUI read.
   app.route("/api/scopes", scopesRoutes());
   // 51-08 A3 — usage series + top-N burn over usage_samples (one projection, CLI+HTTP).
-  app.route("/api/telemetry", telemetryRoutes({ db: () => deps.rigRepo.db }));
+  app.route("/api/telemetry", telemetryRoutes({ db: () => deps.rigRepo.db,
+    source: { hostId: getSelfHostId(), bootEpoch: deps.daemonBootEpoch ?? null } }));
   // OPR.0.4.4.19 FR-9 — scope approve: frontmatter stamp + audit row.
   app.route("/api/scope/approve", scopeApproveRoutes());
   app.route("/api/proof", proofRoutes());
@@ -803,7 +839,8 @@ export function createApp(deps: AppDeps): Hono {
   app.route("/api/attention", attentionRoutes());
   app.route("/api/health-diagnosis", healthDiagnosisRoutes());
   // S10 — gateway subsystem admin (slack enable/disable with the seeding rule preserved).
-  app.route("/api/gateway", gatewayRoutes());
+  // A shared Slack app's relay carries the token `rig host pair` issued: this daemon's auth bearer.
+  app.route("/api/gateway", gatewayRoutes({ relayBearerToken: deps.missionControlBearerToken ?? null }));
   app.route("/api/rigs/:rigId/env", envRoutes());
   app.route("/api/restore-check", restoreCheckRoutes);
   // Slice 09 (OPR.0.3.2.9) — rig-policy bindings (operator context mode).
@@ -827,6 +864,11 @@ export function createApp(deps: AppDeps): Hono {
 
     if (requestPath === "/healthz" || requestPath.startsWith("/api/")) {
       return c.notFound();
+    }
+
+    if (deps.webUiEnabled !== true) {
+      c.header("X-OpenRig-Web-UI", "off");
+      return c.text(WEB_UI_OFF_MESSAGE, 404);
     }
 
     if (!hasUiBundle) {

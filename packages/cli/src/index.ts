@@ -25,6 +25,7 @@ import { upCommand } from "./commands/up.js";
 import { downCommand } from "./commands/down.js";
 import { archiveCommand } from "./commands/archive.js";
 import { unarchiveCommand } from "./commands/unarchive.js";
+import { rosterCommand } from "./commands/roster.js";
 import { psCommand } from "./commands/ps.js";
 import { hostCommand } from "./commands/host.js";
 import { gatewayCommand } from "./commands/gateway.js";
@@ -53,6 +54,7 @@ import { preflightCommand } from "./commands/preflight.js";
 import { authCommand } from "./commands/auth.js";
 import { providerCommand } from "./commands/provider.js";
 import { usageCommand } from "./commands/usage.js";
+import { telemetryCommand } from "./commands/telemetry.js";
 import { healthCommand, type HealthDeps } from "./commands/health.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { runtimesCommand } from "./commands/runtimes.js";
@@ -69,6 +71,7 @@ import { contextCommand } from "./commands/context.js";
 import { pluginCommand } from "./commands/plugin.js";
 import { skillCommand } from "./commands/skill.js";
 import { agentImageCommand } from "./commands/agent-image.js";
+import { agentAppCommand } from "./commands/agent-app.js";
 import { forkCommand } from "./commands/fork.js";
 import { workspaceCommand, type WorkspaceDeps } from "./commands/workspace.js";
 import { whoamiCommand } from "./commands/whoami.js";
@@ -89,11 +92,12 @@ import { rigModeCommand, type RigModeDeps } from "./commands/rig-mode.js";
 import { policyCommand } from "./commands/policy.js";
 import { startupProofCommand, type StartupProofDeps } from "./commands/startup-proof.js";
 import type { LifecycleDeps } from "./daemon-lifecycle.js";
-import { CLI_VERSION } from "./version.js";
+import { configureRoot } from "./program-root.js";
 
 export interface ProgramDeps {
   daemonDeps?: LifecycleDeps;
   statusDeps?: StatusDeps;
+  telemetryDeps?: StatusDeps;
   snapshotDeps?: StatusDeps;
   restoreDeps?: StatusDeps;
   uiDeps?: UiDeps;
@@ -136,6 +140,7 @@ export interface ProgramDeps {
   pluginDeps?: StatusDeps;
   skillDeps?: StatusDeps;
   agentImageDeps?: StatusDeps;
+  agentAppDeps?: StatusDeps;
   forkDeps?: StatusDeps;
   workspaceDeps?: WorkspaceDeps;
   whoamiDeps?: StatusDeps;
@@ -164,12 +169,7 @@ export interface ProgramDeps {
 }
 
 export function createProgram(depsOverride?: ProgramDeps): Command {
-  const program = new Command();
-
-  program
-    .name("rig")
-    .description("CLI for the OpenRig local control plane")
-    .version(CLI_VERSION);
+  const program = configureRoot(new Command());
 
   program.addCommand(startCommand(depsOverride?.startDeps));
   program.addCommand(daemonCommand(depsOverride?.daemonDeps));
@@ -198,6 +198,7 @@ export function createProgram(depsOverride?: ProgramDeps): Command {
   program.addCommand(unarchiveCommand(depsOverride?.unarchiveDeps));
   program.addCommand(hostCommand());
   program.addCommand(psCommand(depsOverride?.psDeps));
+  program.addCommand(rosterCommand());
   program.addCommand(mcpCommand(depsOverride?.mcpDeps));
   program.addCommand(agentCommand(depsOverride?.agentDeps));
   program.addCommand(rigCommand(depsOverride?.rigDeps));
@@ -221,6 +222,7 @@ export function createProgram(depsOverride?: ProgramDeps): Command {
   program.addCommand(pluginCommand(depsOverride?.pluginDeps));
   program.addCommand(skillCommand(depsOverride?.skillDeps));
   program.addCommand(agentImageCommand(depsOverride?.agentImageDeps));
+  program.addCommand(agentAppCommand(depsOverride?.agentAppDeps));
   program.addCommand(forkCommand(depsOverride?.forkDeps));
   program.addCommand(workspaceCommand(depsOverride?.workspaceDeps));
   program.addCommand(rigModeCommand(depsOverride?.rigModeDeps));
@@ -233,6 +235,7 @@ export function createProgram(depsOverride?: ProgramDeps): Command {
   program.addCommand(authCommand());
   program.addCommand(providerCommand());
   program.addCommand(usageCommand());
+  program.addCommand(telemetryCommand(depsOverride?.telemetryDeps));
   program.addCommand(healthCommand(depsOverride?.healthDeps));
   program.addCommand(doctorCommand());
   program.addCommand(runtimesCommand());

@@ -4,17 +4,35 @@
 // oversight detector). Option-A bar: no account identity in any response.
 import { Hono } from "hono";
 import type { Database } from "better-sqlite3";
-import { queryUsageSeries, computeTopBurn } from "../domain/usage-series.js";
+import { queryUsageSeries, computeTopBurn, computeCostView } from "../domain/usage-series.js";
+import { readTelemetryPage, TelemetryInputError, type TelemetrySource, type TelemetryStream } from "../domain/finite-telemetry.js";
+import { timeBoundAdvisory } from "../domain/time-bound-advisory.js";
+import { SQL_LIMIT_BOUND } from "./query-limit.js";
 
 export interface TelemetryRouteDeps {
   db: () => Database;
   /** injectable clock so tests and VM seeds are deterministic */
   nowIso?: () => string;
+  source?: TelemetrySource;
 }
 
 export function telemetryRoutes(deps: TelemetryRouteDeps): Hono {
   const app = new Hono();
   const now = deps.nowIso ?? (() => new Date().toISOString());
+
+  for (const [path, stream] of [["/v1/events", "events"], ["/v1/queue-transitions", "queue-transitions"], ["/v1/nodes/:nodeId/tenures", "tenures"]] as const) {
+    app.get(path, (c) => {
+      try {
+        const input = { cursor: c.req.query("cursor"), start: c.req.query("start"), limit: c.req.query("limit"),
+          nodeId: stream === "tenures" ? c.req.param("nodeId") : c.req.query("nodeId"), rigId: c.req.query("rigId"), qitemId: c.req.query("qitemId") };
+        return c.json(readTelemetryPage(deps.db(), deps.source ?? { hostId: null, bootEpoch: null }, stream as TelemetryStream, input, now()));
+      } catch (error) {
+        if (error instanceof TelemetryInputError) return c.json({ code: "telemetry_invalid_request", error: error.message }, 400);
+        // Database paths, SQL and stored content are not an error-response surface.
+        return c.json({ code: "telemetry_read_unavailable", error: "Telemetry history could not be read.", coverage: { status: "unavailable", historyCompleteness: "unknown" } }, 503);
+      }
+    });
+  }
 
   app.get("/usage/series", (c) => {
     const seat = c.req.query("seat") || undefined;
@@ -28,7 +46,7 @@ export function telemetryRoutes(deps: TelemetryRouteDeps): Hono {
     let limit: number | undefined;
     if (limitRaw !== undefined) {
       limit = Number(limitRaw);
-      if (!Number.isFinite(limit) || limit < 1) {
+      if (!Number.isFinite(limit) || limit < 1 || limit >= SQL_LIMIT_BOUND) {
         return c.json({ error: `invalid limit "${limitRaw}" — must be a positive number` }, 400);
       }
     }
@@ -39,7 +57,16 @@ export function telemetryRoutes(deps: TelemetryRouteDeps): Hono {
       untilIso,
       limit,
     });
-    return c.json({ rows });
+    // An unrecognised bound is compared as text against captured_at, as before; say so.
+    const advisories = [timeBoundAdvisory("since", sinceIso, "captured_at"), timeBoundAdvisory("until", untilIso, "captured_at")]
+      .filter((a): a is string => a !== undefined);
+    return c.json({ rows, ...(advisories.length > 0 ? { advisories } : {}) });
+  });
+
+  // OPR.0.7.0.2: what each seat's harness reports about cost, labelled; absent and stale stay visible.
+  app.get("/usage/cost", (c) => {
+    const seat = c.req.query("seat") || undefined;
+    return c.json(computeCostView(deps.db(), { nowIso: now(), seatSession: seat }));
   });
 
   app.get("/usage/top", (c) => {
@@ -56,7 +83,12 @@ export function telemetryRoutes(deps: TelemetryRouteDeps): Hono {
         return c.json({ error: `invalid top "${topRaw}" — must be a positive count` }, 400);
       }
     }
-    return c.json(computeTopBurn(deps.db(), { windowHours, nowIso: now(), topN }));
+    const nowIso = now();
+    const since = new Date(new Date(nowIso).getTime() - windowHours * 3_600_000);
+    if (!Number.isFinite(since.getTime())) {
+      return c.json({ error: `invalid window_hours "${windowRaw}" — exceeds the supported date range` }, 400);
+    }
+    return c.json(computeTopBurn(deps.db(), { windowHours, nowIso, topN }));
   });
 
   return app;

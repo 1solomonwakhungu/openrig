@@ -1,4 +1,4 @@
-// The canonical ordered migration list (001 → 089). SINGLE SOURCE: the daemon boot path
+// The canonical ordered migration list. SINGLE SOURCE: the daemon boot path
 // (startup.ts) and any test/tool that needs a schema-faithful DB both migrate from THIS array,
 // so a reader DB is never seeded from a stale hand-copied subset (the perf-fixture-migration-parity
 // trap). Append new migrations to the END, in order.
@@ -57,6 +57,7 @@ import { workflowResumeSchema } from "./migrations/051_workflow_resume.js";
 import { workflowInstanceBoundRigSchema } from "./migrations/052_workflow_instance_bound_rig.js";
 import { sessionsNodeIdIndexSchema } from "./migrations/053_sessions_node_id_index.js";
 import { queueTransitionsArchiveSchema } from "./migrations/054_queue_transitions_archive.js";
+import { seatEnvSchema } from "./migrations/111_seat_env.js";
 import { nodePermissionPolicySchema } from "./migrations/055_node_permission_policy.js";
 import { rigPermissionPolicySchema } from "./migrations/056_rig_permission_policy.js";
 import { nodePolicyProvenanceSchema } from "./migrations/057_node_policy_provenance.js";
@@ -92,14 +93,39 @@ import { scopedOperatingPostureSchema } from "./migrations/080_scoped_operating_
 import { seatDeliveryGuardSchema } from "./migrations/087_seat_delivery_guard.js";
 import { nodePermissionSelectionsSchema } from "./migrations/088_node_permission_selections.js";
 import { classificationIdentityProvenanceSchema } from "./migrations/089_classification_identity_provenance.js";
+import { humanReplyToSchema } from "./migrations/090_human_reply_to.js";
+import { humanQuestionsSchema } from "./migrations/091_human_questions.js";
+import { nodeEffortSchema } from "./migrations/092_node_effort.js";
+import { nodeEffortChoiceSchema } from "./migrations/104_node_effort_choice.js";
+import { usageSamplesLatestIndexesSchema } from "./migrations/094_usage_samples_latest_indexes.js";
+import type { Migration } from "./migrate.js";
+
+import { rigNonInterruptiveSchema } from "./migrations/095_rig_non_interruptive.js";
+import { rigInstallRootSchema } from "./migrations/096_rig_install_root.js";
+import { threadPartMapSchema } from "./migrations/097_thread_part_map.js";
+import { queueTransitionsQitemIdOrderSchema } from "./migrations/098_queue_transitions_qitem_id_order.js";
+import { queueItemsRecoveryTagsSchema } from "./migrations/099_queue_items_recovery_tags.js";
+import { typingGuardModesSchema } from "./migrations/100_typing_guard_modes.js";
+import { resumeRotationSchema } from "./migrations/101_claude_resume_rotation.js";
+import { sessionStopIntentSchema } from "./migrations/103_session_stop_intent.js";
+import { usageSamplesClientCostSchema } from "./migrations/105_usage_samples_client_cost.js";
+import { piUsageEntriesSchema } from "./migrations/107_pi_usage_entries.js";
+import { piUsageChargesSchema } from "./migrations/108_pi_usage_charges.js";
+import { modePostureCoexistSchema } from "./migrations/109_mode_posture_coexist.js";
+import { workflowInstanceScopeSchema } from "./migrations/110_workflow_instance_scope.js";
+import { queueTransitionsTsQitemSchema } from "./migrations/112_queue_transitions_ts_qitem.js";
+import { appliedLaunchDaemonOptOutSchema } from "./migrations/113_applied_launch_daemon_opt_out.js";
+import { sessionAgentAppSchema } from "./migrations/114_session_agent_app.js";
+import { threadSeatMapChannelKeySchema } from "./migrations/115_thread_seat_map_channel_key.js";
 import { nodeReadinessTimeoutSchema } from "./migrations/500_node_readiness_timeout.js";
 import { rigGuidanceTrackedFileSchema } from "./migrations/501_rig_guidance_tracked_file.js";
 import { nodeRuntimeFallbackSchema } from "./migrations/502_node_runtime_fallback.js";
 import { runtimeUsageSchema } from "./migrations/505_runtime_usage.js";
 import { nodePermissionSelectionsAnyRuntimeSchema } from "./migrations/510_node_permission_selections_any_runtime.js";
-import type { Migration } from "./migrate.js";
 
-/** Ordered 001→089, then fork migrations from 500 (S02 086/089, S09 087, S03 088; 500 seat readiness window; 501 rig guidance tracked file; 502 runtime fallback; 505 registry runtime usage; 510 per-seat permissions for registry runtimes). */
+/** Ordered migrations; numbers may be reserved by independent changes. Upstream numbers stay below 500; fork
+ *  migrations start at 500 (500 seat readiness window; 501 rig guidance tracked file; 502 runtime fallback; 505
+ *  registry runtime usage; 510 per-seat permissions for registry runtimes) so they sort after every upstream one. */
 export const ALL_MIGRATIONS: Migration[] = [
   coreSchema,
   bindingsSessionsSchema,
@@ -190,6 +216,29 @@ export const ALL_MIGRATIONS: Migration[] = [
   seatDeliveryGuardSchema,
   nodePermissionSelectionsSchema,
   classificationIdentityProvenanceSchema,
+  humanReplyToSchema,
+  humanQuestionsSchema,
+  nodeEffortSchema,
+  usageSamplesLatestIndexesSchema,
+  rigNonInterruptiveSchema,
+  rigInstallRootSchema,
+  threadPartMapSchema,
+  queueTransitionsQitemIdOrderSchema,
+  queueItemsRecoveryTagsSchema,
+  typingGuardModesSchema,
+  resumeRotationSchema,
+  sessionStopIntentSchema,
+  nodeEffortChoiceSchema,
+  usageSamplesClientCostSchema,
+  piUsageEntriesSchema,
+  piUsageChargesSchema,
+  modePostureCoexistSchema,
+  workflowInstanceScopeSchema,
+  seatEnvSchema,
+  queueTransitionsTsQitemSchema,
+  appliedLaunchDaemonOptOutSchema,
+  sessionAgentAppSchema,
+  threadSeatMapChannelKeySchema,
   nodeReadinessTimeoutSchema,
   rigGuidanceTrackedFileSchema,
   nodeRuntimeFallbackSchema,

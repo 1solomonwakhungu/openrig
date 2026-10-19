@@ -78,6 +78,7 @@ function realFsOps(): any {
 
 const seats: string[] = [];
 afterAll(async () => {
+  if (!REAL_CODEX_OPT_IN) return; // a skipped run starts no tmux at all
   for (const s of seats) await tmux(`kill-session -t ${q(s)}`).catch(() => {}); // by name first
   // Then end this run's private server. SOCK is unique to this process (-L), so
   // kill-server here can never reach the fleet's tmux server.

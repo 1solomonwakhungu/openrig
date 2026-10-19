@@ -138,9 +138,9 @@ describe("seat activity sweep feeds the pane classification", () => {
   }
 
   it("declares the TUI CLI inventory only for classified runtimes", () => {
-    expect(runtimeRungInventory("copilot", true)).toBe(TUI_CLI_ACTIVITY_RUNG_INVENTORY);
-    expect(runtimeRungInventory("copilot", false)).toBe(TMUX_GENERIC_RUNG_INVENTORY);
-    expect(runtimeRungInventory("claude-code", true).runtime).toBe("claude-code");
+    expect(runtimeRungInventory("copilot", null, true)).toBe(TUI_CLI_ACTIVITY_RUNG_INVENTORY);
+    expect(runtimeRungInventory("copilot", null, false)).toBe(TMUX_GENERIC_RUNG_INVENTORY);
+    expect(runtimeRungInventory("claude-code", null, true).runtime).toBe("claude-code");
     expect(TUI_CLI_ACTIVITY_RUNG_INVENTORY.rungs).toEqual(expect.arrayContaining([
       expect.objectContaining({ rung: "needs-input-chrome", initialTrust: "authoritative" }),
       expect.objectContaining({ rung: "pane-markers", initialTrust: "trial" }),

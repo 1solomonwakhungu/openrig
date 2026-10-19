@@ -17,7 +17,7 @@
  *  (an attached builtin:locked keeps the floor even under global YOLO; an attached custom
  *  full_bypass flag policy lifts the seat without the env switch). Absent = no policy
  *  attached → the env decision stands (0.4.8.2 behavior, unchanged). */
-export type ResolvedLaunchPosture = "floor" | "full_bypass";
+export type ResolvedLaunchPosture = "floor" | "full_bypass" | "auto";
 
 export function yoloEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -28,13 +28,17 @@ export function yoloEnabled(
   return v === "1" || v === "true";
 }
 
+/** The postures a registry CLI runtime maps onto its own launch flags. Claude's `auto`
+ *  permission mode has no equivalent there, so it resolves to the floor. */
+export type CliLaunchPosture = Exclude<ResolvedLaunchPosture, "auto">;
+
 /** The seat's effective posture for a runtime without a harness-specific helper below:
  *  the resolved policy when attached, otherwise the OPENRIG_YOLO env decision. Each CLI
  *  runtime maps this onto its own launch flags. */
 export function effectiveLaunchPosture(
   env: NodeJS.ProcessEnv = process.env,
   resolvedPosture?: ResolvedLaunchPosture,
-): ResolvedLaunchPosture {
+): CliLaunchPosture {
   return yoloEnabled(env, resolvedPosture) ? "full_bypass" : "floor";
 }
 
@@ -53,6 +57,9 @@ export function claudePostureFlag(
   if (permissionMode !== undefined) {
     if (!/^[A-Za-z][A-Za-z0-9]*$/.test(permissionMode)) throw new Error("Invalid Claude permission mode");
     return `--permission-mode ${permissionMode}`;
+  }
+  if (resolvedPosture === "auto") {
+    return "--permission-mode auto";
   }
   return yoloEnabled(env, resolvedPosture) ? "--dangerously-skip-permissions" : "--permission-mode acceptEdits";
 }

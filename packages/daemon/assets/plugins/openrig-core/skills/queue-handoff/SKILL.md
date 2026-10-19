@@ -10,22 +10,9 @@ metadata:
   openrig:
     stage: factory-approved
     sibling_skills:
-      - workflow-runtime
       - watchdog
-      - refocus
-      - looping-workflows
-      - intake-routing
+      - refocusing
       - human-in-the-loop
-      - dispatching-parallel-agents
-      - subagent-driven-development
-      - structured-ack-dispatch
-      - control-plane-capabilities
-      - status-not-chat-orchestrator
-      - control-plane-queue
-      - control-plane-watchdog
-      - control-plane-workflows
-      - control-plane-delivery-loop
-      - control-plane-rollout-manager
 ---
 
 # Queue Handoff
@@ -127,6 +114,14 @@ reaching for `--notify`, stop — that flag does not exist on the
 shipped 0.3.1 CLI; you may be following a stale instruction that
 inverted the default-nudge polarity.
 
+## Every queue row
+
+- **`--summary "<what it is and why this seat>"`** on every `create`, `handoff` and `handoff-and-complete`: one or two plain sentences. It is the row's subject in RECENT, the story and the needs-you view, and a handoff does not inherit it from the source row.
+- **Scope tags `project:<id>`, `mission:<id>`, `slice:<id>`** on project work, set when you create the row (`--tags`; `create` also takes `--mission` and `--slice`). Tags can't be edited afterwards. A handoff keeps the source row's tags unless you pass `--tags` or `--gate`, either of which replaces them; repeat the scope tags in `--tags` when you use `--gate`.
+- **Pass work on with `handoff-and-complete`.** It closes your row as done and records the next row as its successor in one step. A `create` followed by `update --state done --closure-reason handed_off_to` records no successor, and the stuck sweep raises a recovery item for it.
+- **Close what you hold.** A row you claimed ends in a handoff or an `update --state done --closure-reason …`; `rig queue overdue` lists claimed rows past their deadline.
+- **Brief for the model that will read it.** Before handing a peer open-ended work, check which model it runs: `delegating-work`, "Check what kind of agent you're handing it to".
+
 ## Queue-body hygiene (token + parse safety)
 
 The qitem body is durable DATA the daemon stores and replays on every
@@ -184,8 +179,3 @@ policies and workflow runtime project new owners off these fields.
 
 If a daemon-backed coordination command fails, debug the command/runtime/schema
 edge directly — don't fall back to stale pre-upgrade assumptions.
-
-## See also
-
-- `looping-workflows` skill — operating discipline for self-driving rig-shaped loops; queue-handoff is its current handoff substrate
-- `intake-routing` skill — how raw signals enter the system and become routed work that flows through the queue

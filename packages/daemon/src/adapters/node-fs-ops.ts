@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import nodePath from "node:path";
+import { replaceFile } from "./replace-file.js";
 
 /** Recursive relative file listing (directories are walked, not listed). */
 export function listFilesRecursive(dir: string): string[] {
@@ -25,7 +26,8 @@ export function createNodeFsOps() {
     writeFile: (p: string, content: string) => fs.writeFileSync(p, content, "utf-8"),
     exists: (p: string) => fs.existsSync(p),
     mkdirp: (p: string) => { fs.mkdirSync(p, { recursive: true }); },
-    copyFile: (src: string, dest: string) => fs.copyFileSync(src, dest),
+    // Replace by rename so a read-only destination (a re-seated asset) keeps working.
+    copyFile: replaceFile,
     listFiles: listFilesRecursive,
     readdir: (dir: string) => fs.readdirSync(dir),
     statMode: (p: string) => fs.statSync(p).mode,

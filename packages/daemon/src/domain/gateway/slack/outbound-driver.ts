@@ -30,6 +30,9 @@ export interface OutboundPostPayload {
   ownerNotificationLevel?: import("../../queue-transition-log.js").OwnerNotificationLevel | null;
   humanIntent?: "decision" | "update" | null;
   humanDetail?: string | null;
+  /** #96: an update posted into this earlier qitem's thread (subsystem-resolved). */
+  replyTo?: string | null;
+  humanQuestions?: import("../../human-questions.js").HumanQuestion[] | null;
   summary?: string | null;
   body?: string | null;
   destinationSession?: string | null;
@@ -38,6 +41,9 @@ export interface OutboundPostPayload {
   /** F: the loudness discriminators (interim rule: escalations mention, all else quiet). */
   tier?: string | null;
   tags?: string[] | null;
+  /** #1013 — the row's state, so the renderer can tell a gate PARKED on a human
+   *  (state=blocked) from the same row while an agent seat owns it. */
+  state?: string | null;
 }
 
 export interface OutboundDriverDeps {
@@ -133,6 +139,8 @@ function toPayload(q: QueueItem): OutboundPostPayload {
     ownerNotificationLevel: q.ownerNotificationLevel,
     humanIntent: q.humanIntent,
     humanDetail: q.humanDetail,
+    replyTo: q.replyTo,
+    humanQuestions: q.humanQuestions,
     summary: q.summary,
     body: q.body,
     destinationSession: q.destinationSession,
@@ -140,6 +148,7 @@ function toPayload(q: QueueItem): OutboundPostPayload {
     evidenceRef: q.evidenceRef,
     tier: q.tier,
     tags: q.tags,
+    state: q.state,
   };
 }
 

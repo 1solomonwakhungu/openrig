@@ -26,8 +26,10 @@ export interface ResumeTokenCaptureDeps {
    *  capture is not session-scoped (runtime-capture.ts). */
   hasLiveSiblingSeat?: ((input: { runtime: string; cwd: string; sessionName: string }) => string | null) | null;
   contextUsageStore?: {
-    readSidecar(sessionName: string): { ok: true; data: { session_id?: string } } | { ok: false; reason: string };
+    readSidecar(sessionName: string): { ok: true; data: { session_id?: string; sampled_at?: string } } | { ok: false; reason: string };
   } | null;
+  /** Start time (`ps` lstart) of the Claude process now in the seat's pane, or null when unknown. */
+  claudeProcessStartedAt?: ((sessionName: string) => Promise<string | null>) | null;
   resumeTokenCapturer?: {
     captureCodexThreadId(sessionName: string): Promise<string | undefined>;
   } | null;
@@ -51,7 +53,28 @@ export type ResumeTokenDeriveResult =
   /** A live token was derived + format-validated. The caller persists it. */
   | { outcome: "captured"; resumeType: ResumeType; token: string }
   /** Derivation ran but produced no usable token — the caller emits a skip event. */
-  | { outcome: "skipped"; reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "invalid_token" | "capture_error" | "ambiguous_seat" };
+  | { outcome: "skipped"; reason: "missing_sidecar" | "parse_error" | "probe_timeout" | "process_unreadable" | "invalid_token" | "stale_sidecar" | "capture_error" | "ambiguous_seat" };
+
+/**
+ * A Claude sidecar outlives the process that wrote it (#421: a seat that keeps a user's own status
+ * line never refreshes it). A sample taken before the pane's current Claude process started can
+ * only come from an earlier process, so its session id is not this process's. True only when both
+ * times are known; unknown never reads as stale.
+ */
+export async function isClaudeSidecarFromEarlierProcess(
+  sampledAt: unknown,
+  sessionName: string,
+  claudeProcessStartedAt: ResumeTokenCaptureDeps["claudeProcessStartedAt"],
+): Promise<boolean> {
+  if (typeof sampledAt !== "string" || !claudeProcessStartedAt) return false;
+  const sampled = Date.parse(sampledAt);
+  if (Number.isNaN(sampled)) return false;
+  let startedAt: string | null;
+  try { startedAt = await claudeProcessStartedAt(sessionName); } catch { return false; }
+  // `ps` lstart is local time to the second, so a sample from the current process is never earlier.
+  const started = startedAt ? Date.parse(startedAt) : Number.NaN;
+  return !Number.isNaN(started) && sampled < started;
+}
 
 /**
  * Derive a runtime's resume token from live, read-only sources, via the
@@ -76,7 +99,22 @@ export async function deriveResumeToken(
     cwd: input.cwd,
     seatStateDir: runtimeSeatStateDir(descriptor.id, input.sessionName, input.stateRoot),
   }, deps);
-  if (captured.outcome !== "token") return captured;
+  if (captured.outcome !== "token") {
+    // Codex: a process listing that throws is upstream's process_unreadable (the
+    // exception text stays out of the event).
+    if (descriptor.id === "codex" && captured.outcome === "skipped" && captured.reason === "capture_error") {
+      return { outcome: "skipped", reason: "process_unreadable" };
+    }
+    return captured;
+  }
+  // Claude: a sidecar sampled before the pane's current Claude process started
+  // names an earlier process's session (#421), so its id is not this seat's.
+  if (descriptor.id === "claude-code" && deps.contextUsageStore) {
+    const sidecar = deps.contextUsageStore.readSidecar(input.sessionName);
+    if (sidecar.ok && await isClaudeSidecarFromEarlierProcess(sidecar.data.sampled_at, input.sessionName, deps.claudeProcessStartedAt)) {
+      return { outcome: "skipped", reason: "stale_sidecar" };
+    }
+  }
 
   // Defensive format validation before the caller persists: a malformed token
   // is an honest skip, never a bad write (validity-before-rank).

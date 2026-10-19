@@ -1,6 +1,6 @@
 /** Runtime hint from fingerprinting: a built-in hint, "unknown", or the id of
  *  a registered runtime matched by its descriptor paneCommands. */
-export type RuntimeHint = "claude-code" | "codex" | "pi" | "terminal" | "unknown" | (string & {});
+export type RuntimeHint = "claude-code" | "codex" | "pi" | "omp" | "terminal" | "unknown" | (string & {});
 
 /** Confidence level of the runtime detection */
 export type Confidence = "highest" | "high" | "medium" | "low";

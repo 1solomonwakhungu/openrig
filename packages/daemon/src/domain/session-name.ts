@@ -79,6 +79,9 @@ export function validateSessionComponents(
   } else {
     const err = validateSessionNameChars(podName, "pod name");
     if (err) errors.push(err);
+    if (podName.includes("@")) {
+      errors.push('pod name must not contain "@" — it separates the member from the rig');
+    }
   }
 
   if (!memberName) {
@@ -86,6 +89,9 @@ export function validateSessionComponents(
   } else {
     const err = validateSessionNameChars(memberName, "member name");
     if (err) errors.push(err);
+    if (memberName.includes("@")) {
+      errors.push('member name must not contain "@" — it separates the member from the rig');
+    }
   }
 
   if (!rigName) {
@@ -97,6 +103,18 @@ export function validateSessionComponents(
 
   return errors;
 }
+/**
+ * A session name tmux would create under a different name. tmux replaces "." with "_" in a
+ * session name, so `dev-impl@demo.v2` runs as `dev-impl@demo_v2` and every later lookup by the
+ * recorded name misses it. Launch preflight refuses these; parsing and validation above still
+ * accept "." (existing records, attach and restore are unchanged).
+ * Returns null when tmux keeps the name, or an error naming the session tmux would create.
+ */
+export function tmuxRenamedSessionError(sessionName: string): string | null {
+  if (!sessionName.includes(".")) return null;
+  return `session name "${sessionName}" contains "." and tmux would create it as "${sessionName.replace(/\./g, "_")}", so OpenRig could not reach the seat; use a rig name without dots`;
+}
+
 // ============================================================================
 // OPR.0.4.6.MH1 FR-8 — THE session-name parse contract (parity-pinned).
 //

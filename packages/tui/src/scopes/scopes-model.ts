@@ -3,7 +3,7 @@
 // header and responsive Intent / Requirements / Proof regions. PROGRESS.md still renders
 // ONLY in the `n` narrative panel, never in status, proof, or lock facts.
 import type { Action, ExplorerRow } from "../types.js";
-import type { ContentLine } from "../detail.js";
+import { sliceWhole, type ContentLine } from "../detail.js";
 import type { Token } from "../theme.js";
 
 export interface ScopeDropRef { file: string; artifactType: string | null; verdict: string | null; media: string[] }
@@ -12,6 +12,9 @@ export interface ScopeLocksSnap { spec: { by: string; at: string } | null; deliv
 export interface ReadinessSnap {
   configured: boolean; state: string; revision: string;
   issues?: string[];
+  /** The authored judgment policy; null when none is readable. `configured` alone also covers a leftover judgments
+   * directory or a failed policy read. Absent from an older daemon, which is read as no policy. */
+  policy?: { judges: string[] } | null;
   history?: Array<{ ref: string; id: string; verdict: string; previous: string | null }>;
   items: Array<{ id: string; index: number; text: string; state: string; reason: string; judgment: {
     id: string; actor?: string; at?: string; verdict?: string; previous?: string | null;
@@ -95,7 +98,7 @@ function semantic(parts: Seg[], width: number, action?: Action): ContentLine {
       segs.push(part);
       room -= part.text.length;
     } else {
-      segs.push({ ...part, text: room === 1 ? "…" : `${part.text.slice(0, room - 1)}…` });
+      segs.push({ ...part, text: room === 1 ? "…" : `${sliceWhole(part.text, room - 1)}…` });
       room = 0;
     }
   }
@@ -113,8 +116,9 @@ function wrapText(text: string, width: number): string[] {
       let word = original;
       while (word.length > limit) {
         if (line) { out.push(line); line = ""; }
-        out.push(word.slice(0, limit));
-        word = word.slice(limit);
+        const head = sliceWhole(word, limit) || word.slice(0, 2);
+        out.push(head);
+        word = word.slice(head.length);
       }
       if (!word) continue;
       if (!line) line = word;
@@ -180,6 +184,34 @@ export function proofProvenanceLines(proof: ReadinessSnap | null | undefined, wi
 function itemState(detail: SliceScopeSnap, item: ScopeContractItem): string {
   return detail.readiness?.configured ? detail.readiness.items.find(i => item.id !== undefined && i.id === item.id)?.state.toUpperCase() ?? "UNKNOWN" : item.paired ? "PAIRED" : "OPEN";
 }
+/** Current evidence comes only from the served judgment; drops retain every round. */
+function proofEvidence(detail: SliceScopeSnap, item: ScopeContractItem): Array<{ text: string; token: Token }> {
+  const lines: Array<{ text: string; token: Token }> = [];
+  const current = detail.readiness?.configured
+    ? detail.readiness.items.find(i => item.id !== undefined && i.id === item.id) : undefined;
+  const judgment = current?.judgment;
+  if (judgment) {
+    lines.push({ text: `Current judgment ${judgment.id}: ${current.reason}`, token: current.state === "accepted" ? "ok" : "warn" });
+    if (judgment.previous) lines.push({ text: `Corrects: ${judgment.previous}`, token: "dim" });
+    for (const evidence of judgment.evidence ?? []) {
+      lines.push({ text: `Evidence: ${evidence.ref}`, token: "dim" });
+      lines.push({ text: `SHA256: ${evidence.sha256}`, token: "dim" });
+    }
+    if (!judgment.evidence?.length) lines.push({ text: "Evidence references not served.", token: "warn" });
+  } else if (detail.readiness?.configured) {
+    lines.push({ text: "No current attributed judgment.", token: "warn" });
+  } else if (!item.drops.length) {
+    lines.push({ text: "not recorded", token: "warn" });
+  }
+  if (item.drops.length) lines.push({ text: "Retained proof drops — all rounds", token: "dim" });
+  for (const drop of item.drops) {
+    lines.push({ text: `↳ ${(drop.artifactType ?? "drop").toUpperCase()} ${drop.verdict ?? ""}`.trimEnd(), token: drop.verdict === "PASS" || drop.verdict === "CLEAR" ? "ok" : "dim" });
+    lines.push({ text: drop.file, token: "dim" });
+    for (const media of drop.media) lines.push({ text: `media ${media}`, token: "dim" });
+  }
+  return lines;
+}
+
 function proofColumns(detail: SliceScopeSnap, width: number): ContentLine[] {
   const stateW = 8;
   const indexW = 3;
@@ -205,15 +237,8 @@ function proofColumns(detail: SliceScopeSnap, width: number): ContentLine[] {
   const lines = [column("STATE", "#", "REQUIREMENT", "EVIDENCE", "accentBright", "accentBright")];
   for (const item of detail.proofContract) {
     const requirements = wrapText(item.text, requirementW);
-    const evidence: Array<{ text: string; token: Token }> = [];
-    const judgment = detail.readiness?.items.find(i => item.id !== undefined && i.id === item.id);
-    if (judgment?.judgment) evidence.push({ text: `judgment ${judgment.judgment.id.slice(0, 12)}: ${judgment.reason}`, token: judgment.state === "accepted" ? "ok" : "warn" });
-    if (item.drops.length === 0 && !judgment?.judgment) evidence.push({ text: "not recorded", token: "warn" });
-    for (const drop of item.drops) {
-      evidence.push({ text: `↳ ${(drop.artifactType ?? "drop").toUpperCase()} ${drop.verdict ?? ""}`.trimEnd(), token: drop.verdict === "PASS" || drop.verdict === "CLEAR" ? "ok" : "dim" });
-      evidence.push(...wrapText(drop.file, evidenceW).map((text) => ({ text, token: "dim" as Token })));
-      for (const media of drop.media) evidence.push(...wrapText(`media ${media}`, evidenceW).map((text) => ({ text, token: "dim" as Token })));
-    }
+    const evidence = proofEvidence(detail, item).flatMap(line =>
+      wrapText(line.text, evidenceW).map(text => ({ text, token: line.token })));
     const count = Math.max(requirements.length, evidence.length, 1);
     for (let i = 0; i < count; i += 1) {
       lines.push(column(
@@ -238,23 +263,8 @@ function proofStack(detail: SliceScopeSnap, width: number): ContentLine[] {
       { text: status, token: status === "ACCEPTED" ? "ok" : "warn", bold: true },
     ], width));
     lines.push(...wrapped(item.text, width, "    "));
-    const judgment = detail.readiness?.items.find(i => item.id !== undefined && i.id === item.id);
-    if (judgment?.judgment) lines.push(...wrapped(`judgment ${judgment.judgment.id.slice(0, 12)}: ${judgment.reason}`, width, "    "));
-    if (item.drops.length === 0) {
-      if (judgment?.judgment) continue;
-      lines.push(semantic([{ text: "    EVIDENCE · ", token: "dim" }, { text: "not recorded", token: "warn" }], width));
-      continue;
-    }
     lines.push(semantic([{ text: "    EVIDENCE", token: "dim", bold: true }], width));
-    for (const drop of item.drops) {
-      lines.push(semantic([
-        { text: "    ↳ ", token: "chrome" },
-        { text: (drop.artifactType ?? "drop").toUpperCase(), token: "accentBright" },
-        { text: ` ${drop.verdict ?? ""}`.trimEnd(), token: drop.verdict === "PASS" || drop.verdict === "CLEAR" ? "ok" : "dim" },
-      ], width));
-      lines.push(...wrapped(drop.file, width, "    ", "dim"));
-      for (const media of drop.media) lines.push(...wrapped(`media ${media}`, width, "    ", "dim"));
-    }
+    for (const line of proofEvidence(detail, item)) lines.push(...wrapped(line.text, width, "    ", line.token));
   }
   return lines;
 }
@@ -266,6 +276,22 @@ export interface ScopeContentOpts {
   executionStrip?: ContentLine[];
 }
 
+/** The header's proof count. With a judgment policy actually present it counts accepted items and is ok only
+ * when all are accepted. Otherwise it counts items an artifact cites, labelled "paired", because citation is
+ * not acceptance: that covers no policy, a judgments directory left behind after the policy was removed, and a
+ * failed policy read. Reported issues keep the count but never colour it ok. The colour follows the number shown. */
+function proofHeader(detail: SliceScopeSnap): { text: string; token: Token } {
+  const readiness = detail.readiness;
+  const broken = (readiness?.issues?.length ?? 0) > 0;
+  if (readiness?.configured && readiness.policy && !broken) {
+    const total = readiness.items.length;
+    const accepted = readiness.items.filter(i => i.state === "accepted").length;
+    return { text: `${accepted}/${total} accepted`, token: total > 0 && accepted === total ? "ok" : "warn" };
+  }
+  const { paired, total } = detail.proof;
+  return { text: `${paired}/${total} paired`, token: !broken && total > 0 && paired === total ? "ok" : "warn" };
+}
+
 /** Compact identity/status/provenance block shared by every route into the
  * canonical slice detail. Keeping it here prevents Explorer and mission-graph
  * navigation from growing separate slice pages again. */
@@ -275,7 +301,7 @@ export function scopeIdentityLines(detail: SliceScopeSnap, mission: string | nul
   const w = Math.max(24, width);
   const stage = detail.readiness?.configured ? (detail.readiness.state === "ready" ? "outcome complete" : detail.readiness.items.some(i => i.state === "withdrawn" || i.state === "rejected") ? "reopened" : "outcomes pending") : detail.stage ?? detail.status ?? "unknown";
   const stateToken: Token = /done|established|building|active|spec/i.test(stage) ? "ok" : "dim";
-  const proofToken: Token = detail.proof.total > 0 && detail.proof.paired === detail.proof.total ? "ok" : "warn";
+  const { text: proofText, token: proofToken } = proofHeader(detail);
   const locks = `${detail.locks.spec ? "spec locked" : "spec open"} · ${detail.locks.delivery ? "delivery locked" : "delivery open"}`;
   lines.push(semantic([
     { text: `${sliceGlyph(detail)} `, token: stateToken, bold: true },
@@ -291,18 +317,21 @@ export function scopeIdentityLines(detail: SliceScopeSnap, mission: string | nul
       { text: `${detail.id ?? "unregistered"} · ${detail.displayName}`, token: "bright" },
     ], w));
   }
-  if (w < 70) {
+  const wide = [
+    { text: "  STATE ", token: "dim" as Token }, { text: stage, token: stateToken, bold: true },
+    { text: " · ", token: "chrome" as Token },
+    { text: "PROOF ", token: "dim" as Token }, { text: proofText, token: proofToken, bold: true },
+    { text: " · ", token: "chrome" as Token },
+    { text: "LOCKS ", token: "dim" as Token }, { text: locks, token: detail.locks.delivery ? "ok" as Token : "bright" as Token },
+  ];
+  // One line while it fits. A longer proof label (or stage) must not cut the lock state with an ellipsis, so
+  // a line wider than the detail stacks exactly as the narrow layout does.
+  if (w < 70 || wide.reduce((n, part) => n + part.text.length, 0) > w) {
     lines.push(semantic([{ text: "  STATE  ", token: "dim" }, { text: stage, token: stateToken, bold: true }], w));
-    lines.push(semantic([{ text: "  PROOF  ", token: "dim" }, { text: `${detail.proof.paired}/${detail.proof.total}`, token: proofToken, bold: true }], w));
+    lines.push(semantic([{ text: "  PROOF  ", token: "dim" }, { text: proofText, token: proofToken, bold: true }], w));
     lines.push(semantic([{ text: "  LOCKS  ", token: "dim" }, { text: locks, token: detail.locks.delivery ? "ok" : "bright" }], w));
   } else {
-    lines.push(semantic([
-      { text: "  STATE ", token: "dim" }, { text: stage, token: stateToken, bold: true },
-      { text: " · ", token: "chrome" },
-      { text: "PROOF ", token: "dim" }, { text: `${detail.proof.paired}/${detail.proof.total}`, token: proofToken, bold: true },
-      { text: " · ", token: "chrome" },
-      { text: "LOCKS ", token: "dim" }, { text: locks, token: detail.locks.delivery ? "ok" : "bright" },
-    ], w));
+    lines.push(semantic(wide, w));
   }
   if (detail.readiness?.configured) lines.push({ text: `  judgment basis ${detail.readiness.revision.slice(0, 12)} · publication is separate` });
   const provenance = [
@@ -325,7 +354,7 @@ export function scopeContractLines(detail: SliceScopeSnap, opts: Pick<ScopeConte
   const lines: ContentLine[] = [];
   const w = Math.max(24, opts.width);
   if (opts.narrative) {
-    lines.push({ text: "" }, rule("PROGRESS · narrative only · n closes", w));
+    lines.push({ text: "" }, rule("PROGRESS · narrative only · N closes", w));
     for (const l of (detail.narrative ?? "(no PROGRESS.md)").split("\n")) lines.push(...wrapped(l, w, "  "));
     return lines;
   }
@@ -333,7 +362,7 @@ export function scopeContractLines(detail: SliceScopeSnap, opts: Pick<ScopeConte
   lines.push({ text: "" }, rule("INTENT", w));
   lines.push(...wrapped(detail.intent, w, "  "));
 
-  lines.push({ text: "" }, rule(`REQUIREMENTS (${detail.miniRequirements.length}) · m collapses`, w));
+  lines.push({ text: "" }, rule(`REQUIREMENTS (${detail.miniRequirements.length}) · M collapses`, w));
   if (!opts.collapseReqs) {
     detail.miniRequirements.forEach((requirement, i) => {
       const chunks = wrapText(requirement, Math.max(1, w - 5));
@@ -343,7 +372,7 @@ export function scopeContractLines(detail: SliceScopeSnap, opts: Pick<ScopeConte
       ], w)));
     });
   } else {
-    lines.push(semantic([{ text: "  collapsed · m expands", token: "dim" }], w));
+    lines.push(semantic([{ text: "  collapsed · M expands", token: "dim" }], w));
   }
 
   lines.push({ text: "" }, rule(`PROOF · ${detail.proof.paired}/${detail.proof.total} paired`, w));
@@ -368,7 +397,7 @@ export function scopesContentLines(
   lines.push(...proofProvenanceLines(detail.readiness, w));
   lines.push(...scopeContractLines(detail, opts));
   lines.push({ text: "" }, semantic([{
-    text: opts.narrative ? "  esc back · n narrative · m reqs · : command bar" : "  esc back · m collapse reqs · n narrative · : command bar",
+    text: opts.narrative ? "  esc back · N narrative · M reqs · : command bar" : "  esc back · M collapse reqs · N narrative · : command bar",
     token: "dim",
   }], w));
   return lines;

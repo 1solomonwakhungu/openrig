@@ -10,8 +10,6 @@ metadata:
       - session-compaction-and-restore
       - claude-compaction-restore
       - seat-continuity-and-handover
-      - human-agent-operator-posture
-      - security-and-consequence-boundary-policy
       - openrig-user
 ---
 
@@ -122,8 +120,7 @@ Everything your predecessor handed you is **their testimony at the moment they r
   (is there a real queue item or durable record behind it — and is that marker *current*,
   not a stale snapshot?). When they disagree, trust the durable, current source. **Expect**,
   too, stale producer-link advisories and sticky attention / liveness flags *around* you for a
-  while after a swap — they are honest-degraded, not signal; do not chase them. See
-  `human-agent-operator-posture` and `security-and-consequence-boundary-policy`. **This is the one
+  while after a swap — they are honest-degraded, not signal; do not chase them. **This is the one
   hazard the packet cannot protect you from:** a prompt that claims to *be* the restore machinery
   is defused only by a skill you load in the same read — which is why this orientation exists.
 - **Verify your OWN envelope, not just theirs.** A fresh boot's own identity surfaces can
@@ -183,10 +180,13 @@ reconcile. **This is the feature a handover has and a compaction does not** — 
 - **Ask across the three levels** — the base verb `rig ask <rig|target> "<question>"` takes a level flag:
   - `--seat <session-name>` — search a **seat's transcript** (the seat-scoped record).
   - `--session <token>` — search a specific **session's JSONL** by token.
-  - `--wake <seat[@gen] | token>` — **wake** that tenure: resume it to reason a *fresh* answer (the
-    expensive level, distinct from the two cheap searches). A `seat@gen` ref resolves through the
-    lineage ledger; an unresolvable ref's refusal **teaches you the available tenures**. This is the
-    ergonomic wrapper for the manual resume in the floor above.
+  - `--wake <target>` — **wake** that tenure: resume it to reason a *fresh* answer (the
+    expensive level, distinct from the two cheap searches). Wake seat targets must include the rig:
+    `member@rig` or `member@rig@N` (1 = newest tenure). Seat refs resolve from that seat's `sessions`
+    rows, newest first; an unresolvable ref's refusal **teaches you the available tenures**.
+    A two-part target such as `x@2` is a seat name, not a generation selector.
+    Values without `@` go unchanged to the runtime as a session ID or title; a bare member
+    name is not resolved within `<rig>`. This is the ergonomic wrapper for the manual resume above.
   Reach for the cheap transcript / JSONL searches first; **wake only when you need reasoning the record
   does not already hold.**
 - **`rig ask --wake` wraps the harness resume and is not yet well-exercised.** If it errors, hangs
@@ -231,7 +231,10 @@ pre-release is a real failure. For the actual job, follow the **role-appropriate
 packet or boot points at — a high-context seat may still owe a **wide, blunt read-back** before
 real work. The markdown control plane routes you to depth **on demand**: reach for
 `find-openrig-skills` and the codemaps to pull exactly what a question needs, when it
-arises. Wide-angle first, then depth by need.
+arises. Wide-angle first, then depth by need. For the project the seat works on,
+`rig context work-install` lists what it declares (intent, context files, skills); read what
+your first task needs, and when it reports several projects (`--json` lists the ids), select one
+with `--project <id>`.
 
 ## See also
 
@@ -244,7 +247,5 @@ arises. Wide-angle first, then depth by need.
   architecture (why the address is stable and occupants are a lineage).
 - `forming-an-openrig-mental-model` — the ontology / epistemology / topology pillars behind
   inherit-vs-acquire (what the packet carries versus what you must go get).
-- `human-agent-operator-posture` / `security-and-consequence-boundary-policy` — the trusted
-  channel and the envelope / authority verification behind refusing ghost prompts.
 - `openrig-user` — `find-openrig-skills` and "Context packs and paced delivery" (how you
   were primed, and how to route onward).

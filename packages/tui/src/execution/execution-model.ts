@@ -16,7 +16,7 @@ import { workflowOverview, workflowDetail } from "./workflow-model.js";
 // Every row opens a page built from the projections' own values; `esc` returns.
 import type { Action, SliceDetailSnap } from "../types.js";
 import type { Token } from "../theme.js";
-import { wrapDetailLines, detailPage, listItem, sectionRule, type ContentLine, type Section } from "../detail.js";
+import { sliceWhole, wrapDetailLines, detailPage, listItem, sectionRule, type ContentLine, type Section } from "../detail.js";
 import { scopeContractLines, scopeIdentityLines, proofProvenanceLines, type ReadinessSnap, type MissionScopesSnap, type SliceScopeSnap } from "../scopes/scopes-model.js";
 
 export interface ExecutionViewSnap {
@@ -57,7 +57,7 @@ function shortSha(value: unknown): string {
 }
 
 function clip(text: string, room: number): string {
-  return text.length > room ? `${text.slice(0, Math.max(room - 1, 0))}…` : text;
+  return text.length > room ? `${sliceWhole(text, Math.max(room - 1, 0))}…` : text;
 }
 
 type SemanticSeg = NonNullable<ContentLine["segs"]>[number];
@@ -72,7 +72,7 @@ function fitSegs(parts: SemanticSeg[], width: number): SemanticSeg[] {
       room -= part.text.length;
       continue;
     }
-    out.push({ ...part, text: room === 1 ? "…" : `${part.text.slice(0, room - 1)}…` });
+    out.push({ ...part, text: room === 1 ? "…" : `${sliceWhole(part.text, room - 1)}…` });
     room = 0;
   }
   return out;
@@ -93,6 +93,7 @@ function stateToken(word: string): Token {
   if (word === "working" || word === "done" || word === "outcome complete" || word === "active") return "ok";
   if (word === "needs input" || word === "blocked" || word === "parked") return "warn";
   if (word === "failed") return "error";
+  if (word === "retired" || word === "deferred") return "dim";
   return "dim";
 }
 
@@ -112,7 +113,7 @@ function row(text: string, key: string, width = Number.MAX_SAFE_INTEGER): Conten
 
 // ---- facts per slice ----------------------------------------------------------
 
-interface RungCell { value: unknown; basis: string; state: "yes" | "no" | "undetermined" }
+interface RungCell { value: unknown; basis: string; state: "yes" | "no" | "undetermined" | "N/A" }
 
 function rungCell(ladder: Record<string, unknown>, rung: Rung): RungCell {
   const cell = record(ladder[rung]);
@@ -122,7 +123,7 @@ function rungCell(ladder: Record<string, unknown>, rung: Rung): RungCell {
     return { value: sha, basis, state: typeof sha === "string" && sha !== INDETERMINATE ? "yes" : "undetermined" };
   }
   const value = cell["value"];
-  return { value, basis, state: value === true ? "yes" : value === false ? "no" : "undetermined" };
+  return { value, basis, state: value === "NOT_APPLICABLE" ? "N/A" : value === true ? "yes" : value === false ? "no" : "undetermined" };
 }
 
 /** Highest rung actually confirmed (true / built sha), 0 = nothing confirmed. */
@@ -174,7 +175,7 @@ function sliceFacts(execution: ExecutionViewSnap, scopes: readonly MissionScopes
     const cells = Object.fromEntries(RUNGS.map((rung) => [rung, rungCell(ladder, rung)])) as Record<Rung, RungCell>;
     const seqIndex = seq.findIndex((item) => item["slice_id"] === id || item["dir"] === dir);
     const scope = missionScopes?.slices.find((slice) => slice.id === id || slice.dirName === dir) ?? null;
-    const lane = lanes.find((candidate) => candidate["slice"] === id) ?? null;
+    const lane = lanes.find((candidate) => candidate["slice"] === id || candidate["slice"] === dir) ?? null;
     return {
       id,
       dir,
@@ -210,6 +211,10 @@ function blockerText(rows: unknown, lead: "blocker" | "row" = "row"): string {
     .join("; ");
 }
 
+function stageText(slice: SliceFacts): string {
+  return slice.scope?.stage?.trim().toLowerCase() || "";
+}
+
 /** Declared work state — the slice file's own status word, verbatim. */
 function declaredText(slice: SliceFacts): string {
   return slice.scope?.status?.trim().toLowerCase() || "no declared status";
@@ -218,6 +223,18 @@ function declaredText(slice: SliceFacts): string {
 function seatShort(seat: unknown): string {
   const full = str(seat, "");
   return full.includes("@") ? full.slice(0, full.indexOf("@")) : full;
+}
+
+/** What a waiting lane (a row parked on an external gate) waits on, or null for active work. */
+function waitingOn(lane: Record<string, unknown> | null | undefined): string | null {
+  const on = record(lane?.["waiting"])["on"];
+  return typeof on === "string" && on ? on : null;
+}
+
+/** A waiting row in words: the seat, the actual blocker and the row. Never a builder assignment. */
+function waitingRowText(lane: Record<string, unknown>): string | null {
+  const on = waitingOn(lane);
+  return on ? `waiting row · ${str(lane["seat"])} · ${on} · ${str(lane["qitem_id"])}` : null;
 }
 
 /** A live problem on the slice, in words, or null. Elapsed time alone is never a verdict. */
@@ -248,6 +265,8 @@ function stateWord(slice: SliceFacts): string {
   if (outcomeComplete(slice)) return "outcome complete";
   if (slice.readiness?.items.some(i => i.state === "withdrawn" || i.state === "rejected")) return "reopened";
   if (slice.readiness?.configured) return "outcomes pending";
+  if (stageText(slice) === "retired" || declaredText(slice) === "retired") return "retired";
+  if (declaredText(slice) === "deferred" || declaredText(slice) === "closed-deferred") return "deferred";
   return declaredText(slice) === "done" ? "declared done" : "planned";
 }
 
@@ -397,6 +416,7 @@ function collectIndeterminate(execution: ExecutionViewSnap, slices: SliceFacts[]
     if (first) add(RUNG_WORD[first], slice.id, slice.cells[first].basis);
   }
   for (const lane of execution.q1_lanes ?? []) {
+    if (waitingOn(lane)) continue; // a wait does not depend on the seat's activity
     const activity = record(lane["activity"]);
     if (activity["activity"] === INDETERMINATE) add("activity", str(lane["slice"] ?? lane["qitem_id"], "lane"), activity["basis"]);
   }
@@ -421,7 +441,7 @@ function evidenceDetail(execution: ExecutionViewSnap, slices: SliceFacts[], widt
   }
   lines.push({ text: "" }, sectionRule("code lineage · separate from item judgments", width),
     { text: `  git:         ${gitBasis}` },
-    ...wrapDetailLines([{ text: "  Build, review, merge and live-runtime facts remain on each slice's code evidence. Artifact acceptance supplies none of these code facts." }], width));
+    ...wrapDetailLines([{ text: "  Build, review and merge facts remain on each slice's code evidence. Daemon adoption applies only to the unscoped daemon-source view. Artifact acceptance supplies none of these code facts." }], width));
   for (const item of collectIndeterminate(execution, slices)) {
     lines.push({ text: "" }, sectionRule(`${item.where} unconfirmed for ${item.members.length} slice${item.members.length === 1 ? "" : "s"}`, width));
     lines.push({ text: `  basis:       ${item.basis}` });
@@ -487,7 +507,7 @@ function overviewLines(execution: ExecutionViewSnap, scopes: readonly MissionSco
   const provenanceAction = attributed || unknown > 0 ? open("evidence") : open("sources");
   const provenance: SemanticSeg[] = [
     { text: "  provenance · ", token: "dim" },
-    { text: attributed ? `proof judgments · ${done}/${slices.length} ready${unknown ? ` · ${unknown} legacy unknown` : ""}` : unknown > 0 ? `evidence gap ${unknown}/${slices.length} unknown` : `build ${build}`, token: unknown > 0 || (attributed && execution.readiness!.state === "unknown") ? "warn" : "dim" },
+    { text: attributed ? `proof judgments · ${done}/${slices.length} ready${unknown ? ` · ${unknown} legacy unknown` : ""}` : unknown > 0 ? `evidence gap ${unknown}/${slices.length} unknown` : `daemon build ${build}`, token: unknown > 0 || (attributed && execution.readiness!.state === "unknown") ? "warn" : "dim" },
   ];
   const localTime = displayTime(execution.derived_at, timeZone);
   if (provenance.reduce((n, s) => n + s.text.length, 0) + localTime.length + 3 <= width) {
@@ -557,8 +577,9 @@ function wrapWords(text: string, width: number): string[] {
     let word = raw;
     while (word.length > room) {
       if (line) { out.push(line); line = ""; }
-      out.push(word.slice(0, room));
-      word = word.slice(room);
+      const head = sliceWhole(word, room) || word.slice(0, 2);
+      out.push(head);
+      word = word.slice(head.length);
     }
     if (!word) continue;
     if (!line) line = word;
@@ -624,17 +645,18 @@ function sliceDetail(
     const candidateDeps = candidate.sequencing?.["depends_on"];
     return Array.isArray(candidateDeps) && candidateDeps.map(String).includes(slice.id);
   }).map((candidate) => candidate.id);
+  const waitingRow = slice.lane ? waitingRowText(slice.lane) : null;
   const ownership: ContentLine[] = [
-    cardField("seat", slice.lane ? str(slice.lane["seat"]) : "none — no claimed lane", slice.lane ? open(laneKey(slice.lane)) : undefined),
-    cardField("activity", slice.lane ? str(activity["activity"], INDETERMINATE) : "not assigned"),
-    cardField("decided by", slice.lane ? str(activity["decided_by"] ?? activity["basis"], "basis unavailable") : "—"),
-    cardField("changed", slice.lane ? str(activity["changed_at"], "—") : "—"),
+    cardField("seat", slice.lane && !waitingRow ? str(slice.lane["seat"]) : "none — no in-progress lane", slice.lane && !waitingRow ? open(laneKey(slice.lane)) : undefined),
+    cardField("activity", slice.lane ? (waitingRow ?? str(activity["activity"], INDETERMINATE)) : "not assigned", waitingRow ? open(laneKey(slice.lane!)) : undefined),
+    cardField("decided by", slice.lane && !waitingRow ? str(activity["decided_by"] ?? activity["basis"], "basis unavailable") : "—"),
+    cardField("changed", slice.lane && !waitingRow ? str(activity["changed_at"], "—") : "—"),
   ];
   const evidence: ContentLine[] = [];
   for (const rung of RUNGS) {
     const cell = slice.cells[rung];
     const value = rung === "built" ? (cell.state === "yes" ? shortSha(cell.value) : "undetermined") : cell.state;
-    evidence.push(cardField(RUNG_WORD[rung], `${value} · ${cell.basis}`));
+    evidence.push(...wrappedCardField(rung === "adopted" && cell.state === "N/A" ? "daemon live" : RUNG_WORD[rung], `${value} · ${cell.basis}`, width));
   }
   const legs = record(slice.ladder["reviewed"])["legs"];
   if (Array.isArray(legs)) for (const leg of legs) {
@@ -658,10 +680,13 @@ function sliceDetail(
   ];
 
   const source = record(slice.sequencing?.["source"]);
+  const supersededBy = record(execution.sources["wave_map"])["superseded_by"];
+  const waveMapSource = typeof supersededBy === "string" && supersededBy
+    ? `superseded by ${supersededBy}` : str(source["wave_map_row"], "not named");
   const sourceRows = [
     cardField("spec", str(source["spec_path"], "not named")),
     cardField("arrangement", str(source["arrangement_path"], "not named")),
-    cardField("wave map", str(source["wave_map_row"], "not named")),
+    ...wrappedCardField("wave map", waveMapSource, width),
   ];
   const identity = slice.scope
     ? scopeIdentityLines(slice.scope, execution.mission, width)
@@ -703,17 +728,21 @@ function laneDetail(execution: ExecutionViewSnap, key: string): ContentLine[] | 
   const sections: Section[] = [];
   if (lane) {
     sections.push({
-      title: "lane",
+      title: waitingOn(lane) ? "waiting row" : "lane",
       fields: [
         { label: "qitem", value: str(lane["qitem_id"]) },
         { label: "slice", value: str(lane["slice"]), link: open(`slice:${str(lane["slice"])}`) },
         { label: "seat", value: str(lane["seat"]) },
-        { label: "activity", value: str(activity["activity"], INDETERMINATE) },
-        { label: "decided by", value: str(activity["decided_by"] ?? activity["basis"], "basis unavailable") },
-        { label: "changed", value: str(activity["changed_at"], "—") },
+        ...(waitingOn(lane)
+          ? [{ label: "waiting on", value: waitingOn(lane)! }]
+          : [
+              { label: "activity", value: str(activity["activity"], INDETERMINATE) },
+              { label: "decided by", value: str(activity["decided_by"] ?? activity["basis"], "basis unavailable") },
+              { label: "changed", value: str(activity["changed_at"], "—") },
+            ]),
         { label: "needs input", value: Number(needs["count"] ?? 0) > 0 ? `${str(needs["count"])} · ${str(needs["reason"], "input")}` : "none" },
         { label: "pickup", value: str(record(lane["pickup"])["state"], INDETERMINATE) },
-        { label: "oracle", value: str(activity["source"], "(not named)") },
+        ...(waitingOn(lane) ? [] : [{ label: "oracle", value: str(activity["source"], "(not named)") }]),
       ],
     });
     sections.push({
@@ -814,18 +843,20 @@ export function executionSliceStripLines(
   const problem = problemText(slice);
   const unconfirmed = RUNGS.filter((rung) => slice.cells[rung].state === "undetermined").map((rung) => RUNG_WORD[rung]);
   const evidence = `${evidenceText(slice.cells, slice.rank)}${unconfirmed.length ? ` · ${unconfirmed.join(" / ")} unconfirmed (${slice.cells[RUNGS.find((rung) => slice.cells[rung].state === "undetermined")!].basis})` : ""}`;
-  const liveWord = slice.lane ? str(activity["activity"], "claimed") : "no claimed lane";
+  const liveWord = slice.lane ? (waitingOn(slice.lane) ? "waiting" : str(activity["activity"], "claimed")) : "no claimed lane";
   const declaredWord = declared?.trim().toLowerCase() || "no declared status";
-  const next = declaredWord === "done" && !slice.lane
-    ? "none — declared done"
-    : nextText(slice) ?? (slice.lane ? "in progress on the lane above" : "nothing the projection can sequence");
+  const next = (declaredWord === "done" || declaredWord === "retired" || declaredWord === "deferred" || declaredWord === "closed-deferred") && !slice.lane
+    ? `none — declared ${declaredWord}`
+    : nextText(slice) ?? (slice.lane ? (waitingOn(slice.lane) ? `waiting on ${waitingOn(slice.lane)}, see the waiting row above` : "in progress on the lane above") : "nothing the projection can sequence");
   return [
     { text: "" },
     sectionRule(`EXECUTION · ${problem ? stateWord(slice) : liveWord} · wave ${waveOf(slice)}`, width),
     ...workflowOverview(execution, width),
     { text: `  declared    ${declaredWord} (slice file)` },
     actionRow(slice.readiness?.configured ? `proof ${slice.readiness.state} · inspect judgments and evidence` : `evidence    ${evidence}`, open("evidence"), width),
-    { text: `  assignment  ${slice.lane ? `${str(slice.lane["seat"])} · ${str(activity["activity"], INDETERMINATE)} (${str(activity["decided_by"], "?")})` : "none — no claimed lane"}`, ...(slice.lane ? { action: open(laneKey(slice.lane)) } : {}) },
+    { text: slice.lane && waitingOn(slice.lane)
+      ? `  waiting     ${waitingRowText(slice.lane)!.replace(/^waiting row · /, "")}`
+      : `  assignment  ${slice.lane ? `${str(slice.lane["seat"])} · ${str(activity["activity"], INDETERMINATE)} (${str(activity["decided_by"], "?")})` : "none — no claimed lane"}`, ...(slice.lane ? { action: open(laneKey(slice.lane)) } : {}) },
     { text: `  next        ${next}` },
     { text: `  problem     ${problem ?? "none on the projection's current surfaces"}` },
     ...planningLines(execution, width), ...planningLines(execution, width, waveOf(slice), true),

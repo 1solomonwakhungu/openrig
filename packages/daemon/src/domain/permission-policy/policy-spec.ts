@@ -7,10 +7,11 @@
 // the skill). Schema authority: ARCH-POLICY-SPEC-SCHEMA sha256-8 92409094.
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { findFrontmatterBlock } from "../frontmatter.js";
 
 export type PolicySurface = "flag" | "config";
 export type PolicySource = "builtin" | "custom";
-export type LaunchPosture = "floor" | "full_bypass";
+export type LaunchPosture = "floor" | "full_bypass" | "auto";
 export type DefaultPosture = "allow" | "ask" | "deny";
 
 /** A parsed policy spec: the raw frontmatter object + the preserved Markdown body. */
@@ -24,24 +25,20 @@ export interface ParseError {
   error: string;
 }
 
-// Leading `---\n<yaml>\n---\n<body>` frontmatter block. Non-greedy YAML capture so the FIRST closing
-// `---` ends the frontmatter; everything after is the body (preserved exactly).
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
-
 /** Parse a policy spec into its frontmatter contract + preserved body. Never throws. */
 export function parsePolicySpec(raw: string): ParsedPolicySpec | ParseError {
-  const m = FRONTMATTER_RE.exec(raw);
-  if (!m) return { error: "policy spec must open with a '---' YAML frontmatter block" };
+  const block = findFrontmatterBlock(raw, { consumeClosingNewline: true });
+  if (!block) return { error: "policy spec must open with a '---' YAML frontmatter block" };
   let frontmatter: unknown;
   try {
-    frontmatter = parseYaml(m[1]!);
+    frontmatter = parseYaml(block.yaml);
   } catch (e) {
     return { error: `frontmatter is not valid YAML: ${(e as Error).message}` };
   }
   if (!frontmatter || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
     return { error: "frontmatter must be a YAML object at the root" };
   }
-  return { frontmatter: frontmatter as Record<string, unknown>, body: m[2] ?? "" };
+  return { frontmatter: frontmatter as Record<string, unknown>, body: raw.slice(block.bodyStart) };
 }
 
 export interface ValidationResult {
@@ -51,7 +48,7 @@ export interface ValidationResult {
 
 const SOURCES = new Set(["builtin", "custom"]);
 const SURFACES = new Set(["flag", "config"]);
-const LAUNCH_POSTURES = new Set(["floor", "full_bypass"]);
+const LAUNCH_POSTURES = new Set(["floor", "full_bypass", "auto"]);
 const DEFAULT_POSTURES = new Set(["allow", "ask", "deny"]);
 const ACTION_LIST_FIELDS = ["allow", "ask", "deny", "destructive_class"] as const;
 
@@ -80,7 +77,7 @@ export function validatePolicySpec(fm: Record<string, unknown>): ValidationResul
   }
 
   if (surface === "flag") {
-    if (!LAUNCH_POSTURES.has(fm["launch_posture"] as string)) errors.push("flag-surface policy requires launch_posture ('floor' or 'full_bypass')");
+    if (!LAUNCH_POSTURES.has(fm["launch_posture"] as string)) errors.push("flag-surface policy requires launch_posture ('floor', 'full_bypass' or 'auto')");
     if (fm["default_posture"] !== undefined) errors.push("flag-surface policy must NOT carry default_posture (config-surface field)");
     for (const f of ACTION_LIST_FIELDS) if (fm[f] !== undefined) errors.push(`flag-surface policy must NOT carry '${f}' (config-surface field)`);
   } else {

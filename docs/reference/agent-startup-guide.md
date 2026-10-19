@@ -1,12 +1,67 @@
 # Agent Startup Guide
 
-Version: 0.2.0
-Last validated: 2026-04-11
-Applies to: OpenRig 0.1.x
+Last validated: 2026-10-05, against main `9b88b118`
+Applies to: OpenRig 0.6.8
 
 This guide teaches you how to think about what goes into an agent's startup experience — what files to write, where to put them, and how the layering model delivers them. It is an authoring guide, not a schema reference. For field-level details, see `rig-spec.md` and `agent-spec.md`.
 
 ---
+
+## Continue after a native consent prompt
+
+If a fresh Claude seat is waiting at its bypass-permissions warning, review and
+answer that warning in the seat's native pane. Unless the rig was launched with
+`--non-interruptive` (see [non-interruptive mode](non-interruptive-mode.md)),
+OpenRig does not accept it for you, and it never sends configured startup context
+into the active dialog. The seat reports `attention_required` and retains that
+context for the same occupant.
+
+After accepting, run `rig seat continue <seat>` (or press `c` on the seat in the
+TUI, shown while its context is pending). This delivers the pending context
+without relaunching Claude, and its first prompt reminds the seat that this is a
+fresh conversation and how to find its work. It does not replay a delivery that
+already started. A timeout, or a refusal because nothing is pending, reports an
+unknown outcome; inspect `rig seat status <seat>` before taking another action.
+It is also refused while the prompt is still showing (`attention_required`), or
+when the seat's binding or runtime has changed since launch.
+Runtime readiness, startup delivery, and orientation proof remain separate;
+a missing proof does not block this continuation.
+
+Other fresh-launch prerequisites, such as login or workspace trust, use the same
+continuation: resolve the prerequisite in the native pane, then run the displayed
+command. `rig ps --nodes` shows it under "Startup details (<seat>)", and
+`rig up` and `rig bundle install` print it as "Startup attention (<seat>)":
+"After resolving it in <session>, run: rig seat continue <session>".
+
+The attention codes that stop startup this way are `trust_gate`,
+`hook_trust_gate`, `update_gate`, `login_required`, `mcp_gate`,
+`bypass_consent_gate`, `codex_auth_refusal` and `codex_client_incompatible`.
+They are recognized from each harness's English prompt text.
+
+## Continue a Codex fork whose child ID arrived late
+
+For a member with `session_source.mode: fork`, OpenRig waits for Codex's new
+child thread ID before sending its role and other startup prompts. It saves the
+ID and sends the role only for a verified child: the bound pane's foreground
+process forks the requested parent, and its own native record, matched to its
+start time, supplies the ID. This capture uses `runtime.readiness_timeout_seconds`
+(30 seconds by default, configurable from 1 to 600 seconds), as does the later
+readiness check. The two waits have separate budgets. A seat handover with
+`--source fork:<seat>` is different: its fork carries the conversation itself,
+and a missed ID capture leaves the ID pending rather than stopping the handover.
+
+If the ID is still unavailable, the seat reports `attention_required` and keeps
+its startup context pending. Wait for the child to finish starting, resolve any
+native prompt, then run `rig seat continue <seat>`. The continuation verifies
+that the bound pane is running a fork of the requested parent and reads the
+child's own native identity before delivering the saved context. It does not
+launch another fork or resume the parent. The parent ID is never saved as the
+child's resume token.
+
+An unavailable or conflicting identity leaves the context pending. Once prompt
+delivery has been attempted, it cannot be replayed by `continue`, including
+after a daemon restart: inspect `rig seat status <seat>` and the native pane
+before deciding how to recover an uncertain delivery.
 
 ## Two Categories of Startup
 
@@ -26,14 +81,14 @@ Context loading shapes what the agent knows, believes, and is capable of:
 ### Category 2: Deterministic Configuration
 
 The rig spec declaratively installs things into the agent's runtime environment:
-- Hooks (git hooks, pre-commit scripts)
+- Hooks (shipped inside plugins)
 - Permissions (`.claude/settings.json` allowlists, approval modes)
 - MCPs (Model Context Protocol servers)
 - System dependencies (tools, packages)
 
 See the **Current Support Matrix** section at the end of this guide for what is reliable today vs experimental.
 
-**The v0.2.0 recommendation:** Put as much of your setup logic as possible into Category 1 (context loading via markdown files). Describe the desired end state in startup files and let the agent handle the configuration. The deterministic path exists in the spec and will become more reliable over time, but for now the context-loading path is the one that works consistently across runtimes.
+**The recommendation:** Put as much of your setup logic as possible into Category 1 (context loading via markdown files). Describe the desired end state in startup files and let the agent handle the configuration. The deterministic path exists in the spec and will become more reliable over time, but for now the context-loading path is the one that works consistently across runtimes.
 
 ---
 
@@ -118,12 +173,15 @@ Startup content is merged additively through layers. Each layer adds to what the
 ```
 1. Agent layer     — from the AgentSpec's top-level startup block
 2. Profile layer   — from the active profile's startup block
-3. Rig layer       — from the RigSpec's top-level startup block
-4. Culture layer   — from the RigSpec's culture_file
+3. Culture layer   — OpenRig's default culture, then the RigSpec's culture_file
+4. Rig layer       — from the RigSpec's top-level startup block
 5. Pod layer       — from the pod's startup block
 6. Member layer    — from the member's startup block in the RigSpec
-7. Operator layer  — injected at runtime (openrig-start overlay, context collector, etc.)
+7. Operator layer  — added by OpenRig: openrig-start.md and, on a fresh start, the onboarding pack
 ```
+
+A member with a `starter_ref` gets that agent starter's files in front of the agent layer. Terminal seats
+(`builtin:terminal`) skip the agent and profile layers.
 
 ### What Each Layer Is For
 
@@ -131,17 +189,19 @@ Startup content is merged additively through layers. Each layer adds to what the
 |-------|-------------|---------|-----------------|
 | Agent | Agent spec author | Core identity and capabilities that travel with this agent type | Role guidance, default skills |
 | Profile | Agent spec author | Profile-specific variations | Different skill sets for "default" vs "minimal" profiles |
-| Rig | Rig spec author | Rig-wide context for all agents | Team norms, project documentation |
-| Culture | Rig spec author | Rig constitution | `CULTURE.md` — communication, quality, operating philosophy |
+| Culture | OpenRig, then the rig spec author | Team norms | OpenRig's `CULTURE-default.md` for every seat, then the rig's own `CULTURE.md` |
+| Rig | Rig spec author | Rig-wide context for all agents | Project documentation |
 | Pod | Rig spec author | Pod-specific coordination context | Pod SOP, intra-pod workflow |
 | Member | Rig spec author | Individual member overrides | Member-specific instructions, cwd-specific context |
-| Operator | OpenRig system | System-injected runtime content | `openrig-start.md`, context collector |
+| Operator | OpenRig system | System-injected runtime content | `openrig-start.md` (optional delivery); on a fresh start, `openrig-onboarding-01.md` and `-02.md` unless `onboarding.default_pack.enabled` is false |
+
+After the files, OpenRig sends a session-identity message (rig, pod, member, logical ID) once the seat is ready.
 
 ### Practical Guidance
 
-**Most rigs only need three layers:** agent (role.md), rig (culture), and operator (openrig-start). Start simple. Add pod and member layers only when agents in the same pod need different startup content.
+**Most rigs only need three layers:** agent (role.md), culture, and the built-in operator layer. Start simple. Add pod and member layers only when agents in the same pod need different startup content.
 
-**The culture layer is high-value and often skipped.** A rig without a `CULTURE.md` relies on agents to guess how the team communicates and coordinates. Write one. Even a short culture file dramatically improves team coherence.
+**The rig's own culture file is high-value and often skipped.** Every seat gets OpenRig's default culture, but that says nothing about how this team communicates and coordinates. Write a `CULTURE.md`. Even a short one dramatically improves team coherence.
 
 **Member-level startup is for exceptions, not the rule.** If every member has its own startup block, the layering model is being used as a configuration dump. Refactor shared content up to the pod or rig level.
 
@@ -153,8 +213,8 @@ Startup content is merged additively through layers. Each layer adds to what the
 
 | Delivery Hint | When | How | Use For |
 |---------------|------|-----|---------|
-| `auto` | Before harness boot | System chooses | Default — let OpenRig decide |
-| `guidance_merge` | Before harness boot | Merged into `CLAUDE.md` / `AGENTS.md` as a managed block | Role guidance, culture, project context |
+| `auto` | Depends on the file | Resolved per file: a `SKILL.md` (or content starting `# SKILL`) is `skill_install`, any other `.md` is `guidance_merge`, and any other file is `send_text` | Default — let OpenRig decide |
+| `guidance_merge` | Before harness boot | Merged as a managed block into `AGENTS.md` (Codex, Pi) or `CLAUDE.md` (Claude; `CLAUDE.local.md` with the rig's `managed_blocks: { claude-code: CLAUDE.local.md }`) | Role guidance, culture, project context |
 | `skill_install` | Before harness boot | Copied to runtime's skill directory | Skills |
 | `send_text` | After harness is ready | Sent as text to agent's terminal via tmux | Boot-time grounding, identity hints, instructions to read skills |
 
@@ -167,11 +227,129 @@ Files delivered via `send_text` happen AFTER the harness is ready. The agent rec
 - Instructions to load skills (the files are already projected, the message tells the agent to read them)
 - Context that should feel like an operator briefing, not pre-loaded content
 
+On a fresh launch the first message is one turn: the session identity, the first `send_text` file and, when a startup
+proof is selected, its challenge (below).
+
+A file's `required` field defaults to `true`: a required file that can't be delivered fails startup, and an optional
+one is dropped without a message.
+
+### Readiness, startup proof and failure
+
+**Readiness.** After launch OpenRig polls the pane until the harness is interactive (backing off 1, 2, 4, 8 and 16
+seconds), for up to 30 seconds by default. Change the window with
+`rig config set runtime.readiness_timeout_seconds <1-600>` (or `OPENRIG_RUNTIME_READINESS_TIMEOUT_SECONDS`); it
+applies to the next launch. A recognized prompt (the attention codes above) ends the wait at once as
+`attention_required`. A timeout ends startup as `failed` ("Readiness timeout after Ns — harness did not become
+interactive"), and the post-launch files aren't sent. A Codex fork that the rig launches (a member with
+`session_source.mode: fork`, or an agent image's fork) is the exception: its timeout ends as `attention_required`,
+with its startup context kept for `rig seat continue` (see below). A seat handover's fork has its own readiness check.
+
+**Claude submission check.** For each startup message to a Claude seat, OpenRig makes a bounded check that the prompt
+was submitted. When the capture can't tell, it records the submission as unverified and carries on. When it sees the
+same prompt still sitting in the input, it presses Enter once more; if it's still there, it warns "Startup prompt still
+staged in <session>; press Enter in that pane." The seat can still end `ready` with its submission `unverified` or
+`staged`, so `ready` doesn't prove the prompt was submitted. After all files and actions are delivered, readiness is
+checked once more, so a prompt that appears by then gives `attention_required`.
+
+**Startup proof.** A `startup_proof` action selects `authenticated` or `none` (the default is none; the last applicable
+one wins, and it needs `idempotent: true`). With `authenticated`, a fresh launch of an agent seat includes a challenge,
+and the seat answers it with `rig startup-proof submit --challenge-id <id> --answer <answer>`. `rig ps --nodes --full`
+shows the result in the ORIENTED column: `verified`, `missing`, `rejected` or `n-a`. A missing proof doesn't block startup.
+
+**After a failure.** Delivery, launch and action failures, and readiness timeouts other than a Codex fork's, give
+`failed`. Every 30 seconds the context monitor marks a `failed` or `attention_required` seat `ready` once its pane reads
+ready, unless its fresh or Codex fork context is still pending for `rig seat continue`. A seat that timed out can therefore read `ready` without having received its
+post-launch files. If it needs them, first look at what that occupant has done; then
+`rig seat launch <seat> --fresh --reason <text>` starts a blank conversation for the seat. If the occupant is still
+live, the command refuses with `session_live` unless you also pass `--stop`, which replaces that occupant deliberately.
+
+**Preview before replacing a seat.** `rig seat launch <seat> --fresh --plan` inspects the selected
+seat without starting tmux, stopping or launching a process, projecting startup files, or changing
+lifecycle/queue records. Add `--json` for structured output. `--fresh` is still required;
+`--reason` is optional for the preview and required when executing. Pass `--stop` to preview the
+intended replacement of a live managed occupant. Adopted and unmanaged occupants remain blocked.
+
+The plan identifies the target, current occupant, stop requirements, blockers, startup counts,
+and each sibling seat's unchanged effect. Siblings stay attached and untouched. Launch composes
+a new command through the runtime adapter using current settings; it does not replay a stored
+wrapper command. The seat's launch environment and managed executable selection still apply.
+The plan does not construct or display the launch command.
+
+A preview is a snapshot, not a reservation or a native-readiness check. Unreadable tmux produces
+`complete: false` and `launchable: null` (unknown), unless a known blocker already proves
+`launchable: false`. A successful preview exits 0, including blocked or incomplete plans; scripts
+must inspect `launchable === true` before deciding to execute. Request failures still exit nonzero.
+Execution always resolves and checks the current state again. An older daemon without the preview
+endpoint refuses the request; the CLI never falls back to executing a launch.
+
+### Change an existing seat's working directory
+
+Editing `cwd` in an already applied RigSpec doesn't update an existing seat's saved launch directory. Use `set-cwd` to
+save a new one for the seat's next launch:
+
+```sh
+rig seat set-cwd planning-lead@project \
+  --cwd /work/project/seats/planning-lead --reason "isolate planning"
+rig seat status planning-lead@project
+```
+
+**The path:** it must be absolute **on the daemon's host**. OpenRig creates a missing directory, resolves symlinks to
+its real path, and refuses a filesystem root.
+
+**What it saves:** the directory and a `node.cwd_changed` audit event (from, to, reason, operator), together, in one
+transaction. The seat's node, canonical address, queue, session history and skill selection stay as they are.
+`rig seat status` shows **Working directory for future launches** (`launch_cwd` in JSON). That's saved configuration,
+not where the running process is.
+
+**What it writes:** it creates the folder if it's missing, and writes nothing else there. The seat's next fresh launch or
+rebuild handover writes its startup files there, as launch does today.
+
+**`set-cwd`'s preflight policy:** before saving, it reads, without writing, the enumerated resource copies (including
+nested plugin files) and startup skills that launch would place in the new directory, at their actual destinations,
+as they are at that moment. It's a point-in-time check, not a global overwrite guarantee or protection against later
+changes; at adoption, launch applies its own policy. (The commit's re-check covers the saved startup configuration,
+not the destination's file contents.)
+- **Refused, with the protected paths named (`cwd_destination_conflict`):** a file there that an operator edited, an
+  unrecorded file with different content, or two sources for one destination. That's stricter than launch, which
+  overwrites an unrecorded differing file with a warning; the refusal is deliberate, while the occupant still runs.
+- **What to do:** use a clean destination, or move or merge those files, then retry.
+- **Not checked:** managed guidance blocks and native configuration merges keep the adapter's policy at launch, and
+  launch-owned files such as `.openrig/context-collector.cjs` are written by launch as always.
+- **A community harness** takes no startup files, so none are checked for it.
+
+**The running occupant keeps its current directory.** Adopt the new one with:
+- `rig seat launch <seat> --fresh --stop --reason <text>`, which starts a blank conversation; or
+- `rig handover <seat> --source rebuild --reason <text>`, which carries durable context.
+
+**Adopt it promptly.** The saved directory doesn't move the running process, but background work can use it before
+adoption. Saved configuration isn't the live process's directory, and these examples aren't the only consumers. For a
+running Claude seat:
+- **Collector provisioning** writes `.openrig/context-collector.cjs` and merges `.claude/settings.local.json` in the
+  saved directory, under its existing preservation rules.
+- **Managed compaction,** manual (`POST /api/compaction/trigger`) or automatic, asks the seat to write its restore map
+  under it. That may be outside the seat's current workspace, so a seat without bypass permissions may meet a write
+  prompt.
+
+Adopting promptly is guidance. It doesn't protect against a poll or a compaction that runs before your next command.
+
+**Before adopting,** don't `rig down`/`rig up` or hand over by fork. Those resume the existing conversation in the
+saved directory, and Claude keeps conversations per project directory, so a resume there may not find it.
+Cross-directory resume hasn't been run natively; this is the order to follow. `rig seat restart --keep-conversation`
+(Codex) isn't adoption: it respawns in the directory it observes from the running process.
+
+**Failures:** a refusal, missing or malformed saved startup context, or an audit-write failure leaves the prior
+directory saved, and changes no seat, custody or startup file (a refusal may leave the new folder created). A concurrent configuration change is reported, not overwritten. A CLI timeout means the outcome is
+unknown; check `rig seat status` before retrying. Choosing the same directory again records no second event.
+
+**The old directory:** files there are left as they are, since other seats may still use them. The source RigSpec
+declaration isn't changed either; update it separately if a future recreation should use the new directory.
+
 ### The `applies_on` Field
 
 Each startup file and action specifies when it applies:
-- `fresh_start` — delivered on first launch only
-- `restore` — delivered on restore from snapshot
+- `fresh_start` — delivered when a new conversation starts: the first launch, `rig seat launch --fresh`,
+  `rig seat continue`, and seats restored with `--fresh`
+- `restore` — delivered when a seat is restored, including a restore whose resume falls back to a fresh conversation
 - Default: `[fresh_start, restore]` (both)
 
 Use this to avoid re-sending context that the agent already has from its resumed conversation. For example, a one-time project briefing might only apply on `fresh_start`, while identity grounding should apply on both.
@@ -184,15 +362,10 @@ The AgentSpec and RigSpec allow declaring deterministic environment configuratio
 
 ### What the Spec Supports
 
-**Hooks** (in `resources.hooks`):
-```yaml
-resources:
-  hooks:
-    - id: pre-commit
-      path: hooks/pre-commit.sh
-      runtimes: [claude-code]
-```
-Hooks are scripts copied to the agent's workspace. They can be git hooks, automation scripts, or environment setup.
+**Hooks** ship inside plugins: declare the plugin under `resources.plugins[]`. AgentSpec validation refuses
+`resources.hooks`. OpenRig loads one plugin's hooks into a seat itself: the shipped `openrig-core` plugin, for a Claude seat
+that selects it (see [the refocus channel](refocus-channel.md#the-mechanism)). The folder a declared plugin is projected into
+is not one Claude Code or Codex loads, so a plugin of your own does not get its hooks run by that projection.
 
 **Runtime resources** (in `resources.runtime_resources`):
 ```yaml
@@ -214,23 +387,26 @@ startup:
       phase: after_ready
       idempotent: true
 ```
-Commands sent to the agent's terminal after it's ready. Can install MCPs, run setup commands, etc.
+Each value is typed into the harness's input and submitted, so it is a prompt or a slash command, not a shell command.
+Types are `send_text`, `slash_command` and `startup_proof` (see "Startup proof" above); `shell` is refused.
+`idempotent` is required, and an action that isn't idempotent must not list `restore` in `applies_on`. Both phases
+run after the harness is ready: `after_files` (the default) after the post-launch files, then `after_ready`.
 
-### Current Support Matrix (OpenRig 0.1.x)
+### Current Support Matrix
 
 | Capability | Status | Notes |
 |------------|--------|-------|
 | Guidance file projection (`guidance_merge`) | **Supported** | Reliable. Primary delivery mechanism. |
 | Skill projection (`skill_install`) | **Supported** | Reliable. Skills are copied to workspace. |
 | `send_text` delivery after ready | **Supported** | Reliable. Requires harness to be ready. |
-| Hook projection | **Experimental** | Files are copied but execution/integration varies by runtime. |
+| Hooks | **Through plugins, limited** | `resources.hooks` is refused. OpenRig loads the shipped `openrig-core` plugin's hooks into a Claude seat that selects it (Claude Code v2.1.280 or later); a plugin you declare under `resources.plugins[]` is projected, but its hooks are not loaded. |
 | Runtime resource projection | **Supported for recognized fragments** | `claude_settings_fragment`, `claude_mcp_fragment`, and `codex_config_fragment` are applied to provider config. Unknown types are copied to runtime extension directories. |
-| Permission configuration | **Native settings plus managed launch flags** | OpenRig launches Claude with `acceptEdits` and Codex with `workspace-write` unless an explicit supported selection changes them. It does not add a global Claude `Bash(rig:*)` allowance. Use [the first-user permission guide](getting-started.md#opt-in-permissive-operation) for opt-in and custom choices. |
-| MCP installation | **Experimental** | Claude Code: `/mcp` interactive command or `claude mcp add` from CLI. Can also be described in startup files for agent self-configuration. Reliability depends on runtime TUI state. |
+| Permission configuration | **Native settings plus managed launch flags** | OpenRig launches Claude with `acceptEdits` and Codex with `workspace-write` unless an explicit supported selection changes them; a seat with no policy, selection or named Codex profile also gets the per-launch [team default](rig-spec.md#team-launch-defaults), and the `kernel` rig's seats get a wider operational default ([rig spec, "At launch"](rig-spec.md)). Neither is written to a settings file. Use [the first-user permission guide](getting-started.md#opt-in-permissive-operation) for opt-in and custom choices. |
+| MCP installation | **Supported for Claude fragments** | A selected `claude_mcp_fragment` is merged into the project's `.mcp.json`. Claude asks to approve new servers found there; that prompt stops startup as `mcp_gate` until someone answers it and runs `rig seat continue`. Otherwise use `/mcp` or `claude mcp add`, or describe the servers in startup files for the agent to configure. |
 | System dependency installation | **Not deterministic** | Describe in startup files; agent handles via shell commands. |
 | Recurring tasks / wake timers | **Runtime-dependent** | Claude Code supports recurring tasks via the `/loop` command. Codex does not have a confirmed equivalent. Orchestrators should include `/loop` instructions in startup for Claude Code agents. |
 
-### The v0.2.0 Approach: Describe, Then Let the Agent Handle It
+### The Approach: Describe, Then Let the Agent Handle It
 
 For anything beyond `guidance_merge`, `skill_install`, and `send_text`, the recommended approach is:
 
@@ -250,12 +426,18 @@ OpenRig performs best-effort deterministic runtime configuration for managed ses
   installations may retain one; existing user settings are not removed.
 - Claude global state: `~/.claude.json`
   Purpose: pre-trust managed workspaces and mark onboarding complete for fresh managed sessions.
+  Explicit permission modes use the launch-selected `HOME/.claude.json`, or
+  `<CLAUDE_CONFIG_DIR>/.claude.json` when that variable is set. Classic startup
+  retains the daemon-home path.
 - Claude project-local config: `.claude/settings.local.json`
   Purpose: apply context collector/activity hooks and selected `claude_settings_fragment` resources inside the project without committing them to git.
 - Claude project-local MCP config: `.mcp.json`
   Purpose: apply selected `claude_mcp_fragment` resources for Claude in that project.
-- Codex global config: `~/.codex/config.toml`
+- Codex global config: `$CODEX_HOME/config.toml`, or `~/.codex/config.toml` when unset
   Purpose: pre-trust managed workspaces and apply selected `codex_config_fragment` resources. Codex currently has no equivalent project-local MCP config path for global profile settings.
+- Global skill folders: `~/.claude/skills` and `~/.agents/skills`
+  Purpose: daemon startup seeds the `openrig-skills` and `refocusing` skills and the person-facing `rigs` skill. Each
+  upgrade refreshes the `rigs` skill; a copy installed another way is left as it is.
 
 Two important caveats:
 - these writes are best-effort and should still be paired with startup guidance so the local agent can verify and repair them if needed
@@ -265,6 +447,39 @@ Permission mode and runtime resource projection are separate. A selected fragmen
 can affect native configuration, but OpenRig's launch flags can override those
 values. Recording a config-surface `permission_policy` is not proof that its
 rules were translated or applied. See [permission precedence and limits](getting-started.md#custom-settings-and-precedence).
+
+### Separate Codex homes for separate installations
+
+Set an **absolute `CODEX_HOME` in the environment that starts the daemon** when
+you want a separate Codex configuration and state root. OpenRig uses that root
+for its startup hook setup/removal and trust records, feature flag, workspace
+trust and selected config fragments. Startup can write those files even when
+the daemon has no seats.
+
+The explicit selection also applies to future managed Codex fresh, resume and
+fork launches, their capability/profile/configuration probes, native thread and
+context reads, and plugin-cache discovery. Launch commands reassert it after
+pane shell startup, so an rc file cannot silently switch that launch to another
+Codex home. Executable and PATH selection stay the same. Existing running
+sessions are not moved or restarted; a thread in another home is not searched
+as a fallback for an explicitly selected home.
+
+**With `CODEX_HOME` unset, a second install still shares `~/.codex`.** Setting only
+`OPENRIG_HOME` separates OpenRig state, not provider configuration. The default
+launch behavior is unchanged, including existing pane-shell overrides.
+
+OpenRig does not copy or migrate authentication, history, rules, trust or
+settings into the selected home. A separate file-backed home needs its intended
+authentication provisioned if absent; OS credential stores and other config
+layers can behave differently, so a new login is not universally required.
+Explicit Codex auth commands resolve their **caller's** `CODEX_HOME`, otherwise
+`$HOME/.codex`; contacting a daemon with `OPENRIG_URL` does not retarget auth
+save/switch/registry writes to that daemon's selection. Set the intended root
+on those commands as well.
+
+This separates provider files, not OS users or accounts. Project-local resources
+still use the selected project directory; shared project and system settings
+remain shared.
 
 ### Runtime Differences
 
@@ -283,7 +498,84 @@ rules were translated or applied. See [permission precedence and limits](getting
 - Approval policy and sandbox access are separate controls. OpenRig's default
   `-s workspace-write` selects the sandbox; it does not force `-a`. A member's
   `codex_config_profile` selects native `-p`, distinct from the AgentSpec `profile`.
+- On that plain `-s workspace-write` launch (fresh, resume, fork or restore), a
+  short-lived `codex app-server` first reads Codex's own configuration with the
+  seat's executable, home and working directory. OpenRig adds
+  `-c sandbox_workspace_write.network_access=true` only when no configuration
+  layer sets network access and no managed requirement could restrict it. A
+  timeout, error or unrecognized answer adds nothing. Named profiles and full
+  bypass are not read. The read may write Codex's own state files in
+  `CODEX_HOME`, read its login and fetch managed policy, as a Codex start does.
+- Managed launches pass `-c check_for_update_on_startup=false`, so Codex skips its startup update check; your Codex
+  config is not changed.
 - Can self-install dependencies from instructions but timer/recurring behavior is not reliably available
+
+**Pi and OMP:**
+- Read `AGENTS.md` in the working directory; guidance is merged there, added to Pi's own system prompt
+- Selected skills are projected into the seat's own agent directory under OpenRig's state, not into a shared
+  workspace folder
+
+**Terminal seats** (`builtin:terminal`) get no agent or profile layers and no startup proof.
+
+### Codex compaction and sizing
+
+OpenRig's managed compaction is for Claude Code seats only, by design. That covers `rig compact`, the
+`policies.claude_compaction.*` automatic policy, and the watchdog jobs that the `managed-compaction` and
+`apprentice-handover` strategies create. A Codex seat compacts with Codex's own automatic compaction, and OpenRig
+leaves that to Codex.
+
+- `rig compact <session>` refuses a Codex seat: "not a Claude (claude-code) seat".
+- `rig compact-plan` lists a Codex seat as skipped (`codex_not_managed_by_claude_compact_in_place`).
+- The automatic policy never acts on a Codex seat.
+- A Codex member with `compaction_strategy: managed-compaction` or `apprentice-handover` gets no watchdog jobs.
+
+**What Codex compacts at.** Codex describes `model_auto_compact_token_limit` as the "token threshold that triggers
+automatic history compaction (unset uses model defaults)". Its configuration reference does not say what those
+defaults are, and the model catalog's `auto_compact_token_limit` is null for the models we checked in Codex 0.162.1.
+Measure a seat's own compactions before relying on an unset limit.
+
+**What window the model has.** `codex debug models` prints the catalog. Each model carries `context_window`,
+`max_context_window` and `effective_context_window_percent`. In Codex 0.162.1, `gpt-5.6-sol` has a `context_window`
+of 272000 at 95%, which is 258400. That is the `model_context_window` its rollout `token_count` events report.
+A limit only matters when it is below that effective window. Leave `model_context_window` alone: don't raise it toward
+`max_context_window` to avoid compaction. Set the limit instead.
+
+**Setting the limit for seats only.** Put `model_auto_compact_token_limit` in a Codex profile file,
+`$CODEX_HOME/<name>.config.toml` (`~/.codex/<name>.config.toml` when `CODEX_HOME` is unset), and name it on each
+Codex member that should use it:
+
+```toml
+# ~/.codex/seat-compaction.config.toml
+model_auto_compact_token_limit = 150000   # choose your own value
+```
+
+```yaml
+codex_config_profile: seat-compaction
+```
+
+OpenRig passes `-p seat-compaction` on that seat's fresh, fork and resume launches. Codex layers the profile file on
+top of the base user config, so only seats that name the profile see the lower limit. A Codex session started without
+that profile keeps the base `config.toml` in the same Codex home (`$CODEX_HOME/config.toml`, or `~/.codex/config.toml`
+when `CODEX_HOME` is unset). The `150000` is an example, not a recommendation.
+
+With the normal launch mode, `codex_config_profile` replaces OpenRig's explicit workspace-write sandbox flag, so the
+profile must set the sandbox and approvals you want. See
+[permission precedence and limits](getting-started.md#custom-settings-and-precedence), which also gives Codex's order
+of precedence between a profile, project settings and CLI overrides.
+
+**The trade-off.** Every model call carries the whole context so far, so a smaller context makes each call cheaper. The
+cost is that Codex compacts sooner and more often, so more of the conversation is carried as a summary instead of
+verbatim. A higher limit keeps more detail and makes each call larger.
+
+**Related keys.** These also shape compaction. This guide doesn't recommend values for them. See Codex's
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference):
+
+| Key | What Codex says it does |
+|---|---|
+| `model_auto_compact_token_limit_scope` | `total` (the default) counts the full active context; `body_after_prefix` counts only growth after the carried compaction-window prefix. |
+| `compact_prompt` | Inline override for the history compaction prompt. |
+| `experimental_compact_prompt_file` | Loads the compaction prompt override from a file (experimental). |
+| `tool_output_token_limit` | Token budget for storing individual tool or function outputs in history. |
 
 When authoring startup content, note which instructions are runtime-specific. For example, an orchestrator that needs a monitoring loop should include instructions like: "If running Claude Code, use `/loop 3m` to periodically check rig health. If running Codex, check rig health at the start of each task cycle instead."
 
@@ -300,6 +592,63 @@ rig.yaml → culture_file: CULTURE.md
 profile → uses.skills: [openrig-user]
 ```
 This is the minimum effective startup. The agent knows who it is, how the team works, and how to use the rig.
+
+For seats sharing a working directory, keep each role in its own AgentSpec startup entry:
+
+```yaml
+startup:
+  files:
+    - path: guidance/role.md
+      orientation: role
+      delivery_hint: send_text
+      required: true
+```
+
+`rig queue whoami --json` reports only the calling seat's explicitly marked role
+bindings, independently of its current work. The `role.state` is `no-record`,
+`not-declared`, `missing`, `present`, or `unknown` when identity, storage or the
+observation is unavailable. Files retain their original `path`, `absolutePath`
+and `ownerRoot` plus the currently resolved `resolvedPath` and
+`resolvedOwnerRoot`. Built-in packaged paths follow the running installation;
+existing development-checkout paths stay where they were recorded.
+
+`recordedAt` is the startup-context record write/attempt, which happens before
+launch succeeds. Exact resume can retain an older record. `present` means the
+resolved file currently exists, not that its bytes still match the spec or that
+the agent read it. Unmarked startup files and startup actions are not exposed.
+
+Refocus includes the role path and a re-read reminder with topology or both trees,
+even if the trace fails. Work-only mode omits it; disabling refocus still disables
+the entire hook. Custom refocus prose keeps its existing precedence. The hook
+reuses its work lookup, or makes one bounded lookup when the work node is explicit;
+a failed or skipped lookup reports `unknown`.
+
+The shipped kernel seats no longer project their role into shared guidance.
+Existing user files and legacy role blocks are left intact; this is not a cleanup
+of already-installed shared blocks. General user-authored guidance projection is
+unchanged.
+
+The other shipped agent specs that start a seat with `guidance/role.md` mark that
+file `orientation: role` too, so `rig queue whoami --json` reports their role and
+refocus names it. They never projected a role into shared guidance; their startup
+delivery is unchanged.
+
+**Removing a leftover shared role block by hand.** A kernel installed before 0.6.5
+may still hold one seat's old role in its working directory's `CLAUDE.md` (or the
+rig's configured `managed_blocks` file) or `AGENTS.md`. Upgrading doesn't remove it.
+`rig down` removes OpenRig's managed blocks from that file when no other running
+rig uses it, so it stays until then. To remove it sooner, by hand:
+
+1. Find the exact block: the lines from `<!-- BEGIN OpenRig MANAGED BLOCK: role -->`
+   through `<!-- END OpenRig MANAGED BLOCK: role -->` (in older files, `RIGGED`
+   instead of `OpenRig`). Only the block whose id is exactly `role`; leave
+   `rig-role`, other ids and everything outside the markers alone.
+2. Confirm each seat that shares that directory has its per-seat replacement:
+   `rig queue whoami --json` run in the seat reports `role.state` as `present`.
+   A seat started before it was upgraded still has the old content in its
+   conversation; restart it fresh if you want it to start from the per-seat role.
+3. Keep a copy of the file, remove only those lines, and compare the result with
+   the copy: nothing else in the file should differ.
 
 **Separate project context from role**
 
@@ -320,7 +669,7 @@ This prompts the agent to actually invoke the skills, not just have them as pass
 
 After identity recovery, verify:
 1. `rig ps --nodes` shows your rig running (scoped to your session's rig by default; outside a managed session name it explicitly: `rig ps --nodes --rig <name>`)
-2. `rig env status` shows services healthy (if applicable)
+2. `rig env status <rig>` shows services healthy (if applicable)
 3. Your working directory is correct
 4. Required tools are available (node, npm, git, etc.)
 
@@ -356,7 +705,7 @@ If your rig REQUIRES a hook to function and the hook installation fails silently
 When creating a new agent's startup experience:
 
 - [ ] Write a `guidance/role.md` — who is this agent?
-- [ ] Reference it in the agent spec's `resources.guidance` AND `startup.files`
+- [ ] Reference it in `startup.files` with `orientation: role` and `delivery_hint: send_text`. Avoid projecting distinct seat roles into one shared `AGENTS.md` or `CLAUDE.md`.
 - [ ] Write a rig `CULTURE.md` if the rig doesn't have one
 - [ ] Choose skills from the shared pool via profile `uses`
 - [ ] Write a `startup/context.md` if the agent needs environment grounding

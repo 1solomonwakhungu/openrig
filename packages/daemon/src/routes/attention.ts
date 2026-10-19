@@ -57,6 +57,37 @@ export function attentionRoutes(): Hono {
         if (q === detailOnly) result.items = result.items.filter(i => i.id !== item.id);
       }
     } catch (e) { unavailable("queue", e); }
+    try {
+      if (!queue) throw new Error("Queue repository unavailable");
+      const rows = queue.listOpenHumanUpdates({ limit: 1001 });
+      result.sources.push({ source: "queue updates", state: rows.length >= 1001 ? "partial" : "available",
+        detail: rows.length >= 1001 ? "Open human updates reached 1001 rows; showing at most 1000, critical then urgent first." : "Open explicit human-addressed updates, critical then urgent first; local FYIs do not require a delivery receipt or decision." });
+      const current = rows.slice(0, 1000);
+      const opened = wanted?.startsWith("queue-update:") ? queue.getById(wanted.slice(13)) : null;
+      const detailOnly = opened?.humanIntent === "update" && isHumanSeatSessionRef(opened.destinationSession)
+        && !current.some(q => q.qitemId === opened.qitemId) ? opened : null;
+      for (const q of [...current, ...(detailOnly ? [detailOnly] : [])]) {
+        const tags = [...new Set((q.tags ?? []).filter(t => t.startsWith("project:")).map(t => t.slice(8)))];
+        const p = tags.length === 1 ? projects.find(p => p.id === tags[0] && !p.error) : undefined;
+        const item: AttentionItem = { id: `queue-update:${q.qitemId}`, kind: "update", recipient: q.destinationSession,
+          summary: q.summary || q.body.trim().split(/\r?\n/).find(Boolean) || "Update summary unavailable",
+          urgency: q.priority, unblocks: null, at: q.tsUpdated, scope: p ? `project ${p.id}` : "instance · project unknown",
+          project: p ? { id: p.id, root: p.root } : null, source: `/api/queue/${encodeURIComponent(q.qitemId)}` };
+        add(item, () => ["Informational update; no action needed. Viewing is not approval or proof of delivery.",
+          q.body, ...(q.humanDetail ? ["Supplemental detail:", q.humanDetail] : []),
+          `State: ${q.state}`, `To: ${q.destinationSession}`, `From: ${q.sourceSession}`,
+          `Evidence reference: ${q.evidenceRef ?? "none recorded"}`, `Inspect: rig queue show ${q.qitemId} --full`,
+          "Queue history (read/delivery is not approval):", ...queue.listTransitions(q.qitemId).map(t => JSON.stringify(t))], () => {
+          if (!q.evidenceRef || !path.isAbsolute(q.evidenceRef) && (!p || /^[a-z][a-z\d+.-]*:/i.test(q.evidenceRef))) return [];
+          const hash = q.evidenceRef.indexOf("#"), anchor = hash < 0 ? "" : q.evidenceRef.slice(hash);
+          let file = hash < 0 ? q.evidenceRef : q.evidenceRef.slice(0, hash);
+          file = path.isAbsolute(file) ? file : path.resolve(p!.root, file);
+          try { file = fs.realpathSync(file); } catch { /* The file reader reports the unavailable source. */ }
+          return [{ label: "Update evidence", path: file + anchor }];
+        });
+        if (q === detailOnly) result.items = result.items.filter(i => i.id !== item.id);
+      }
+    } catch (e) { unavailable("queue updates", e); }
     for (const p of projects) {
       const source = `proof: project ${p.id}`;
       try {
@@ -107,7 +138,13 @@ export function attentionRoutes(): Hono {
       // Canonical episodes supply status and observation time, including retained
       // clears. No liveness stream, inferred transition or new retention store.
       const records = service.records().filter(r => r.severity !== "info" && (!r.ceremony || r.ceremony.stage === "confirmed" || r.ceremony.stage === "cleared"));
-      result.sources.push({ source: "health", state: records.length > 200 ? "partial" : "available", detail: "Material canonical episodes (including retained clears), at most 200. Source retention bounds apply; absence is not proof of recovery." });
+      const coverage = service.coverage();
+      const unavailableSource = coverage.some(s => s.status === "unavailable");
+      const partial = coverage.filter(s => s.partial);
+      result.sources.push({ source: "health", state: unavailableSource ? "unavailable" : records.length > 200 || partial.length ? "partial" : "available",
+        detail: ["Material canonical episodes (including retained clears), at most 200. Source retention bounds apply; absence is not proof of recovery.",
+          ...partial.map(s => s.status === "unavailable" ? `${s.source}: unavailable — ${s.reason}`
+            : `${s.source}: partial — evaluated ${s.evaluated} of ${s.total} ${s.unit}; ${s.omitted} omitted (limit ${s.limit}, ${s.order}).`)].join(" ") });
       for (const r of records.slice(0, 200)) {
         const projectId = "projectId" in r.scope ? r.scope.projectId : undefined;
         const p = projects.find(p => p.id === projectId && !p.error);
@@ -115,7 +152,7 @@ export function attentionRoutes(): Hono {
         add(item, () => [`Status: ${r.status}; first observed ${r.startedAt ?? "unknown"}; last observed ${r.lastObservedAt ?? "unknown"}`, `Freshness: ${r.freshness.state}; ${r.indeterminateReason ?? ""}`, `Posture: ${r.operatingPosture?.posture ?? "unknown"} · ${r.operatingPosture?.reason ?? "not supplied by source"}`, r.explanation, r.suggestedInspection, `Threshold: ${r.threshold}`, "Canonical source and bounded evidence:", JSON.stringify(r, null, 2)]);
       }
     } catch (e) { unavailable("health", e); }
-    result.items.sort((a, b) => a.kind.localeCompare(b.kind) || (b.at ?? "").localeCompare(a.at ?? "") || a.id.localeCompare(b.id));
+    result.items.sort((a, b) => a.kind.localeCompare(b.kind) || (a.kind === "update" ? ((b.id.startsWith("queue-update:") && b.urgency === "critical" ? 2 : b.urgency === "urgent" ? 1 : 0) - (a.id.startsWith("queue-update:") && a.urgency === "critical" ? 2 : a.urgency === "urgent" ? 1 : 0)) : 0) || (b.at ?? "").localeCompare(a.at ?? "") || a.id.localeCompare(b.id));
     if (wanted && !result.detail) result.detailError = "Selected source is unavailable or outside the current source window. Return to Attention to refresh; absence is not resolution.";
     return c.json(result);
   });
