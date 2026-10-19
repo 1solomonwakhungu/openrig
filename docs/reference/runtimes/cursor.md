@@ -52,8 +52,13 @@ members:
 Posture comes from the member or rig `permission_policy` (for example
 `builtin:yolo` selects `full_bypass`). To choose a posture for one seat, run
 `rig seat set-permissions <seat> --mode floor|full_bypass --reason <text>`; it
-applies on the seat's next launch, resume, or handover, and `--mode inherit`
-returns the seat to its policy.
+changes the arguments on the seat's next launch, resume, or handover, and
+`--mode inherit` returns the seat to its policy. Cursor also stores approval
+mode in each chat: resuming a chat previously run with `--force` without that
+flag does not clear its stored Run Everything setting. Selecting `floor` is
+therefore not evidence that a resumed chat has reduced permissions. Start a
+fresh chat when a lower posture is required; OpenRig does not rewrite Cursor
+chat metadata.
 
 Under `full_bypass` OpenRig records `force` as the seat's applied-launch observation (axis `permission`); when the seat has a `rig seat set-permissions` choice or a permission policy, permission drift compares the posture it implies with that choice (else the policy's posture) and reports `aligned` or `drift`. The floor passes no permission flag, so its observation is `unknown` (Cursor's own settings govern) and never compared. This checks the launch arguments OpenRig emitted, not Cursor's own enforcement.
 
@@ -76,28 +81,31 @@ reinstalling.
 
 ## Resume
 
-Cursor assigns the chat id itself and stores chats under
+Cursor stores chats under
 `<config dir>/chats/<md5 of the absolute working directory>/<chat id>/store.db`,
 where the config dir is `CURSOR_CONFIG_DIR`, else `$XDG_CONFIG_HOME/cursor`,
 else `~/.cursor`.
 
-Before each launch OpenRig records the chat ids that already exist for the
-seat's directory, along with the config dir the launch resolved. Cursor
-creates a chat only when the seat receives its first prompt, so the resume
-token is captured afterward (after readiness, by the periodic resume refresher,
-or at restore). A chat is taken as this seat's only when it is the single chat
-that appeared since the launch snapshot and its `store.db` was created at or
-after the launch started. Anything else records no token rather than a guess.
-While another OpenRig seat of the same runtime shares the directory, OpenRig
-does not attempt late capture at all.
+Fresh launches mint a UUIDv4 and pass `--new-session-id <id>`. Cursor reserves
+that exact ID and rejects an existing directory at that location. OpenRig
+records the ID in the seat's `launch.json` and the launch's resolved config
+dir in `cursor-chats-before-launch.json` (the legacy filename is retained).
+Capture returns only that reserved ID once its `store.db` exists. It never
+chooses a chat by its timestamp or by comparing directory contents. Operator
+chats and sibling seats in the same directory cannot substitute their IDs.
+A never-prompted seat without a store reports no resumable token.
+
+Existing persisted resume tokens continue to work. An older launch without a
+reserved ID cannot safely discover its identity from the shared chat store;
+set that seat's exact token by hand if it was not already recorded. Fresh
+launches use reserved IDs automatically.
 
 Resume launches `cursor-agent --disable-auto-update --trust --resume <chat id>` after checking the
 chat's `store.db` still exists; if it does not, the resume is refused as
 `retry_fresh` and restore asks before starting a new chat. Fork is not
 supported (Cursor has no fork flag).
 
-To set the token by hand (for example in a shared directory where capture is
-refused), take the chat id from the seat's chat directory name under
+To set the token by hand for an older seat, identify its exact chat under
 `<config dir>/chats/<md5 of the working directory>/` and pipe it in:
 
 ```sh
@@ -126,15 +134,10 @@ Context-pressure alerts use the same `context.pressure` health detector and oper
   pane command is `node`; discovery matches the `cursor-agent` program name. A
   CLI started through the `agent` link is not recognized as Cursor. Stop reaps
   the pane's process tree.
-- Chats the owner starts by hand. If you run `cursor-agent` yourself in a
-  seat's directory after the seat launched and before the seat's first prompt,
-  capture cannot tell that chat from the seat's and may record it. Avoid
-  starting your own Cursor chats in a seat's directory until the seat has
-  prompted, or set the token by hand (see Resume).
-- Seats that share a working directory get no captured token while a sibling
-  Cursor seat is live there; set it by hand if you need resume.
-- `cursor-agent create-chat` was considered for choosing the chat id up front.
-  Without signing in it printed an id but wrote no chat, so it is not used.
+- `--new-session-id` is a hidden CLI flag, verified in the shipped bundles for
+  `2026.09.28-64d2043` and `2026.10.18-ea085cb`. Older releases were not tested.
+- A token manually supplied by the operator is trusted; OpenRig does not prove
+  the history or original ownership of an existing Cursor chat.
 - Readiness is read from the composer placeholder (`Plan, search, build
   anything` or `Add a follow-up`).
 - Activity: `ctrl+c to stop` reads as working (at trial: measured, not yet
@@ -153,3 +156,42 @@ the install script's `rm -f ~/.local/bin/agent`. From the shipped CLI bundle
 the chat storage layout, the ready placeholders, the trust dialog text, and the
 skill locations. The signed-in ready screen and trust dialog were not captured
 live; their test fixtures are built from the bundle strings.
+
+## Ownership and posture investigation (2026-10-19)
+
+No Cursor CLI was on PATH during this investigation. Official release archives
+for `2026.09.28-64d2043` and `2026.10.18-ea085cb` were extracted under `/tmp`;
+the installer was read, never executed. All probes used disposable HOME,
+XDG_CONFIG_HOME, CURSOR_CONFIG_DIR and cwd, with no account credentials.
+
+- Live binaries reported their expected versions. `create-chat` printed a UUID
+  but did not exit within seven seconds; neither probe left a chat store.
+  Both binaries rejected combining `--new-session-id` with `--resume`, with
+  the explicit conflict diagnostic. Interactive fresh-ID probes were stopped
+  after six seconds without reaching a readable login or ready screen.
+- The shipped `src/state/requested-session-id.ts` validates UUIDv4, forbids
+  combining it with resume/continue, and reserves the exact chat directory
+  with non-recursive mkdir. The exported reservation function was executed in
+  isolation with real filesystem operations: it created the requested
+  directory and rejected a second reservation. The module loader supplied
+  only filesystem/path, a temporary state root and a schema stub; this was
+  source-level execution, not an authenticated end-to-end Cursor run.
+- Source provenance: `1249.index.js` (September release), SHA-256
+  `cf0cf05d8090b491191df9cfd041c122e9031e2c7480d26f33f7c38b450b55f0`;
+  `4189.index.js` (October release), SHA-256
+  `fe2e8731edba56da8f349ea12f88a0bbabdadf296b20b67f01935fe2aad7d609`.
+- Both bundles' `src/commands/chat.ts` load the existing store on resume and
+  set `isRunEverything` to true for the force option. The default branch does
+  not reset it. `src/shared/approval-mode-setting.ts` reads the stored
+  approval mode and legacy `isRunEverything`; the config-sync hook only reacts to changes
+  after its initial value. This supports the contributor's warning about
+  lowering posture on resume. No authenticated enforcement probe was run,
+  and this change adds no posture refusal or metadata mutation.
+
+The [contributor's report](https://github.com/mvschwarz/openrig/discussions/43#discussioncomment-19047812)
+provided the `create-chat` and per-chat posture observations. The adapter uses
+`--new-session-id` instead, avoiding the non-exiting creator process. Regression
+tests exercise the actual adapter and descriptor consumer with temporary chat
+stores, including the unmanaged-chat collision and lazy refresher/restore
+capture. Stub-runtime scenarios cannot exercise Cursor's native store or argv;
+no real-model or authenticated continuity claim follows from these tests.

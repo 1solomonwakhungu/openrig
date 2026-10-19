@@ -1,14 +1,11 @@
 // Cursor CLI runtime registration (`runtime: cursor`).
 //
-// Cursor assigns the chat id itself, so prepareLaunch snapshots the chat ids
-// that already exist for the seat cwd (and the config dir the launch env
-// resolves), and capture takes the single chat created since that launch
-// started (see pickNewCursorChat for the rule and its limit). Every launch
-// passes `--trust`; it never launches the bare `agent` name. See cursor-cli.ts
-// for the verified CLI facts.
+// Fresh launches reserve a UUID using Cursor's --new-session-id. Capture only
+// accepts that exact launch token once its store exists, never a cwd store diff.
 
 import { activityMarkers } from "../activity-markers.js";
-import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readLaunchRecord } from "../../../domain/runtime-capture.js";
 import nodePath from "node:path";
 import { TuiCliRuntimeAdapter, type TuiCliRuntimeSpec } from "../tui-cli-runtime-adapter.js";
 import { createNodeFsOps } from "../../node-fs-ops.js";
@@ -21,12 +18,12 @@ import { CURSOR_MODEL_SHAPE } from "../model-shapes.js";
 import {
   CURSOR_BINARY, CURSOR_GATE_PATTERNS, CURSOR_GUIDANCE_FILE, CURSOR_READY_PATTERNS, CURSOR_RESUME_TYPE,
   CURSOR_RUNTIME_ID, CURSOR_SKILLS_SUBDIR, buildCursorArgv, cursorChatsDirForCwd, cursorConfigDir,
-  cursorResumeTargetExists, listCursorChatIds, parseCursorChatSnapshot, pickNewCursorChat,
+  cursorResumeTargetExists, parseCursorChatSnapshot,
   serializeCursorChatSnapshot, validateCursorChatId, verifyCursorVersionOutput, type CursorChatSnapshot,
   CURSOR_FULL_BYPASS_PERMISSION_VALUE,
 } from "./cursor-cli.js";
 
-/** Pre-launch chat ids for the seat cwd, kept in the seat state dir. */
+/** Launch config location. Retains the legacy snapshot filename for resume. */
 export const CURSOR_CHAT_SNAPSHOT_FILE = "cursor-chats-before-launch.json";
 
 function readSnapshot(fsOps: Pick<CliAdapterFsOps, "exists" | "readFile">, seatStateDir: string): CursorChatSnapshot | null {
@@ -42,21 +39,6 @@ function readSnapshot(fsOps: Pick<CliAdapterFsOps, "exists" | "readFile">, seatS
  *  seat has not recorded one (it is also the default launch env). */
 function seatConfigDir(snapshot: CursorChatSnapshot | null, homedir: string): string {
   return snapshot?.configDir ?? cursorConfigDir(process.env, homedir);
-}
-
-/** When the chat's store was created: the birth time where the filesystem
- *  reports one (macOS, most Linux filesystems via statx). Where it is 0 this
- *  falls back to the change time, which moves on every write, so there the
- *  check only proves the store was touched after launch start: a chat created
- *  before launch and written to afterward can pass. The snapshot diff still
- *  excludes every chat that existed when the seat launched. */
-function storeCreatedAt(chatsDir: string, chatId: string): Date | null {
-  try {
-    const stat = fs.statSync(nodePath.join(chatsDir, chatId, "store.db"));
-    return new Date(stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.ctimeMs);
-  } catch {
-    return null;
-  }
 }
 
 export const CURSOR_DESCRIPTOR: RuntimeDescriptor = {
@@ -77,21 +59,21 @@ export const CURSOR_DESCRIPTOR: RuntimeDescriptor = {
   },
   resumeType: CURSOR_RESUME_TYPE,
   validateResumeToken: validateCursorChatId,
-  captureResumeToken: ({ cwd, seatStateDir, launchStartedAt, homedir }) => {
+  captureIsSessionScoped: true,
+  captureResumeToken: ({ cwd, sessionName, seatStateDir, homedir }) => {
     if (!cwd) return null;
+    const record = readLaunchRecord(seatStateDir);
+    if (record?.runtimeId !== CURSOR_RUNTIME_ID || record.sessionName !== sessionName || record.cwd !== cwd
+      || typeof record.presetToken !== "string") return null;
     const nodeFs = createNodeFsOps();
     const snapshot = readSnapshot(nodeFs, seatStateDir);
     if (!snapshot) return null;
     const chatsDir = cursorChatsDirForCwd(seatConfigDir(snapshot, homedir), cwd);
-    return pickNewCursorChat({
-      before: snapshot.chatIds,
-      after: listCursorChatIds(nodeFs, chatsDir),
-      launchStartedAt,
-      createdAt: (chatId) => storeCreatedAt(chatsDir, chatId),
-    });
+    return cursorResumeTargetExists(nodeFs, chatsDir, record.presetToken) ? record.presetToken : null;
   },
   supportsFork: false,
-  // Each posture maps to distinct launch flags, so a seat may select either.
+  // Both postures have launch arguments; a resumed chat can retain its wider
+  // stored approval mode. See cursor.md for the verified source limitation.
   permissionModes: ["floor", "full_bypass"],
   guidanceFile: CURSOR_GUIDANCE_FILE,
   skillsDir: ({ cwd }) => nodePath.join(cwd, ...CURSOR_SKILLS_SUBDIR),
@@ -108,15 +90,16 @@ export const CURSOR_DESCRIPTOR: RuntimeDescriptor = {
 
 export const CURSOR_SPEC: TuiCliRuntimeSpec = {
   descriptor: CURSOR_DESCRIPTOR,
-  buildLaunchCommand: ({ binding, posture, resumeToken, forkSource }) =>
-    buildCursorArgv({ model: binding.model, posture, resumeToken, forkSource }),
-  prepareLaunch: ({ binding, seatStateDir, fs: fsOps, env, homedir }) => {
+  buildLaunchCommand: ({ binding, posture, resumeToken, forkSource, sessionToken }) =>
+    buildCursorArgv({ model: binding.model, posture, resumeToken, newSessionId: sessionToken, forkSource }),
+  mintSessionToken: ({ forkSource }) => forkSource ? undefined : randomUUID(),
+  mintedTokenAwaitsCapture: true,
+  prepareLaunch: ({ seatStateDir, fs: fsOps, env, homedir }) => {
     const configDir = cursorConfigDir(env, homedir);
-    const chatsDir = cursorChatsDirForCwd(configDir, binding.cwd);
     fsOps.mkdirp(seatStateDir);
     fsOps.writeFile(
       nodePath.join(seatStateDir, CURSOR_CHAT_SNAPSHOT_FILE),
-      serializeCursorChatSnapshot({ chatIds: listCursorChatIds(fsOps, chatsDir), configDir }),
+      serializeCursorChatSnapshot({ chatIds: [], configDir }),
     );
   },
   // Runs before prepareLaunch rewrites the snapshot, so it reads the config

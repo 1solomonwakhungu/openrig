@@ -11,6 +11,11 @@ import { describe, it, expect } from "vitest";
 import { CURSOR_CHAT_SNAPSHOT_FILE, CURSOR_REGISTRATION, CURSOR_SPEC } from "../src/adapters/cli/cursor/index.js";
 import { createNodeFsOps } from "../src/adapters/node-fs-ops.js";
 import { runDescriptorTokenCapture } from "../src/domain/runtime-capture.js";
+import { ResumeMetadataRefresher } from "../src/domain/resume-metadata-refresher.js";
+import { RigRepository } from "../src/domain/rig-repository.js";
+import { SessionRegistry } from "../src/domain/session-registry.js";
+import { getRuntimeDescriptor, registerRuntimeDescriptor } from "../src/domain/runtime-registry.js";
+import { createFullTestDb } from "./helpers/test-app.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
 import { processMatches } from "../src/domain/session-fingerprinter.js";
 import {
@@ -20,7 +25,7 @@ import {
 import {
   buildCursorArgv, validateCursorChatId, CURSOR_READY_PATTERNS, CURSOR_GATE_PATTERNS,
   parseCursorVersion, verifyCursorVersionOutput, cursorConfigDir, cursorChatsDirForCwd,
-  listCursorChatIds, cursorResumeTargetExists, pickNewCursorChat,
+  listCursorChatIds, cursorResumeTargetExists,
   serializeCursorChatSnapshot, parseCursorChatSnapshot, type ReadOnlyFs,
 } from "../src/adapters/cli/cursor/cursor-cli.js";
 
@@ -67,6 +72,14 @@ describe("buildCursorArgv", () => {
   it("keeps bracketed model overrides as one argv element", () => {
     const model = "claude-opus-4-8[context=1m,effort=high]";
     expect(buildCursorArgv({ posture: "floor", model })).toEqual(["cursor-agent", "--disable-auto-update", "--trust", "--model", model]);
+  });
+
+  it("reserves an exact UUIDv4 on a fresh launch and rejects conflicting or invalid IDs", () => {
+    expect(buildCursorArgv({ posture: "floor", newSessionId: ID }))
+      .toContain("--new-session-id");
+    expect(() => buildCursorArgv({ posture: "floor", newSessionId: ID, resumeToken: ID })).toThrow(/mutually exclusive/);
+    expect(() => buildCursorArgv({ posture: "floor", newSessionId: "11111111-2222-1333-8444-555555555555" })).toThrow(/UUIDv4/);
+    expect(() => buildCursorArgv({ posture: "floor", newSessionId: "$(whoami)" })).toThrow(/UUIDv4/);
   });
 
   it("resume passes the exact chat id, never --continue", () => {
@@ -150,24 +163,6 @@ describe("Cursor chat store", () => {
     expect(cursorResumeTargetExists(fs, dir, "../../etc")).toBe(false);
   });
 
-  it("capture takes exactly one new chat created at or after launch start, else null", () => {
-    const launchStartedAt = new Date("2026-09-29T12:00:00Z");
-    const after = (iso: string) => () => new Date(iso);
-    const pick = (before: string[], afterIds: string[], createdAt: (id: string) => Date | null, start: Date | null = launchStartedAt) =>
-      pickNewCursorChat({ before, after: afterIds, launchStartedAt: start ?? undefined, createdAt });
-    expect(pick([OTHER_ID], [OTHER_ID, ID], after("2026-09-29T12:00:05Z"))).toBe(ID);
-    expect(pick([OTHER_ID], [OTHER_ID, ID], after("2026-09-29T12:00:00Z"))).toBe(ID);
-    // Nothing new, or two new chats (a pod-mate prompted too): ambiguous.
-    expect(pick([OTHER_ID], [OTHER_ID], after("2026-09-29T12:00:05Z"))).toBeNull();
-    expect(pick([], [OTHER_ID, ID], after("2026-09-29T12:00:05Z"))).toBeNull();
-    // A chat that predates this launch but was missing from the snapshot
-    // (created by the owner or a pod-mate before we started) is refused.
-    expect(pick([], [ID], after("2026-09-29T11:59:59Z"))).toBeNull();
-    // Unknown creation time or unknown launch start: refuse.
-    expect(pick([], [ID], () => null)).toBeNull();
-    expect(pick([], [ID], after("2026-09-29T12:00:05Z"), null)).toBeNull();
-  });
-
   it("round-trips the snapshot and rejects a corrupt one", () => {
     expect(parseCursorChatSnapshot(serializeCursorChatSnapshot({ chatIds: [ID], configDir: "/c" }))).toEqual({ chatIds: [ID], configDir: "/c" });
     expect(parseCursorChatSnapshot(JSON.stringify({ chatIds: [ID] }))).toEqual({ chatIds: [ID] });
@@ -205,11 +200,12 @@ runTuiCliAdapterContract({
     files.writeFile(file, "");
   },
   // Cursor creates the chat lazily; seeding writes the chat store it creates.
-  seedSession: ({ cwd, homedir }) => {
-    const file = storeDbUnder(homedir, cwd, SEEDED_ID);
+  seedSession: ({ cwd, homedir, seatStateDir }) => {
+    const token = JSON.parse(fs.readFileSync(nodePath.join(seatStateDir, "launch.json"), "utf8")).presetToken;
+    const file = storeDbUnder(homedir, cwd, token);
     fs.mkdirSync(nodePath.dirname(file), { recursive: true });
     fs.writeFileSync(file, "");
-    return SEEDED_ID;
+    return token;
   },
 });
 
@@ -227,8 +223,16 @@ describe("Cursor adapter launch", () => {
     const { adapter, pane } = launch();
     const result = await adapter.launchHarness(harnessBinding({ model: "gpt-5" }), { name: "x" });
     expect(result).toEqual({ ok: true, appliedLaunch: { runtime: "cursor", axis: "permission", state: "unknown", value: null, reason: "cli_config_governs" } });
-    expect(pane.typed[0]).toContain("'cursor-agent' '--disable-auto-update' '--trust' '--model' 'gpt-5'");
+    expect(pane.typed[0]).toContain("'--model' 'gpt-5'");
     expect(pane.typed[0]).not.toContain("--force");
+  });
+
+  it("fresh launch reserves its own UUID before any operator chat appears", async () => {
+    const { adapter, pane, files } = launch();
+    await adapter.launchHarness(harnessBinding(), { name: "x" });
+    const record = JSON.parse(files.files[nodePath.join(seatDir, "launch.json")]!);
+    expect(record.presetToken).toMatch(/^[0-9a-f-]{36}$/);
+    expect(pane.typed[0]).toContain(`'--new-session-id' '${record.presetToken}'`);
   });
 
   it("full_bypass types --force", async () => {
@@ -237,11 +241,11 @@ describe("Cursor adapter launch", () => {
     expect(pane.typed[0]).toContain("'--force'");
   });
 
-  it("snapshots the chats that already exist for the cwd before launch", async () => {
+  it("records the launch config without inferring ownership from existing chats", async () => {
     const files = harnessMemFs({ [storeDbUnder(HARNESS_HOME, HARNESS_CWD, SEEDED_ID)]: "" });
     await launch(files).adapter.launchHarness(harnessBinding(), { name: "x" });
     expect(parseCursorChatSnapshot(files.files[nodePath.join(seatDir, CURSOR_CHAT_SNAPSHOT_FILE)]!))
-      .toEqual({ chatIds: [SEEDED_ID], configDir: nodePath.join(HARNESS_HOME, ".cursor") });
+      .toEqual({ chatIds: [], configDir: nodePath.join(HARNESS_HOME, ".cursor") });
   });
 
   it("fresh, resume, and restore launches all type --disable-auto-update", async () => {
@@ -270,15 +274,20 @@ describe("Cursor adapter launch", () => {
     const root = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "openrig-cursor-"));
     const homedir = nodePath.join(root, "home");
     const cwd = nodePath.join(root, "work");
-    const seatStateDir = nodePath.join(root, "seat");
+    const seatStateDir = nodePath.join(root, "cursor", HARNESS_SESSION);
     fs.mkdirSync(seatStateDir, { recursive: true });
     const seed = (id: string, configDir = nodePath.join(homedir, ".cursor")) => {
       const file = nodePath.join(cursorChatsDirForCwd(configDir, cwd), id, "store.db");
       fs.mkdirSync(nodePath.dirname(file), { recursive: true });
       fs.writeFileSync(file, "");
     };
-    const snapshot = (chatIds: string[], configDir?: string) =>
+    const snapshot = (chatIds: string[], configDir?: string, token: string | null = SEEDED_ID) => {
       fs.writeFileSync(nodePath.join(seatStateDir, CURSOR_CHAT_SNAPSHOT_FILE), serializeCursorChatSnapshot({ chatIds, configDir }));
+      if (token) fs.writeFileSync(nodePath.join(seatStateDir, "launch.json"), JSON.stringify({
+        runtimeId: "cursor", sessionName: HARNESS_SESSION, cwd, presetToken: token,
+        launchStartedAt: new Date(Date.now() - 60_000).toISOString(),
+      }));
+    };
     // null = the seat has no recorded launch start.
     const capture = (launchStartedAt: Date | null = new Date(Date.now() - 60_000)) => CURSOR_REGISTRATION.descriptor.captureResumeToken!(
       { sessionName: HARNESS_SESSION, cwd, seatStateDir, homedir, launchStartedAt: launchStartedAt ?? undefined }, {} as never,
@@ -286,29 +295,75 @@ describe("Cursor adapter launch", () => {
     return { root, homedir, cwd, seatStateDir, seed, snapshot, capture, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
   }
 
-  it("late capture ignores pre-launch chats and refuses to guess", () => {
+  it("late capture waits for the reserved store and ignores other chats", () => {
     const rig = captureRig();
     try {
       expect(rig.capture()).toBeNull(); // no snapshot yet
       rig.seed(OTHER_ID);
       rig.snapshot([OTHER_ID]);
-      expect(rig.capture()).toBeNull(); // nothing new since launch
+      expect(rig.capture()).toBeNull(); // reserved store does not exist
       rig.seed(SEEDED_ID);
       expect(rig.capture()).toBe(SEEDED_ID);
-      expect(rig.capture(null)).toBeNull(); // no launch start: refuse
-      expect(rig.capture(new Date(Date.now() + 60_000))).toBeNull(); // created before this launch
+      expect(rig.capture(null)).toBe(SEEDED_ID); // identity does not depend on timestamps
     } finally {
       rig.cleanup();
     }
   });
 
-  it("pod-mate race: a second new chat in the shared cwd makes capture refuse", () => {
+  it("the refresher never persists a sole unmanaged chat, then captures the reserved chat", async () => {
+    const rig = captureRig();
+    const db = createFullTestDb();
+    const unregister = getRuntimeDescriptor("cursor") ? () => {} : registerRuntimeDescriptor(CURSOR_REGISTRATION.descriptor);
+    try {
+      rig.snapshot([]);
+      rig.seed(OTHER_ID);
+      const rigRepo = new RigRepository(db);
+      const sessions = new SessionRegistry(db);
+      const node = rigRepo.addNode(rigRepo.createRig("collision").id, "dev", { runtime: "cursor", cwd: rig.cwd });
+      const row = sessions.registerSession(node.id, HARNESS_SESSION);
+      const refresher = new ResumeMetadataRefresher({
+        sessionRegistry: sessions, tmuxAdapter: mockTmux([running]).tmux,
+        runtimeStateRoot: rig.root, homeDir: rig.homedir,
+      });
+      const request = { sessionId: row.id, sessionName: HARNESS_SESSION, runtime: "cursor", resumeType: null, resumeToken: null, cwd: rig.cwd };
+      const stored = () => db.prepare("SELECT resume_token FROM sessions WHERE id = ?").get(row.id) as { resume_token: string | null };
+      await refresher.refresh([request], { fillNullOnly: true });
+      expect(stored().resume_token).toBeNull();
+      rig.seed(SEEDED_ID);
+      await refresher.refresh([request], { fillNullOnly: true });
+      expect(stored().resume_token).toBe(SEEDED_ID);
+    } finally {
+      unregister();
+      db.close();
+      rig.cleanup();
+    }
+  });
+
+  it("capture rejects corrupt or mismatched launch identity", () => {
+    const rig = captureRig();
+    try {
+      rig.snapshot([]);
+      rig.seed(SEEDED_ID);
+      const recordPath = nodePath.join(rig.seatStateDir, "launch.json");
+      const record = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+      for (const patch of [{ runtimeId: "grok" }, { cwd: "/other" }, { sessionName: "other" }, { presetToken: "../../other" }]) {
+        fs.writeFileSync(recordPath, JSON.stringify({ ...record, ...patch }));
+        expect(rig.capture()).toBeNull();
+      }
+      fs.writeFileSync(recordPath, "{");
+      expect(rig.capture()).toBeNull();
+    } finally {
+      rig.cleanup();
+    }
+  });
+
+  it("pod-mate race: captures only the reserved chat among multiple new chats", () => {
     const rig = captureRig();
     try {
       rig.snapshot([]);
       rig.seed(SEEDED_ID); // this seat's chat
       rig.seed(ID); // a pod-mate in the same cwd prompted too
-      expect(rig.capture()).toBeNull();
+      expect(rig.capture()).toBe(SEEDED_ID);
     } finally {
       rig.cleanup();
     }
@@ -325,28 +380,26 @@ describe("Cursor adapter launch", () => {
     }
   });
 
-  it("owner race, documented limit: an owner chat started after launch and before the seat prompts is taken", () => {
-    // Cursor gives no per-process marker to tell these apart (see cursor.md,
-    // Known limits). This pins the limit so a future change is deliberate.
+  it("owner race: an unmanaged chat started after launch is never captured", () => {
     const rig = captureRig();
     try {
-      rig.snapshot([]);
+      rig.snapshot([], undefined, null);
       rig.seed(OTHER_ID);
-      expect(rig.capture()).toBe(OTHER_ID);
+      expect(rig.capture()).toBeNull();
     } finally {
       rig.cleanup();
     }
   });
 
-  it("pod-mate race: the base sibling-seat guard skips cursor capture while another live cursor seat shares the cwd", async () => {
+  it("pod-mate race: reserved identity remains capturable with a live sibling", async () => {
     const rig = captureRig();
     try {
-      expect(CURSOR_REGISTRATION.descriptor.captureIsSessionScoped).toBeFalsy();
+      expect(CURSOR_REGISTRATION.descriptor.captureIsSessionScoped).toBe(true);
       rig.snapshot([]);
       rig.seed(SEEDED_ID);
       const request = { sessionName: HARNESS_SESSION, cwd: rig.cwd, seatStateDir: rig.seatStateDir, homedir: rig.homedir, launchStartedAt: new Date(Date.now() - 60_000) };
       const shared = await runDescriptorTokenCapture(CURSOR_REGISTRATION.descriptor, request, { hasLiveSiblingSeat: () => "dev-other@harness-rig" });
-      expect(shared).toEqual({ outcome: "skipped", reason: "ambiguous_seat" });
+      expect(shared).toMatchObject({ outcome: "token", token: SEEDED_ID });
       const alone = await runDescriptorTokenCapture(CURSOR_REGISTRATION.descriptor, request, { hasLiveSiblingSeat: () => null });
       expect(alone).toMatchObject({ outcome: "token", token: SEEDED_ID });
     } finally {
@@ -358,7 +411,7 @@ describe("Cursor adapter launch", () => {
     const rig = captureRig();
     try {
       const configDir = nodePath.join(rig.root, "custom-cursor");
-      rig.snapshot([], configDir);
+      rig.snapshot([], configDir, ID);
       rig.seed(SEEDED_ID); // under ~/.cursor: not where this seat's Cursor writes
       expect(rig.capture()).toBeNull();
       rig.seed(ID, configDir);

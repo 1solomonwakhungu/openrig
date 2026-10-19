@@ -14,6 +14,8 @@
 // - Chats live at <config dir>/chats/<md5(absolute cwd)>/<chat id>/store.db,
 //   where the config dir is CURSOR_CONFIG_DIR, else $XDG_CONFIG_HOME/cursor,
 //   else ~/.cursor. `--resume <chatId>` reopens an exact chat.
+// - --new-session-id <UUIDv4> reserves an exact new chat ID (hidden flag).
+//   Also checked against 2026.10.18-ea085cb; see cursor.md for probe limits.
 // - There is no fork flag.
 
 import nodePath from "node:path";
@@ -49,6 +51,7 @@ export interface CursorLaunchInput {
   model?: string | null;
   posture: ResolvedLaunchPosture;
   resumeToken?: string;
+  newSessionId?: string;
   forkSource?: ForkSource;
   /** Defaults to `cursor-agent`; a resolved absolute path is also fine. */
   binary?: string;
@@ -72,6 +75,9 @@ export function buildCursorArgv(input: CursorLaunchInput): string[] {
   if (input.forkSource) {
     throw new Error("cursor has no native fork primitive; remove session_source for cursor members");
   }
+  if (input.resumeToken !== undefined && input.newSessionId !== undefined) {
+    throw new Error("cursor launch: resumeToken and newSessionId are mutually exclusive");
+  }
   const binary = input.binary ?? CURSOR_BINARY;
   if (nodePath.basename(binary) === "agent") {
     throw new Error("cursor launch: use `cursor-agent`, not `agent` (`agent` can resolve to another CLI)");
@@ -85,6 +91,13 @@ export function buildCursorArgv(input: CursorLaunchInput): string[] {
     const token = validateCursorChatId(input.resumeToken);
     if (!token.ok) throw new Error(`cursor resume: ${token.error}`);
     argv.push("--resume", token.token);
+  }
+  if (input.newSessionId !== undefined) {
+    const token = validateCursorChatId(input.newSessionId);
+    if (!token.ok || token.token[14] !== "4" || !/[89ab]/.test(token.token[19]!)) {
+      throw new Error("cursor launch: new session id must be a lowercase UUIDv4");
+    }
+    argv.push("--new-session-id", token.token);
   }
   const model = input.model?.trim();
   if (model) {
@@ -173,40 +186,15 @@ export function cursorResumeTargetExists(fs: ReadOnlyFs, chatsDir: string, chatI
   return id.ok && fs.exists(nodePath.join(chatsDir, id.token, "store.db"));
 }
 
-/**
- * Cursor creates the chat lazily (on the first prompt) and picks its id
- * itself, so capture diffs the cwd's chats dir against a snapshot taken just
- * before launch. A chat is this seat's only when it is the single chat that
- * appeared since the snapshot AND its store was created at or after the launch
- * started. Zero or several new chats, a missing or earlier creation time, or no
- * launch start return null rather than a guess.
- *
- * Limit: a chat the owner starts by hand in the same directory before this
- * seat prompts is indistinguishable and can still be taken. Other OpenRig seats
- * sharing the cwd are excluded by the base's sibling-seat guard.
- */
-export function pickNewCursorChat(input: {
-  before: readonly string[];
-  after: readonly string[];
-  launchStartedAt?: Date;
-  createdAt: (chatId: string) => Date | null;
-}): string | null {
-  const known = new Set(input.before);
-  const fresh = input.after.filter((id) => !known.has(id));
-  if (fresh.length !== 1 || !input.launchStartedAt) return null;
-  const created = input.createdAt(fresh[0]!);
-  if (!created || created.getTime() < input.launchStartedAt.getTime()) return null;
-  return fresh[0]!;
-}
-
 export interface CursorChatSnapshot {
+  /** Legacy inventory, retained for old seat-state parsing; never ownership evidence. */
   chatIds: string[];
   /** The config dir the launch resolved (from the launch env), so capture and
    *  the resume check look where this seat's Cursor writes. */
   configDir?: string;
 }
 
-/** Snapshot file content (seat state dir) and its tolerant parser. */
+/** Legacy snapshot file content (seat state dir) and its tolerant parser. */
 export function serializeCursorChatSnapshot(snapshot: CursorChatSnapshot): string {
   return `${JSON.stringify(snapshot)}\n`;
 }
