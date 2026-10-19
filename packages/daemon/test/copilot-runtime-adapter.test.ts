@@ -5,7 +5,7 @@
 
 import fs, { readFileSync } from "node:fs";
 import nodePath from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { COPILOT_REGISTRATION, COPILOT_SEAT_FILE, COPILOT_SPEC } from "../src/adapters/cli/copilot/index.js";
 import { TuiCliRuntimeAdapter, unwrapBoxedLines } from "../src/adapters/cli/tui-cli-runtime-adapter.js";
 import { runTuiCliAdapterContract } from "./helpers/tui-cli-adapter-contract.js";
@@ -528,4 +528,80 @@ describe("Copilot trust dialog answer", () => {
       expect(Object.keys(r.files.files).every((f) => f.startsWith(`${HARNESS_STATE_ROOT}/copilot/`))).toBe(true);
     }
   });
+});
+
+// Freshness must not weaken the exact cwd/selected-option guards. Use the
+// real trust capture and its actual cwd, so an unsafe match would send Enter.
+describe("Copilot marker freshness without positional evidence", () => {
+  const trust = fixture("copilot-80-trust.txt").trimEnd();
+  const ready = fixture("copilot-80-idle-derived.txt");
+  const login = fixture("copilot-idle-unauth.txt");
+
+  function launch(frames: Parameters<typeof mockTmux>[0], position: number | null = null) {
+    const pane = mockTmux(frames);
+    vi.mocked(pane.tmux.getPaneLinePosition).mockResolvedValue(position);
+    const adapter = COPILOT_REGISTRATION.createAdapter(harnessDeps({ tmux: pane.tmux, fsOps: harnessMemFs() }));
+    return { pane, result: adapter.launchHarness(harnessBinding({ cwd: copilotTrustDialogPath(trust)! }), { name: "x" }) };
+  }
+
+  for (const prompts of [1, 2, 5]) for (const header of ["new status", "$ "]) {
+    it(`never answers inherited trust with ${prompts} prompts and ${JSON.stringify(header)} repaint`, async () => {
+      const repeated = Array(prompts).fill("$ ").join("\n");
+      const old = `old status\n${repeated}\n${trust}\n${repeated}`;
+      const { pane, result } = launch([atShell(old),
+        { command: "copilot", content: `${header}\n${repeated}\n${trust}\n${repeated}` },
+        { command: "copilot", content: `another status\n${trust}\nchanged footer` },
+      ]);
+      expect(await result).toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+      expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+    });
+  }
+
+  it("does not assign the guards of an inherited dialog to an additional marker", async () => {
+    const { pane, result } = launch([atShell(`${trust}\n$ `),
+      { command: "copilot", content: `${trust}\nConfirm folder trust` },
+    ]);
+    expect(await result).toMatchObject({ ok: false, attentionCode: "trust_gate" });
+    expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+  });
+
+  it("answers once after observing the entire old trust marker disappear", async () => {
+    const { pane, result } = launch([atShell(`${trust}\n$ `),
+      { command: "copilot", content: "starting" },
+      { command: "copilot", content: trust },
+      { command: "copilot", content: ready },
+    ]);
+    expect(await result).toMatchObject({ ok: true });
+    expect(pane.tmux.sendKeys).toHaveBeenCalledExactlyOnceWith(HARNESS_SESSION, ["Enter"]);
+  });
+
+  for (const position of [null, 1]) {
+    it(`does not answer inherited alternate-screen trust (position ${position})`, async () => {
+      const { pane, result } = launch([
+        { command: "zsh", content: trust, alternate: true },
+        { command: "copilot", content: `changed header\n${trust}`, alternate: true },
+      ], position);
+      expect(await result).toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+      expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+    });
+
+    it(`answers a new alternate-screen trust after observed exit/reentry (position ${position})`, async () => {
+      const { pane, result } = launch([
+        { command: "zsh", content: trust, alternate: true },
+        { command: "copilot", content: "starting", alternate: false },
+        { command: "copilot", content: trust, alternate: true },
+        { command: "copilot", content: ready, alternate: true },
+      ], position);
+      expect(await result).toMatchObject({ ok: true });
+      expect(pane.tmux.sendKeys).toHaveBeenCalledExactlyOnceWith(HARNESS_SESSION, ["Enter"]);
+    });
+  }
+
+  for (const baseline of [ready, "$ "]) {
+    it(`fresh multiline login outranks ${baseline === ready ? "stale" : "fresh"} ready`, async () => {
+      const { pane, result } = launch([atShell(baseline), { command: "copilot", content: login }]);
+      expect(await result).toMatchObject({ ok: false, attentionCode: "login_required" });
+      expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+    });
+  }
 });

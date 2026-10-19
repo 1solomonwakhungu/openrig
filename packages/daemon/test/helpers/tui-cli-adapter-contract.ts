@@ -300,15 +300,21 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
             .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
         });
 
-        for (const screen of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen)]) {
-          it(`keeps duplicate inherited prompt boundaries ordered around ${JSON.stringify(screen.slice(0, 32))}`, async () => {
-            const old = `old status\n$ \n${screen}\n$ `;
-            const current = `new status\n$ \n${screen}\n$ `;
-            const { adapter, pane } = withoutPosition(atShell(old), [{ command: running, content: current }]);
-            expect(await adapter.launchHarness(harnessBinding({ cwd: "/home/user/work" }), { name: "x" }))
-              .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
-            expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
-          });
+        for (const screen of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? [])]) {
+          for (const prompts of [1, 2, 5]) for (const header of ["new status", "$ "]) {
+            it(`keeps inherited ${JSON.stringify(screen.slice(0, 32))} stale with ${prompts} prompts and header ${JSON.stringify(header)}`, async () => {
+              const repeated = Array(prompts).fill("$ ").join("\n");
+              const old = `old status\n${repeated}\n${screen}\n${repeated}`;
+              const { adapter, pane } = withoutPosition(atShell(old), [
+                { command: running, content: `${header}\n${repeated}\n${screen}\n${repeated}` },
+                { command: running, content: `another header\n${repeated}\n${screen}\nnew footer` },
+                { command: running, content: `rolled header\n${screen}\nrolled footer` },
+              ]);
+              expect(await adapter.launchHarness(harnessBinding({ cwd: "/home/user/work" }), { name: "x" }))
+                .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+              expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+            });
+          }
         }
 
         it("does not attribute an old ready marker to changes on both sides of it", async () => {
@@ -319,18 +325,40 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
             .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
         });
 
-        it("accepts a genuinely fresh ready screen after stale gates and errors", async () => {
+        it("does not refresh inherited occurrences when only some disappear then return", async () => {
+          const old = `${readyScreen}\n${readyScreen}`;
+          const { adapter, pane } = withoutPosition(atShell(old), [
+            { command: running, content: readyScreen },
+            { command: running, content: `${readyScreen}\n${readyScreen}` },
+          ]);
+          expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+            .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+          expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+        });
+
+        it("matches ready after stale gates and errors only when raw grammar permits it", async () => {
           const old = [...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? []), "$ "].join("\n");
           const { adapter } = withoutPosition(atShell(old), [{ command: running, content: `${old}\n${readyScreen}` }]);
-          expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+          const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+          // Kiro's whole-screen negative lookahead rejects a ready placeholder
+          // while any retained sign-in text remains in the raw capture.
+          if (descriptor.id === "kiro") expect(result).toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+          else expect(result.ok).toBe(true);
         });
 
         for (const screen of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? [])]) {
-          it(`recognizes an appended repeat of ${JSON.stringify(screen.slice(0, 32))}`, async () => {
+          it(`requires a distinguishable match for an appended repeat of ${JSON.stringify(screen.slice(0, 32))}`, async () => {
             const old = `${screen}\n$ `;
             const { adapter } = withoutPosition(atShell(old), [{ command: running, content: `${old}\n${screen}` }]);
             const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
-            if (screen === readyScreen) expect(result.ok).toBe(true);
+            if (screen === readyScreen) {
+              // These regexes consume the whole screen through the final
+              // placeholder. Two textual placeholders still yield ONE match;
+              // an append therefore supplies no additional marker occurrence.
+              if (["kiro", "antigravity", "opencode", "kilo"].includes(descriptor.id)) {
+                expect(result).toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+              } else expect(result.ok).toBe(true);
+            }
             else expect(result).toMatchObject({ ok: false, error: expect.not.stringContaining("timed out") });
           });
         }
@@ -342,13 +370,16 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
           expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
         });
 
-        it("accepts a repeated ready screen after the pre-launch prefix rolls out of capture", async () => {
-          const old = `${readyScreen}\n$ `;
+        it("keeps a same-count rolled marker pending without evidence of disappearance", async () => {
+          const old = readyScreen;
           const { adapter } = withoutPosition(atShell(old), [
-            { command: running, content: `${old}\nstarting` },
+            { command: running, content: `starting\n${old}` },
             { command: running, content: `${Array.from({ length: 120 }, (_, i) => `log ${i}`).join("\n")}\n${readyScreen}` },
           ]);
-          expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+          // The marker never vanished in an observed frame. New surrounding
+          // rows cannot distinguish retention from an identical redraw.
+          expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+            .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
         });
 
         it("does not treat unrelated appended output as freshness for old ready text", async () => {
@@ -395,6 +426,12 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
           expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
             .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
         });
+      });
+
+      it("keeps positional output authoritative when a normal pane's alternate flag becomes unreadable", async () => {
+        const { adapter, pane } = rig([atShell(`${readyScreen}\n$ `), ready]);
+        vi.mocked(pane.tmux.isPaneAlternateScreen).mockResolvedValue(null).mockResolvedValueOnce(false);
+        expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
       });
 
       for (const position of [null, "valid"]) {
