@@ -53,18 +53,17 @@ describe("OMP runner: exit with no model credentials", () => {
     return { output: `${result.stdout}${result.stderr}`, state };
   }
 
-  it("reports a sign-in problem and records exited.reason login_required", () => {
+  it("records exited.reason login_required; the printed error keeps upstream's phase-only wording", () => {
     const { output, state } = runWithFakeOmp(NO_CREDENTIALS_STDERR);
     expect(output).toContain("[omp:err] No models available.");
-    expect(output).toContain("[omp-runner] ERROR OMP has no model credentials for this seat.");
-    expect(output).toContain("PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login");
+    expect(output).toContain("[omp-runner] ERROR OMP exited during startup, before its RPC transport started");
     expect(output).not.toContain("not a credential problem");
     expect(state?.exited).toMatchObject({ code: 1, reason: "login_required" });
   }, 40_000);
 
   it("any other early exit stays a launch failure, without claiming anything about credentials", () => {
     const { output, state } = runWithFakeOmp(["error: unknown option --mode"]);
-    expect(output).toContain("[omp-runner] ERROR OMP exited before its RPC transport started");
+    expect(output).toContain("[omp-runner] ERROR OMP exited during startup, before its RPC transport started");
     expect(output).not.toContain("credential");
     expect(state?.exited?.code).toBe(1);
     expect(state?.exited?.reason).toBeUndefined();
@@ -121,12 +120,14 @@ describe("OMP adapter: a no-credentials exit is a sign-in gate", () => {
       exists: (path: string) => path in files,
       mkdirp: () => {},
     };
+    const send = vi.fn(async (_session: string, command: string) => {
+      const launchId = /--launch-id '([^']+)'/.exec(command)?.[1];
+      files[paths.runnerStatePath] = JSON.stringify({ ready: false, launchId, updatedAt: "t", exited: { ...exited, at: "t" } });
+      return { ok: true };
+    });
     const tmux = {
-      sendText: vi.fn(async (_session: string, command: string) => {
-        const launchId = /--launch-id '([^']+)'/.exec(command)?.[1];
-        files[paths.runnerStatePath] = JSON.stringify({ ready: false, launchId, updatedAt: "t", exited: { ...exited, at: "t" } });
-        return { ok: true };
-      }),
+      sendText: send,
+      sendShellCommand: send,
       sendKeys: vi.fn(async () => ({ ok: true })),
       capturePaneContent: vi.fn(async () => "[omp:err] No models available. Use /login or set an API key environment variable."),
       hasSession: vi.fn(async () => true),

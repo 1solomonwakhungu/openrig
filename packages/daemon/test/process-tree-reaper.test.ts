@@ -143,7 +143,7 @@ describe("runtime stop hook", () => {
     tmux.stopHook = createRuntimeStopHook({ stateRoot, readFile, resolveSessionRuntime: (s) => runtimes[s] ?? null, reaper: table.deps });
 
     await tmux.killSession("dev@rig");
-    expect(exec).toHaveBeenCalledWith("tmux kill-session -t 'dev@rig'");
+    expect(exec.mock.calls.map((call) => String((call as unknown[])[0]))).toEqual(expect.arrayContaining([expect.stringMatching(/^tmux kill-session -t '=?dev@rig'/)]));
     expect(table.signals).toEqual([[-PANE, "SIGTERM"]]);
 
     table.signals.length = 0;

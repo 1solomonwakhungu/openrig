@@ -131,7 +131,7 @@ describe("seat activity sweep feeds the pane classification", () => {
       },
     });
     const db = {
-      prepare: () => ({ all: () => [{ session_name: "dev-impl@rig", node_id: "node-1", runtime }] }),
+      prepare: () => ({ all: () => [{ session_name: "dev-impl@rig", node_id: "node-1", runtime, attachment_type: "tmux", agent_app: null }] }),
     } as never;
     const state = () => service.getSeatState("node-1");
     return { service, db, state };

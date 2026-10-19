@@ -1525,10 +1525,8 @@ export class RestoreOrchestrator {
             if (isPodAware && resumeRequested) {
               // Only the runtime's own report that the conversation doesn't exist rolls the seat back
               // as unresumable. A pane that went back to its shell for another reason stays failed,
-              // with its pane and binding kept, so its output can still be read. Registered CLI
-              // runtimes (adapters/cli/) report retry_fresh only for a missing resume target, so
-              // their retry_fresh is that report.
-              if (startupResult.recovery === "retry_fresh" && (startupResult.missingConversation || isRegistryCliRuntime(startupRuntime))) {
+              // with its pane and binding kept, so its output can still be read.
+              if (startupResult.recovery === "retry_fresh" && startupResult.missingConversation) {
                 await this.rollbackToZeroSession(node.id, sessionName, launchResult?.session.id, priorState);
                 return {
                   nodeId: node.id,
@@ -1789,7 +1787,8 @@ export class RestoreOrchestrator {
     let kernelAuthority = false;
     let teamPermissionDefault = false;
     // Registered CLI runtimes' resume adapters (adapters/cli/index.ts), consulted after the built-ins.
-    const registered = this.registeredResumeAdapters.find((candidate) => candidate.canResume(resumeType, resumeToken));
+    // `?? []`: callers (and tests) may invoke attemptResume on a partial orchestrator.
+    const registered = (this.registeredResumeAdapters ?? []).find((candidate) => candidate.canResume(resumeType, resumeToken));
     let permissionMode: string | undefined;
     try {
       // Pre-registry fallback: an unmatched pair was attributed to "pi".
@@ -2129,7 +2128,3 @@ interface PlanEntry {
   node: NodeWithBinding;
 }
 
-/** A runtime registered by a CLI harness adapter (adapters/cli/), not one of the built-ins. */
-function isRegistryCliRuntime(runtime: string | null | undefined): boolean {
-  return !!runtime && !(BUILTIN_RUNTIME_IDS as readonly string[]).includes(runtime) && !!getRuntimeDescriptor(runtime);
-}

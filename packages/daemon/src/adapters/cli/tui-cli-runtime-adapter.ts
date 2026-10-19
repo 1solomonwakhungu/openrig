@@ -636,7 +636,10 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       return { ok: false, error: `${this.runtime} resume: could not check the resume target (${(err as Error).message})`, recovery: "attention_required" };
     }
     if (result.ok) return null;
-    return { ok: false, error: `${this.runtime} resume: ${result.reason}`, recovery: result.recovery ?? "retry_fresh" };
+    const recovery = result.recovery ?? "retry_fresh";
+    // retry_fresh here always means the resume target is gone: the runtime's own report of a
+    // missing conversation, which is what restore rolls back as unresumable.
+    return { ok: false, error: `${this.runtime} resume: ${result.reason}`, recovery, ...(recovery === "retry_fresh" ? { missingConversation: true as const } : {}) };
   }
 
   private async prepare(input: {
@@ -789,6 +792,8 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return {
       ok: false, error: `${this.runtime} launch: ${reason}`, recovery, evidence: this.evidence(content),
       ...(attentionCode ? { attentionCode } : {}),
+      // A TUI CLI reports retry_fresh only for a missing resume target (see errorPatterns).
+      ...(recovery === "retry_fresh" ? { missingConversation: true as const } : {}),
     };
   }
 

@@ -81,7 +81,8 @@ describe("S03 future native permission selections (offline; no native effect cla
     const before = lineage(db); const prior = db.prepare("SELECT * FROM applied_launch_observations").get();
     migrate(db, ALL_MIGRATIONS); migrate(db, ALL_MIGRATIONS);
     expect(lineageAsOf(db, before)).toBe(before);
-    expect(db.prepare("SELECT * FROM applied_launch_observations").get()).toEqual({ ...prior as object, approval_policy: null });
+    // Migrations after 088 also run here (the fork filters on name < 088), so 113's daemon_opt_out appears too.
+    expect(db.prepare("SELECT * FROM applied_launch_observations").get()).toEqual({ ...prior as object, approval_policy: null, daemon_opt_out: null });
     expect(db.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE name LIKE '088_%'").get()).toEqual({ n: 1 });
     expect(db.pragma("foreign_key_check")).toEqual([]);
   });

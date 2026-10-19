@@ -55,7 +55,8 @@ describe("permission selection on a fallback runtime (overrideFor)", () => {
 
   it("the matching runtime applies the selection as before, with no fallback note", () => {
     const f = fixture({ runtime: "claude-code", mode: "auto" });
-    expect(f.store.overrideFor(f.node.id, "claude-code")).toEqual({ override: { permissionMode: "auto" } });
+    // The matching runtime gets upstream's launchOverride as is (with its kernel/team flags) and no fallback note.
+    expect(f.store.overrideFor(f.node.id, "claude-code")).toEqual({ override: { permissionMode: "auto", kernelAuthority: false, teamPermissionDefault: false } });
   });
 
   it("a runtime outside the seat's candidates still refuses", () => {

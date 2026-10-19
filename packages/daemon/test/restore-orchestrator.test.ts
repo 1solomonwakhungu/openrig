@@ -149,7 +149,7 @@ describe("RestoreOrchestrator", () => {
     const snap = snapshotCapture.captureSnapshot(rig.id, "test");
     sessionRegistry.updateStatus(session.id, "exited");
     db.prepare("DELETE FROM bindings WHERE node_id = ?").run(node.id);
-    const launchHarness = vi.fn(async () => ({ ok: false as const, error, recovery: "retry_fresh" as const }));
+    const launchHarness = vi.fn(async () => ({ ok: false as const, error, recovery: "retry_fresh" as const, missingConversation: true as const }));
     const adapter = {
       runtime,
       listInstalled: vi.fn(async () => []),
@@ -2581,7 +2581,7 @@ describe("RestoreOrchestrator", () => {
     if (result.ok) {
       const nodeResult = result.result.nodes.find((n) => n.nodeId === node.id)!;
       expect(nodeResult.status).toBe("awaiting-decision");
-      expect(nodeResult.error).toContain("resume attempted but failed");
+      expect(nodeResult.error).toContain("Original session unresumable");
       expect(nodeResult.error).toContain(error);
       expect(launchHarness).toHaveBeenCalledTimes(1); // no silent fresh launch
       expect(liveSessionsFor(node.id)).toEqual([]);

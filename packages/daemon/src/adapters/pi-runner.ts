@@ -34,7 +34,7 @@ import { OMP_MAX_FRAME_BYTES, OmpFrameDecoder, ompProtocolV2Limit } from "./omp-
 import {
   piSeatPaths, buildPiChildArgs, buildPiChildEnv, buildPendingRunnerState, parsePiRunnerState,
   PI_RUNNER_READY_MARKER, PI_RUNNER_EXIT_MARKER, PI_RUNNER_ERROR_MARKER, PI_PROVIDER_ENV_VARS,
-  type PiRunnerState, type RunnerRuntime, OMP_NO_CREDENTIALS_RE, OMP_SIGN_IN_HINT,
+  type PiRunnerState, type RunnerRuntime, OMP_NO_CREDENTIALS_RE,
 } from "./pi-runner-protocol.js";
 
 // ── Submitted input boundaries ─────────────────────────────────────────────
@@ -1301,11 +1301,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     if (!core.isReady()) {
       const how = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
       const output = stderrTail.length > 0 ? ` Its last output: ${stderrTail.join(" | ")}` : " It printed nothing on stderr.";
-      console.error(noCredentials
-        ? `[omp-runner] ERROR ${OMP_SIGN_IN_HINT}`
-        : transportUp
-          ? "[omp-runner] ERROR OMP did not establish a resumable RPC session. Authenticate this isolated seat using HOME=<seat-root> PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login, or provide its declared model provider key in the OpenRig daemon environment. Default OMP credentials are not shared."
-          : `[omp-runner] ERROR OMP exited during startup, before its RPC transport started (${command}, ${how}).${output}`);
+      // The printed line reports only what happened (upstream wording). A no-credentials notice is
+      // still recorded on the sidecar as login_required, which the adapter reports as a sign-in gate
+      // so runtime fallback can act on it.
+      console.error(transportUp
+        ? "[omp-runner] ERROR OMP did not establish a resumable RPC session. Authenticate this isolated seat using HOME=<seat-root> PI_CODING_AGENT_DIR=<seat-root>/agent omp and /login, or provide its declared model provider key in the OpenRig daemon environment. Default OMP credentials are not shared."
+        : `[omp-runner] ERROR OMP exited during startup, before its RPC transport started (${command}, ${how}).${output}`);
     }
     core.handlePiExit(code, !core.isReady() && noCredentials ? "login_required" : undefined);
     input.close();

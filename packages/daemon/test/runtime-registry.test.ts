@@ -298,7 +298,7 @@ describe("runtime registry: a registered runtime reaches every generic site", ()
     expect(classifyPaneRuntimeMatch("example-cli", "example-cli")).toBe("match");
     expect(classifyPaneRuntimeMatch("zsh", "example-cli")).toBe("mismatch");
     expect(classifyPaneRuntimeMatch("node", "example-cli")).toBe("match");
-    expect(classifyPaneRuntimeMatch("zsh", "pi")).toBe("match"); // unchanged built-in leniency
+    expect(classifyPaneRuntimeMatch("zsh", "pi")).toBe("mismatch"); // upstream #1391: a Pi seat at a bare shell is a mismatch
 
     const draft = generateDraftRig([{ tmuxSession: "s", runtimeHint: "example-cli", cwd: "/w" } as unknown as DiscoveredSession]);
     expect(draft.yaml).toContain("runtime: example-cli");
