@@ -90,6 +90,13 @@ Fresh launches mint a UUIDv4 and pass `--new-session-id <id>`. Cursor reserves
 that exact ID and rejects an existing directory at that location. OpenRig
 records the ID in the seat's `launch.json` and the launch's resolved config
 dir in `cursor-chats-before-launch.json` (the legacy filename is retained).
+The launch record is replaced atomically before the command is sent. A
+read-only record can be replaced when its directory is writable. If the write
+or rename fails, launch stops before starting Cursor and reports
+`attention_required`; the previous record remains available for recovery.
+This keeps immediate capture, the periodic refresher and restore on the same
+identity, including when the new store appears later.
+
 Capture returns only that reserved ID once its `store.db` exists. It never
 chooses a chat by its timestamp or by comparing directory contents. Operator
 chats and sibling seats in the same directory cannot substitute their IDs.

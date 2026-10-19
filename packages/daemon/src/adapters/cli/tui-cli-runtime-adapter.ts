@@ -206,6 +206,9 @@ export interface TuiCliRuntimeSpec {
    *  launch, from the refresher, or at restore, so an unused seat restores
    *  fresh instead of stopping on a refused resume. */
   mintedTokenAwaitsCapture?: boolean;
+  /** Capture uses this record as its identity authority. Replace it atomically
+   *  before dispatch, and refuse to start a new CLI if persistence fails. */
+  requiresDurableLaunchRecord?: boolean;
   /** Checked before typing a resume, so a missing session never silently
    *  starts fresh. Default recovery on refusal: retry_fresh. */
   validateResumeTarget?(ctx: TuiCliResumeTargetContext): TuiCliResumeTargetResult | Promise<TuiCliResumeTargetResult>;
@@ -464,7 +467,10 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
       ...(sessionToken ? { presetToken: sessionToken } : {}),
       ...(ownerConfigChanges.length ? { ownerConfigChanges } : {}),
     };
-    this.writeLaunchRecord(seatStateDir, record);
+    const recorded = this.writeLaunchRecord(seatStateDir, record);
+    if (!recorded && this.spec.requiresDurableLaunchRecord) {
+      return { ok: false, error: `${id} launch: could not persist ${LAUNCH_RECORD_FILE}; no launch command sent`, recovery: "attention_required" };
+    }
 
     // Mark where this launch's output starts, so ready, gate, and error text
     // left in a reused pane's scrollback never counts.
@@ -676,11 +682,25 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return changes;
   }
 
-  private writeLaunchRecord(seatStateDir: string, record: LaunchRecord): void {
+  private writeLaunchRecord(seatStateDir: string, record: LaunchRecord): boolean {
     try {
-      this.fs.writeFile(nodePath.join(seatStateDir, LAUNCH_RECORD_FILE), `${JSON.stringify(record, null, 2)}\n`);
+      const target = nodePath.join(seatStateDir, LAUNCH_RECORD_FILE);
+      const content = `${JSON.stringify(record, null, 2)}\n`;
+      if (this.spec.requiresDurableLaunchRecord) {
+        if (!this.fs.rename) throw new Error("atomic launch-record write needs fsOps.rename");
+        // Never truncate the preceding identity. Rename also replaces a
+        // read-only record when the seat directory is writable. Late capture
+        // sees either the previous launch (before dispatch) or this one.
+        const pending = `${target}.${record.launchId}.tmp`;
+        this.fs.writeFile(pending, content);
+        this.fs.rename(pending, target);
+      } else {
+        this.fs.writeFile(target, content);
+      }
+      return true;
     } catch (err) {
       console.warn(`[openrig] ${this.runtime}: could not write ${LAUNCH_RECORD_FILE} (${(err as Error).message})`);
+      return false;
     }
   }
 

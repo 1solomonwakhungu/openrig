@@ -94,6 +94,7 @@ export const CURSOR_SPEC: TuiCliRuntimeSpec = {
     buildCursorArgv({ model: binding.model, posture, resumeToken, newSessionId: sessionToken, forkSource }),
   mintSessionToken: ({ forkSource }) => forkSource ? undefined : randomUUID(),
   mintedTokenAwaitsCapture: true,
+  requiresDurableLaunchRecord: true,
   prepareLaunch: ({ seatStateDir, fs: fsOps, env, homedir }) => {
     const configDir = cursorConfigDir(env, homedir);
     fsOps.mkdirp(seatStateDir);
