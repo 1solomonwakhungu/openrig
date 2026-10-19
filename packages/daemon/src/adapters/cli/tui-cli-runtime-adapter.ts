@@ -475,10 +475,12 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     // Mark where this launch's output starts, so ready, gate, and error text
     // left in a reused pane's scrollback never counts.
     const line = await this.tmux.getPaneLinePosition(sessionName);
-    const baseline = (await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "";
+    const baseline = await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED);
     const window: LaunchWindow = {
       line,
-      staleMarkers: new Map(this.launchPatterns().map((pattern) => [pattern, markerMatches(pattern, baseline).length])),
+      // An unavailable baseline supplies no evidence that a later marker is
+      // new. A readable marker-free frame or screen transition can resolve it.
+      staleMarkers: new Map(this.launchPatterns().map((pattern) => [pattern, baseline === null ? Infinity : markerMatches(pattern, baseline).length])),
       previousAlternate: await this.tmux.isPaneAlternateScreen(sessionName),
     };
     const sent = await this.tmux.sendShellCommand(sessionName, command);
@@ -827,9 +829,14 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
   private async readPane(sessionName: string, window?: LaunchWindow): Promise<{ state: PaneState; content: string; gateAnswerFresh: boolean; missingBinary: boolean }> {
     const paneCommand = ((await this.tmux.getPaneCommand(sessionName)) ?? "").trim().replace(/^-/, "");
     const atShell = SHELL_COMMANDS.has(paneCommand);
-    const content = window && window.line !== null
-      ? (await this.tmux.capturePaneFromLine(sessionName, window.line, JOINED)) ?? ""
-      : (await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "";
+    const captured = window && window.line !== null
+      ? await this.tmux.capturePaneFromLine(sessionName, window.line, JOINED)
+      : await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED);
+    if (captured === null) return {
+      state: { kind: atShell ? "at_shell" : "pending" }, content: "",
+      gateAnswerFresh: false, missingBinary: false,
+    };
+    const content = captured;
     const fresh = new Set<RegExp>();
     const alternate = window ? await this.tmux.isPaneAlternateScreen(sessionName) : null;
     // An unreadable flag cannot prove an inherited alternate screen exited.

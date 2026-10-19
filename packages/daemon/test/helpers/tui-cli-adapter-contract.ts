@@ -283,6 +283,30 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
           return instance;
         }
 
+        for (const screen of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen)]) {
+          it(`retains inherited alternate-screen evidence after failed positional capture for ${JSON.stringify(screen.slice(0, 32))}`, async () => {
+            const { adapter, pane } = rig([
+              { command: "zsh", content: screen, alternate: true },
+              { command: running, content: screen, alternate: true },
+            ]);
+            vi.mocked(pane.tmux.capturePaneFromLine).mockResolvedValueOnce(null);
+            expect(await adapter.launchHarness(harnessBinding({ cwd: "/home/user/work" }), { name: "x" }))
+              .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+            expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+          });
+          for (const missing of ["baseline", "intermediate"] as const) {
+            it(`retains unknown ${missing} capture evidence for ${JSON.stringify(screen.slice(0, 32))}`, async () => {
+              const { adapter, pane } = withoutPosition(atShell(screen), [{ command: running, content: screen }]);
+              const capture = vi.mocked(pane.tmux.capturePaneContent);
+              if (missing === "intermediate") capture.mockResolvedValueOnce(screen);
+              capture.mockResolvedValueOnce(null);
+              expect(await adapter.launchHarness(harnessBinding({ cwd: "/home/user/work" }), { name: "x" }))
+                .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+              expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+            });
+          }
+        }
+
         for (const stale of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? [])]) {
           it(`ignores unchanged stale output with the runtime foreground: ${JSON.stringify(stale.slice(0, 32))}`, async () => {
             const content = `${stale}\n$ `;
