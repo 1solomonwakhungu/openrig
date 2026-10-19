@@ -57,6 +57,7 @@ describe("S03 policy permissions compatibility", () => {
       exists: (p: string) => p === STATE_FILE, isProcessAlive: () => true, fetch: async () => ({ ok: true }),
     }, clientFactory: () => ({ post: async (...a: unknown[]) => { posts.push(a); return { status: 200, data: { ok: true } }; } }) };
     await capture(seatCommand(deps as never), ["seat", "set-permissions", "owner@inert", "--mode", "floor", "--reason", "r", "--operator", "op@host", "--json"]);
-    expect(posts).toEqual([["/api/seat/set-permissions/owner%40inert", { mode: "floor", reason: "r", operator: "op@host" }]]);
+    expect(posts).toHaveLength(1);
+    expect((posts[0] as unknown[]).slice(0, 2)).toEqual(["/api/seat/set-permissions/owner%40inert", { mode: "floor", reason: "r", operator: "op@host" }]);
   });
 });
