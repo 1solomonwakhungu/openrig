@@ -106,6 +106,21 @@ describe("a queue wake keeps its input-box reading (#1278)", () => {
     }
   });
 
+  it.each<[SendResult, string]>([
+    [{ ok: false, error: "send failed" }, "failed:send failed"],
+    [{ ok: false, reason: "timeout", delivery: { state: "indeterminate" } }, "indeterminate:timeout"],
+    [{ ok: true, outcome: "retained", reason: "draft_present" }, "retained:draft_aware"],
+  ])("keeps a returned reading alongside the unchanged outcome %j", async (result, expected) => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    h.results.push({ ...result, inputBox: BUSY_SEAT });
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+    const row = h.repo.getById(item.qitemId)!;
+    expect(row.lastNudgeWireResult).toBe(expected);
+    expect(row.lastNudgeInputBox).toEqual(BUSY_SEAT);
+    expect(row.pickup).toMatchObject({ state: "unclaimed" });
+  });
+
   it("a retry replaces the reading: a newer attempt without one never shows the older reading", async () => {
     const h = harness({ outbox: false });
     db = h.db;
