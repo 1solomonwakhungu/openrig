@@ -247,7 +247,7 @@ type LaunchFailure = Extract<HarnessLaunchResult, { ok: false }>;
  *  lines on screen before typing for panes where no position is available. */
 interface LaunchWindow {
   line: number | null;
-  lines: ReadonlySet<string>;
+  lines: readonly string[];
   /** A previous process left the pane on the alternate screen. */
   alternateAtLaunch: boolean;
 }
@@ -476,7 +476,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     // left in a reused pane's scrollback never counts.
     const window: LaunchWindow = {
       line: await this.tmux.getPaneLinePosition(sessionName),
-      lines: new Set(((await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "").split("\n")),
+      lines: ((await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "").split("\n"),
       alternateAtLaunch: (await this.tmux.isPaneAlternateScreen(sessionName)) === true,
     };
     const sent = await this.tmux.sendShellCommand(sessionName, command);
@@ -730,8 +730,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
             return this.failure(`${state.gate.reason} (still showing after OpenRig answered it)`, "attention_required", content, state.gate.code);
           }
         } else if (state.gate.answer && !answered) {
-          const fresh = window.line === null ? freshLines(content, window.lines) : content;
-          const refusal = this.answerRefusal(state.gate, state.gate.answer, fresh, launch.binding);
+          const refusal = this.answerRefusal(state.gate, state.gate.answer, content, launch.binding);
           if (refusal && (refusal.final || ++unreadablePolls >= ANSWER_READ_POLLS)) {
             return this.failure(`${state.gate.reason} (not answered automatically: ${refusal.why})`, "attention_required", content, state.gate.code);
           }
@@ -753,10 +752,9 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
         // is not an exit. It is one once the CLI was seen in the foreground, or
         // when this launch's output shows an error pattern or a missing binary
         // (a CLI that exits before the first poll).
-        const fresh = window.line === null ? freshLines(content, window.lines) : content;
-        const error = this.matchError(fresh);
+        const error = this.matchError(content);
         if (error) return this.failure(error.reason, error.recovery ?? "attention_required", content, error.code);
-        if (MISSING_BINARY_RE.test(fresh)) {
+        if (MISSING_BINARY_RE.test(content)) {
           return this.failure(`the ${this.descriptor.binary ?? this.runtime} binary was not found (command not found)`, "attention_required", content, "runtime_missing");
         }
         if (sawRuntime) return this.failure(`the CLI exited back to the shell`, "attention_required", content);
@@ -825,7 +823,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
    * Read the pane. During a launch wait, `window` limits pattern matching to
    * this launch's output: with a tmux line position, only lines after it are
    * captured (ready, gate, and error text in older scrollback never counts);
-   * without one, error patterns skip lines that were on screen before typing.
+   * without one, all patterns skip pre-launch occurrences of captured lines.
    */
   private async readPane(sessionName: string, window?: LaunchWindow): Promise<{ state: PaneState; content: string }> {
     const paneCommand = ((await this.tmux.getPaneCommand(sessionName)) ?? "").trim().replace(/^-/, "");
@@ -833,13 +831,15 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     let content = window && window.line !== null
       ? (await this.tmux.capturePaneFromLine(sessionName, window.line, JOINED)) ?? ""
       : (await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "";
-    // An alternate screen is the new CLI's only while the CLI holds the
-    // foreground and the screen was not already on before the launch (a
-    // previous TUI that exited without restoring it). Otherwise keep only the
-    // lines that were not on screen before typing.
-    if (window && window.line !== null && (window.alternateAtLaunch || atShell)
-      && (await this.tmux.isPaneAlternateScreen(sessionName)) === true) {
-      content = freshLines(content, window.lines);
+    // A newly entered alternate screen belongs to the foreground CLI, even
+    // when its prompt repeats the previous launch. Inherited alternate screens
+    // and captures without a line position need the baseline removed first.
+    if (window) {
+      const alternate = (await this.tmux.isPaneAlternateScreen(sessionName)) === true;
+      const newAlternate = alternate && !window.alternateAtLaunch && !atShell;
+      if (!newAlternate && (window.line === null || alternate)) {
+        content = freshLines(content, window.lines);
+      }
     }
     // A dead CLI leaves the pane at the shell with its last screen in
     // scrollback: gate, error, and ready text there is stale here.
@@ -847,7 +847,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     for (const gate of this.spec.gatePatterns ?? []) {
       if (gate.pattern.test(content)) return { state: { kind: "gate", gate }, content };
     }
-    const error = this.matchError(window && window.line === null ? freshLines(content, window.lines) : content);
+    const error = this.matchError(content);
     if (error) return { state: { kind: "error", pattern: error }, content };
     if (this.spec.readyPatterns.some((pattern) => pattern.test(content))) return { state: { kind: "ready" }, content };
     return { state: { kind: "pending" }, content };
@@ -1015,6 +1015,14 @@ function lastMatchIndex(pattern: RegExp, text: string): number {
   return at;
 }
 
-function freshLines(content: string, baseline: ReadonlySet<string>): string {
-  return content.split("\n").filter((line) => !baseline.has(line)).join("\n");
+/** Remove only pre-launch occurrences, preserving freshly appended repeats. */
+function freshLines(content: string, baseline: readonly string[]): string {
+  const remaining = new Map<string, number>();
+  for (const line of baseline) remaining.set(line, (remaining.get(line) ?? 0) + 1);
+  return content.split("\n").filter((line) => {
+    const count = remaining.get(line) ?? 0;
+    if (count === 0) return true;
+    remaining.set(line, count - 1);
+    return false;
+  }).join("\n");
 }

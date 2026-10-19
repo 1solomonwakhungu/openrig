@@ -276,6 +276,51 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
         expect(await adapter.launchHarness(harnessBinding(), { name: "x" })).toMatchObject({ ok: false, error: expect.stringMatching(/still at a shell/) });
       });
 
+      describe("launch without a pane line position", () => {
+        function withoutPosition(baseline: PaneFrame, frames: PaneFrame[]) {
+          const instance = rig([baseline, ...frames]);
+          vi.mocked(instance.pane.tmux.getPaneLinePosition).mockResolvedValue(null);
+          return instance;
+        }
+
+        for (const stale of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? [])]) {
+          it(`ignores unchanged stale output with the runtime foreground: ${JSON.stringify(stale.slice(0, 32))}`, async () => {
+            const content = `${stale}\n$ `;
+            const { adapter, pane } = withoutPosition(atShell(content), [{ command: running, content }]);
+            expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+              .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+            expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+          });
+        }
+
+        it("accepts a genuinely fresh ready screen after stale gates and errors", async () => {
+          const old = [...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? []), "$ "].join("\n");
+          const { adapter } = withoutPosition(atShell(old), [{ command: running, content: `${old}\n${readyScreen}` }]);
+          expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+        });
+
+        for (const screen of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? [])]) {
+          it(`recognizes an appended repeat of ${JSON.stringify(screen.slice(0, 32))}`, async () => {
+            const old = `${screen}\n$ `;
+            const { adapter } = withoutPosition(atShell(old), [{ command: running, content: `${old}\n${screen}` }]);
+            const result = await adapter.launchHarness(harnessBinding(), { name: "x" });
+            if (screen === readyScreen) expect(result.ok).toBe(true);
+            else expect(result).toMatchObject({ ok: false, error: expect.not.stringContaining("timed out") });
+          });
+        }
+
+        it("accepts repeated ready text on a newly entered alternate screen", async () => {
+          const { adapter } = withoutPosition(atShell(readyScreen), [{ ...ready, alternate: true }]);
+          expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+        });
+
+        it("ignores an inherited alternate screen while the runtime is foreground", async () => {
+          const { adapter } = withoutPosition({ command: "zsh", content: readyScreen, alternate: true }, [{ ...ready, alternate: true }]);
+          expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+            .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+        });
+      });
+
       it("a full-screen CLI is read whole on the alternate screen", async () => {
         const { adapter } = launchRig([{ command: running, content: readyScreen, alternate: true }]);
         expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
