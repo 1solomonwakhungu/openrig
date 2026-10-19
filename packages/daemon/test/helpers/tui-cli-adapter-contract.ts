@@ -300,6 +300,17 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
             .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
         });
 
+        for (const screen of [readyScreen, ...(input.gateScreens ?? []).map((gate) => gate.screen)]) {
+          it(`keeps duplicate inherited prompt boundaries ordered around ${JSON.stringify(screen.slice(0, 32))}`, async () => {
+            const old = `old status\n$ \n${screen}\n$ `;
+            const current = `new status\n$ \n${screen}\n$ `;
+            const { adapter, pane } = withoutPosition(atShell(old), [{ command: running, content: current }]);
+            expect(await adapter.launchHarness(harnessBinding({ cwd: "/home/user/work" }), { name: "x" }))
+              .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+            expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+          });
+        }
+
         it("does not attribute an old ready marker to changes on both sides of it", async () => {
           const { adapter } = withoutPosition(atShell(`old header\n${readyScreen}\nold footer`), [
             { command: running, content: `new header\n${readyScreen}\nnew footer` },

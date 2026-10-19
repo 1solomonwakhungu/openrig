@@ -1057,7 +1057,15 @@ function inheritedPrefix(lines: readonly string[], previous: readonly string[], 
   let tail = stale - 1;
   while (tail >= 0 && previous[tail]!.trim() === "") tail--;
   if (tail >= 0) {
-    const anchor = lines.indexOf(previous[tail]!);
+    // Resolve duplicate tail rows after the surviving inherited rows before
+    // them. A repeated shell prompt above an old dialog is not its boundary.
+    let after = 0;
+    for (const row of previous.slice(0, tail)) {
+      if (row.trim() === "") continue;
+      const at = lines.indexOf(row, after);
+      if (at >= 0) after = at + 1;
+    }
+    const anchor = lines.indexOf(previous[tail]!, after);
     if (anchor >= 0) return anchor + 1;
   }
   // If the whole observed post-launch suffix has also left this bounded
