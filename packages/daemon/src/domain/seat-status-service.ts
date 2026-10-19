@@ -146,7 +146,12 @@ export class SeatStatusService {
     try {
       const store = new NativePermissionStore(this.rigRepo.db);
       const desired = store.read(nodeId);
-      const effective = runtime ? store.resolve(nodeId, runtime) : undefined;
+      // A seat on one of its fallback runtimes carries its selection over (overrideFor
+      // still throws for a runtime the seat doesn't declare); resolve() only fits the
+      // runtime the selection was made for.
+      const onFallback = Boolean(runtime && desired && desired.runtime !== runtime);
+      if (onFallback) store.overrideFor(nodeId, runtime!);
+      const effective = runtime && !onFallback ? store.resolve(nodeId, runtime) : undefined;
       return { selectionState: desired ? "explicit" : "inherit", desired, lastLaunchArguments, nativeEffect: "unverified", ...(effective ? { effective } : {}) };
     } catch (error) {
       return { selectionState: "unknown", desired: null, lastLaunchArguments, nativeEffect: "unverified", error: (error as Error).message };

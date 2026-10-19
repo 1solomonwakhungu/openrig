@@ -269,6 +269,8 @@ function inspectRegistryPermission(
   const observed = postureFor(applied.value);
   if (!observed) return unknownEnforcement("permission", null, null, "unrecognized_launch_value");
   if (!expectedPosture) return unknownEnforcement("permission", null, null, "expected_posture_unknown");
+  // A CLI runtime launches an `auto` policy at the floor (see CliLaunchPosture).
+  if (expectedPosture === "auto") expectedPosture = "floor";
   return {
     axis: "permission",
     state: observed === expectedPosture ? "aligned" : "drift",

@@ -6,6 +6,7 @@ import { SessionRegistry } from "../src/domain/session-registry.js";
 import { SeatStatusService } from "../src/domain/seat-status-service.js";
 import { PodRepository } from "../src/domain/pod-repository.js";
 import { SeatIdentityStore } from "../src/domain/seat-identity-store.js";
+import { NativePermissionStore } from "../src/domain/native-permission-store.js";
 
 describe("SeatStatusService", () => {
   let db: Database.Database;
@@ -97,6 +98,30 @@ describe("SeatStatusService", () => {
     expect(result.status.handover_result).toBe("partial");
     expect(result.status.previous_occupant).toBe("old-impl@seat-rig");
     expect(result.status.handover_at).toBe("2026-04-20T13:00:00Z");
+  });
+
+  it("keeps the permission selection for a seat running on its fallback runtime", () => {
+    const rig = rigRepo.createRig("fallback-rig");
+    const node = rigRepo.addNode(rig.id, "dev.impl", { runtime: "codex", cwd: "/project" });
+    db.prepare("UPDATE nodes SET declared_runtime = 'claude-code', fallback_runtimes = '[\"codex\"]' WHERE id = ?").run(node.id);
+    new NativePermissionStore(db).write(node.id, { runtime: "claude-code", mode: "full_bypass" }, "operator", "test");
+    sessionRegistry.registerSession(node.id, "dev-impl@fallback-rig");
+
+    const result = service.getStatus("dev-impl@fallback-rig");
+    if (!result.ok) throw new Error(result.message);
+    expect(result.status.permissions).toMatchObject({ selectionState: "explicit", desired: { runtime: "claude-code", mode: "full_bypass" } });
+    expect(result.status.permissions).not.toHaveProperty("error");
+  });
+
+  it("still reports a selection made for a runtime the seat no longer declares", () => {
+    const rig = rigRepo.createRig("changed-rig");
+    const node = rigRepo.addNode(rig.id, "dev.impl", { runtime: "codex", cwd: "/project" });
+    new NativePermissionStore(db).write(node.id, { runtime: "claude-code", mode: "full_bypass" }, "operator", "test");
+    sessionRegistry.registerSession(node.id, "dev-impl@changed-rig");
+
+    const result = service.getStatus("dev-impl@changed-rig");
+    if (!result.ok) throw new Error(result.message);
+    expect(result.status.permissions).toMatchObject({ selectionState: "unknown", error: expect.stringMatching(/runtime changed/) });
   });
 
   it("does not infer active lifecycle for a node with no current running session", () => {

@@ -373,6 +373,13 @@ describe("restore dispatch to registered resume adapters", () => {
     });
   });
 
+  it("resumes an auto-policy seat at the floor, never from OPENRIG_YOLO", async () => {
+    const node = rigRepo.addNode(rigRepo.createRig("r-auto").id, "dev", { runtime: "example-cli" });
+    const adapter = fakeResume({ ok: true });
+    await (orchestrator([adapter]) as any).attemptResume(node.id, "dev@r-auto", "example_session_id", "sess_1", "/w", null, "m1", "auto");
+    expect(adapter.resume).toHaveBeenCalledWith(expect.objectContaining({ resolvedPosture: "floor" }));
+  });
+
   it("maps retry_fresh and attention_required like the built-ins", async () => {
     const node = rigRepo.addNode(rigRepo.createRig("r2").id, "dev", { runtime: "example-cli" });
     const fresh = await (orchestrator([fakeResume({ ok: false, code: "retry_fresh", message: "gone" })]) as any)

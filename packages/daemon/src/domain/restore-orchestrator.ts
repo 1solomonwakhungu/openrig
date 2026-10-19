@@ -1899,7 +1899,8 @@ export class RestoreOrchestrator {
     if (registered) {
       const result = await registered.resume({
         nodeId, sessionName, resumeType, resumeToken, cwd, codexConfigProfile, model,
-        resolvedPosture: resolvedPosture === "auto" ? undefined : resolvedPosture, permissionMode,
+        // `auto` is Claude-only; a CLI runtime takes the floor, never the OPENRIG_YOLO default.
+        resolvedPosture: resolvedPosture === "auto" ? "floor" : resolvedPosture, permissionMode,
         ...(readiness ? { readinessTimeoutMs: readiness } : {}),
       });
       if (result.ok) {
