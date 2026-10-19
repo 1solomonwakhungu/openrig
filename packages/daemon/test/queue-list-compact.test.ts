@@ -199,7 +199,7 @@ describe("OPR.0.4.0.28 — queue list compact + scope-default", () => {
     expect(JSON.stringify(compact)).not.toContain("excluded in compact mode");
     expect(item).not.toHaveProperty("chainOfRecord");
     expect(item).not.toHaveProperty("humanQuestions");
-    expect(item.fieldsElided).toEqual(["body", "evidenceRef", "humanDetail", "waiting", "chainOfRecord", "replyTo", "humanQuestions", "humanAnswers"]);
+    expect(item.fieldsElided).toEqual(["body", "evidenceRef", "humanDetail", "waiting", "chainOfRecord", "replyTo", "humanQuestions", "humanAnswers", "lastNudgeInputBox"]);
   });
 
   it("distinguishes a genuinely empty full item from an elided compact item", () => {
@@ -214,7 +214,7 @@ describe("OPR.0.4.0.28 — queue list compact + scope-default", () => {
     const compact = repo.list({ compact: true })[0]!;
     const full = repo.list({})[0]!;
 
-    expect(compact.fieldsElided).toEqual(["body", "evidenceRef", "humanDetail", "waiting", "chainOfRecord", "replyTo", "humanQuestions", "humanAnswers"]);
+    expect(compact.fieldsElided).toEqual(["body", "evidenceRef", "humanDetail", "waiting", "chainOfRecord", "replyTo", "humanQuestions", "humanAnswers", "lastNudgeInputBox"]);
     expect(compact).not.toHaveProperty("body");
     expect(compact.summary).toBeNull(); // a genuinely absent summary stays null
     expect(full.body).toBe("");
@@ -323,7 +323,7 @@ describe("Slice 15 — findOverdue rig-scoped + bounded + compact (finding 2)", 
     expect(compact.summary).toBe("sum");
     expect(compact).not.toHaveProperty("body");
     expect(compact).not.toHaveProperty("evidenceRef");
-    expect(compact.fieldsElided).toEqual(["body", "evidenceRef", "humanDetail", "waiting", "chainOfRecord", "replyTo", "humanQuestions", "humanAnswers"]);
+    expect(compact.fieldsElided).toEqual(["body", "evidenceRef", "humanDetail", "waiting", "chainOfRecord", "replyTo", "humanQuestions", "humanAnswers", "lastNudgeInputBox"]);
     const full = repo.findOverdue({ now: NOW })[0]!;
     expect(full.body).toContain("SECRET-LONG-BODY-CONTENT");
   });

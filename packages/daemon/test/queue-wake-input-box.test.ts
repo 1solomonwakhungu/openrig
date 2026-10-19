@@ -1,0 +1,159 @@
+// #1278: a queue wake keeps the input-box reading the transport returned for that wake attempt, so
+// `rig queue show --json` can tell an exact-text-still-in-the-box wake from a busy seat or a collapsed
+// paste. The reading is diagnostic only: the wake result, its claim presentation and every delivery
+// decision are unchanged, and an attempt without a reading never shows an earlier attempt's reading.
+
+import { afterEach, describe, expect, it } from "vitest";
+import type Database from "better-sqlite3";
+import { createDb } from "../src/db/connection.js";
+import { migrate } from "../src/db/migrate.js";
+import { ALL_MIGRATIONS } from "../src/db/all-migrations.js";
+import { EventBus } from "../src/domain/event-bus.js";
+import { OutboxHandler } from "../src/domain/outbox-handler.js";
+import { QueueRepository, type QueueNudgeTransport } from "../src/domain/queue-repository.js";
+import type { InputBoxEvidence } from "../src/domain/session-transport.js";
+
+type SendResult = Awaited<ReturnType<QueueNudgeTransport["send"]>>;
+
+const TEXT_STILL_IN_BOX: InputBoxEvidence = { seat: "idle", before: "exact", after: "exact", sameProcess: true };
+const BUSY_SEAT: InputBoxEvidence = { seat: "not-idle", before: "exact", after: "queued", sameProcess: true };
+const COLLAPSED_PASTE: InputBoxEvidence = { seat: "idle", before: "hidden", after: "empty", sameProcess: true };
+
+function harness(opts: { outbox?: boolean } = {}) {
+  const db = createDb();
+  migrate(db, ALL_MIGRATIONS);
+  const repo = new QueueRepository(db, new EventBus(db), { validateRig: () => true });
+  const outbox = opts.outbox === false ? null : new OutboxHandler(db);
+  if (outbox) repo.attachOutbox(outbox);
+  const results: SendResult[] = [];
+  const sent: string[] = [];
+  repo.attachTransport({
+    async send(session) {
+      sent.push(session);
+      return results.shift() ?? { ok: true, verified: true };
+    },
+  });
+  return { db, repo, results, sent };
+}
+
+describe("a queue wake keeps its input-box reading (#1278)", () => {
+  let db: Database.Database | null = null;
+  afterEach(() => { db?.close(); db = null; });
+
+  it("stores the reading of a verified wake and reads it back on the row, beside the unchanged wake result", async () => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    h.results.push({ ok: true, verified: false, outcome: "rendered-unconfirmed", inputBox: TEXT_STILL_IN_BOX });
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+
+    const row = h.repo.getById(item.qitemId)!;
+    expect(row.lastNudgeResult).toBe("delivered-ack-pending");
+    expect(row.lastNudgeWireResult).toBe("delivered-ack-pending");
+    expect(row.lastNudgeInputBox).toEqual(TEXT_STILL_IN_BOX);
+    expect(row.pickup).toMatchObject({ state: "unclaimed" });
+
+    // A claim still presents over the unconfirmed wake (#165); the reading stays as recorded.
+    const claimed = h.repo.claim({ qitemId: item.qitemId, destinationSession: "bob@rig" });
+    expect(claimed.lastNudgeResult).toBe("claimed");
+    expect(claimed.lastNudgeWireResult).toBe("delivered-ack-pending");
+    expect(claimed.lastNudgeInputBox).toEqual(TEXT_STILL_IN_BOX);
+  });
+
+  it("keeps only the structured reading, never any other field the transport attached", async () => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    const withExtra = { ...BUSY_SEAT, pane: "❯ secret pane text" } as unknown as InputBoxEvidence;
+    h.results.push({ ok: true, verified: false, inputBox: withExtra });
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+
+    const stored = (h.db.prepare("SELECT last_nudge_input_box AS v FROM queue_items WHERE qitem_id = ?").get(item.qitemId) as { v: string }).v;
+    expect(JSON.parse(stored)).toEqual(BUSY_SEAT);
+    expect(stored).not.toContain("secret");
+    expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toEqual(BUSY_SEAT);
+  });
+
+  it("a wake with no reading (setting off, a failed send, a retained wake) leaves the reading absent", async () => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    const cases: Array<[SendResult, string]> = [
+      [{ ok: true, verified: true }, "verified"],
+      [{ ok: true, verified: false }, "delivered-ack-pending"],
+      [{ ok: false, error: "Session 'bob@rig' not found" }, "failed:Session 'bob@rig' not found"],
+      [{ ok: true, sent: false, verified: false, outcome: "retained", reason: "typing_guard_enabled" } as SendResult, "retained:typing_guard"],
+    ];
+    for (const [result, expected] of cases) {
+      h.results.push(result);
+      const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+      const row = h.repo.getById(item.qitemId)!;
+      expect(row.lastNudgeWireResult).toBe(expected);
+      expect(row.lastNudgeInputBox).toBeNull();
+    }
+  });
+
+  it("a retry replaces the reading: a newer attempt without one never shows the older reading", async () => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    h.results.push({ ok: true, verified: false, inputBox: TEXT_STILL_IN_BOX });
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+    expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toEqual(TEXT_STILL_IN_BOX);
+
+    // The wake ladder's retry goes through maybeNudge; this one gets no reading (setting turned off).
+    h.results.push({ ok: true, verified: false });
+    await h.repo.maybeNudge(item.qitemId, "bob@rig", true);
+    const afterRetry = h.repo.getById(item.qitemId)!;
+    expect(afterRetry.lastNudgeWireResult).toBe("delivered-ack-pending");
+    expect(afterRetry.lastNudgeInputBox).toBeNull();
+
+    // A later retry with its own reading shows that reading.
+    h.results.push({ ok: true, verified: false, inputBox: COLLAPSED_PASTE });
+    await h.repo.maybeNudge(item.qitemId, "bob@rig", true);
+    expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toEqual(COLLAPSED_PASTE);
+
+    // A result recorded without a send (e.g. the parked-owner consumer's failure line) also clears it.
+    h.repo.recordNudgeAttempt(item.qitemId, "failed:wake refused");
+    expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toBeNull();
+  });
+
+  it("a coalesced wake stores the one send's reading on every row it woke, and a newer coalesced wake replaces it", async () => {
+    const h = harness();
+    db = h.db;
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: `work ${i}`, nudge: false });
+      h.repo.stageWakeIntent(item.qitemId, "alice@rig", "bob@rig", null, true);
+      h.db.prepare("UPDATE outbox_entries SET tags = ? WHERE outbox_id = ?").run(JSON.stringify(["queue:return:common"]), `wake-intent-${item.qitemId}`);
+      ids.push(item.qitemId);
+    }
+    h.results.push({ ok: true, verified: false, inputBox: BUSY_SEAT });
+    await h.repo.drainPendingWakeIntents();
+    expect(h.sent).toHaveLength(1);
+    for (const id of ids) {
+      const row = h.repo.getById(id)!;
+      expect(row.lastNudgeWireResult).toBe("delivered-ack-pending");
+      expect(row.lastNudgeInputBox).toEqual(BUSY_SEAT);
+    }
+
+    // A later coalesced wake of the same rows without a reading: none of them keeps the old one.
+    for (const id of ids) {
+      h.db.prepare("UPDATE outbox_entries SET delivery_state = 'pending' WHERE outbox_id = ?").run(`wake-intent-${id}`);
+    }
+    h.results.push({ ok: true, verified: true });
+    await h.repo.drainPendingWakeIntents();
+    expect(h.sent).toHaveLength(2);
+    for (const id of ids) {
+      const row = h.repo.getById(id)!;
+      expect(row.lastNudgeWireResult).toBe("verified");
+      expect(row.lastNudgeInputBox).toBeNull();
+    }
+  });
+
+  it("a compact listing names the reading as elided rather than showing it empty", async () => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    h.results.push({ ok: true, verified: false, inputBox: TEXT_STILL_IN_BOX });
+    await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+    const [row] = h.repo.list({ compact: true }) as Array<Record<string, unknown>>;
+    expect(row).not.toHaveProperty("lastNudgeInputBox");
+    expect(row!.fieldsElided).toEqual(expect.arrayContaining(["lastNudgeInputBox"]));
+  });
+});
