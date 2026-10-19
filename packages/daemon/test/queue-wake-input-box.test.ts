@@ -25,12 +25,14 @@ function harness(opts: { outbox?: boolean } = {}) {
   const repo = new QueueRepository(db, new EventBus(db), { validateRig: () => true });
   const outbox = opts.outbox === false ? null : new OutboxHandler(db);
   if (outbox) repo.attachOutbox(outbox);
-  const results: SendResult[] = [];
+  const results: Array<SendResult | Error> = [];
   const sent: string[] = [];
   repo.attachTransport({
     async send(session) {
       sent.push(session);
-      return results.shift() ?? { ok: true, verified: true };
+      const result = results.shift();
+      if (result instanceof Error) throw result;
+      return result ?? { ok: true, verified: true };
     },
   });
   return { db, repo, results, sent };
@@ -40,7 +42,7 @@ describe("a queue wake keeps its input-box reading (#1278)", () => {
   let db: Database.Database | null = null;
   afterEach(() => { db?.close(); db = null; });
 
-  it("stores the reading of a verified wake and reads it back on the row, beside the unchanged wake result", async () => {
+  it("stores the reading of an unconfirmed wake and reads it back on the row, beside the unchanged wake result", async () => {
     const h = harness({ outbox: false });
     db = h.db;
     h.results.push({ ok: true, verified: false, outcome: "rendered-unconfirmed", inputBox: TEXT_STILL_IN_BOX });
@@ -57,6 +59,20 @@ describe("a queue wake keeps its input-box reading (#1278)", () => {
     expect(claimed.lastNudgeResult).toBe("claimed");
     expect(claimed.lastNudgeWireResult).toBe("delivered-ack-pending");
     expect(claimed.lastNudgeInputBox).toEqual(TEXT_STILL_IN_BOX);
+  });
+
+  it.each([TEXT_STILL_IN_BOX, BUSY_SEAT, COLLAPSED_PASTE])("keeps %j diagnostic even when the transport reports verified", async (inputBox) => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    // Deliberately inconsistent synthetic evidence: the repository must trust the transport's
+    // verdict, not add its own input-box classifier or another send.
+    h.results.push({ ok: true, verified: true, inputBox });
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+    const reader = new QueueRepository(h.db, new EventBus(h.db), { validateRig: () => true });
+    expect(reader.getById(item.qitemId)).toMatchObject({
+      state: "pending", claimedAt: null, lastNudgeResult: "verified", lastNudgeWireResult: "verified", lastNudgeInputBox: inputBox,
+    });
+    expect(h.sent).toEqual(["bob@rig"]);
   });
 
   it("keeps only the structured reading, never any other field the transport attached", async () => {
@@ -114,18 +130,70 @@ describe("a queue wake keeps its input-box reading (#1278)", () => {
     expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toBeNull();
   });
 
+  it.each([
+    [{ ok: true, verified: true }, "verified"],
+    [{ ok: false, error: "Session 'bob@rig' not found" }, "failed:Session 'bob@rig' not found"],
+    [{ ok: false, error: "ack timed out", delivery: { state: "indeterminate" } }, "indeterminate:ack timed out"],
+    [{ ok: true, verified: false, outcome: "retained", reason: "typing_guard_enabled" }, "retained:typing_guard"],
+    [new Error("transport broke"), "failed:transport broke"],
+    [new Error("ack timed out"), "indeterminate:ack timed out"],
+  ] satisfies Array<[SendResult | Error, string]>)("a newer %j attempt clears the previous reading and keeps result %s", async (result, expected) => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    h.results.push({ ok: true, verified: false, inputBox: TEXT_STILL_IN_BOX });
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+    h.results.push(result);
+
+    await h.repo.maybeNudge(item.qitemId, "bob@rig", true);
+
+    expect(h.sent).toEqual(["bob@rig", "bob@rig"]);
+    expect(h.repo.getById(item.qitemId)).toMatchObject({
+      state: "pending", claimedAt: null, lastNudgeWireResult: expected, lastNudgeInputBox: null,
+    });
+    expect(h.db.prepare("SELECT last_nudge_input_box AS reading FROM queue_items WHERE qitem_id = ?").get(item.qitemId))
+      .toEqual({ reading: null });
+  });
+
+  it("staging a delayed wake preserves the last actual attempt until delivery, then replaces only its row", async () => {
+    const h = harness();
+    db = h.db;
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "delayed", nudge: false });
+    const sibling = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "untouched", nudge: false });
+    h.repo.recordNudgeAttempt(item.qitemId, "delivered-ack-pending", TEXT_STILL_IN_BOX);
+    h.repo.recordNudgeAttempt(sibling.qitemId, "delivered-ack-pending", COLLAPSED_PASTE);
+    const previous = h.repo.getById(item.qitemId)!;
+
+    h.repo.stageWakeIntent(item.qitemId, "alice@rig", "bob@rig", null, true);
+    await h.repo.maybeNudge(item.qitemId, "bob@rig", false);
+    expect(h.sent).toHaveLength(0);
+    expect(h.repo.getById(item.qitemId)).toMatchObject({
+      lastNudgeAttempt: previous.lastNudgeAttempt, lastNudgeInputBox: TEXT_STILL_IN_BOX,
+    });
+
+    h.results.push({ ok: true, verified: true });
+    expect(await h.repo.drainPendingWakeIntents()).toEqual({ delivered: 1, indeterminate: 0, failed: 0, retained: 0 });
+    expect(h.repo.getById(item.qitemId)).toMatchObject({ state: "pending", claimedAt: null, lastNudgeWireResult: "verified", lastNudgeInputBox: null });
+    expect(h.repo.getById(sibling.qitemId)!.lastNudgeInputBox).toEqual(COLLAPSED_PASTE);
+    expect(h.db.prepare("SELECT delivery_state AS state FROM outbox_entries WHERE audit_pointer = ?").get(item.qitemId))
+      .toEqual({ state: "delivered" });
+
+    expect(await h.repo.drainPendingWakeIntents()).toEqual({ delivered: 0, indeterminate: 0, failed: 0, retained: 0 });
+    expect(h.sent).toEqual(["bob@rig"]);
+  });
+
   it("a coalesced wake stores the one send's reading on every row it woke, and a newer coalesced wake replaces it", async () => {
     const h = harness();
     db = h.db;
     const ids: string[] = [];
     for (let i = 0; i < 2; i++) {
       const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: `work ${i}`, nudge: false });
+      h.repo.recordNudgeAttempt(item.qitemId, "delivered-ack-pending", i === 0 ? TEXT_STILL_IN_BOX : COLLAPSED_PASTE);
       h.repo.stageWakeIntent(item.qitemId, "alice@rig", "bob@rig", null, true);
       h.db.prepare("UPDATE outbox_entries SET tags = ? WHERE outbox_id = ?").run(JSON.stringify(["queue:return:common"]), `wake-intent-${item.qitemId}`);
       ids.push(item.qitemId);
     }
     h.results.push({ ok: true, verified: false, inputBox: BUSY_SEAT });
-    await h.repo.drainPendingWakeIntents();
+    expect(await h.repo.drainPendingWakeIntents()).toEqual({ delivered: 0, indeterminate: 1, failed: 0, retained: 0 });
     expect(h.sent).toHaveLength(1);
     for (const id of ids) {
       const row = h.repo.getById(id)!;
@@ -133,12 +201,17 @@ describe("a queue wake keeps its input-box reading (#1278)", () => {
       expect(row.lastNudgeInputBox).toEqual(BUSY_SEAT);
     }
 
-    // A later coalesced wake of the same rows without a reading: none of them keeps the old one.
+    // An indeterminate wake is terminal to the drain; diagnostics must not introduce a retry.
+    expect(await h.repo.drainPendingWakeIntents()).toEqual({ delivered: 0, indeterminate: 0, failed: 0, retained: 0 });
+    expect(h.sent).toHaveLength(1);
+
+    // Synthetically re-arm the intents to exercise a newer coalesced attempt without a reading.
+    // This is fixture setup, not production retry policy: the drain above did not re-arm them.
     for (const id of ids) {
       h.db.prepare("UPDATE outbox_entries SET delivery_state = 'pending' WHERE outbox_id = ?").run(`wake-intent-${id}`);
     }
     h.results.push({ ok: true, verified: true });
-    await h.repo.drainPendingWakeIntents();
+    expect(await h.repo.drainPendingWakeIntents()).toEqual({ delivered: 1, indeterminate: 0, failed: 0, retained: 0 });
     expect(h.sent).toHaveLength(2);
     for (const id of ids) {
       const row = h.repo.getById(id)!;
