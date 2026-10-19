@@ -997,17 +997,17 @@ export class QueueRepository {
   }
 
   private classifyWakeResult(res: Awaited<ReturnType<QueueNudgeTransport["send"]>>): WakeAttemptOutcome {
-    if (res.outcome === "retained") return { classified: "retained", nudgeResult: res.reason?.startsWith("draft_")
-      ? "retained:draft_aware" : "retained:typing_guard" };
     // #1278: the reading rides along unchanged; it never alters the classification.
     const inputBox = inputBoxReading(res.inputBox);
     const reading = inputBox ? { inputBox } : {};
+    if (res.outcome === "retained") return { classified: "retained", nudgeResult: res.reason?.startsWith("draft_")
+      ? "retained:draft_aware" : "retained:typing_guard", ...reading };
     if (res.ok) return res.verified ? { classified: "verified", nudgeResult: "verified", ...reading } : { classified: "indeterminate", nudgeResult: "delivered-ack-pending", ...reading };
     const detail = res.error ?? res.reason ?? "unknown";
     if (res.delivery?.state === "indeterminate" || res.delivery?.state === "sending" || isWakeTimeoutSignal(res.reason) || isWakeTimeoutSignal(res.error)) {
-      return { classified: "indeterminate", nudgeResult: `indeterminate:${detail}` };
+      return { classified: "indeterminate", nudgeResult: `indeterminate:${detail}`, ...reading };
     }
-    return { classified: "failed", nudgeResult: `failed:${detail}` };
+    return { classified: "failed", nudgeResult: `failed:${detail}`, ...reading };
   }
 
   /**
