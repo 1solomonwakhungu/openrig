@@ -293,6 +293,21 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
           });
         }
 
+        it("keeps old ready text pending when unrelated rows repaint above it", async () => {
+          const old = `old status\n${readyScreen}\n$ `;
+          const { adapter } = withoutPosition(atShell(old), [{ command: running, content: `new status\n${readyScreen}\n$ ` }]);
+          expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+            .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+        });
+
+        it("does not attribute an old ready marker to changes on both sides of it", async () => {
+          const { adapter } = withoutPosition(atShell(`old header\n${readyScreen}\nold footer`), [
+            { command: running, content: `new header\n${readyScreen}\nnew footer` },
+          ]);
+          expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+            .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+        });
+
         it("accepts a genuinely fresh ready screen after stale gates and errors", async () => {
           const old = [...(input.gateScreens ?? []).map((gate) => gate.screen), ...(input.errorScreens ?? []), "$ "].join("\n");
           const { adapter } = withoutPosition(atShell(old), [{ command: running, content: `${old}\n${readyScreen}` }]);
@@ -309,9 +324,59 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
           });
         }
 
+        it("accepts a repeated ready screen after observing it disappear during repaint", async () => {
+          const { adapter } = withoutPosition(atShell(`${readyScreen}\n$ `), [
+            { command: running, content: "starting" }, ready,
+          ]);
+          expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+        });
+
+        it("accepts a repeated ready screen after the pre-launch prefix rolls out of capture", async () => {
+          const old = `${readyScreen}\n$ `;
+          const { adapter } = withoutPosition(atShell(old), [
+            { command: running, content: `${old}\nstarting` },
+            { command: running, content: `${Array.from({ length: 120 }, (_, i) => `log ${i}`).join("\n")}\n${readyScreen}` },
+          ]);
+          expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+        });
+
+        it("does not treat unrelated appended output as freshness for old ready text", async () => {
+          const old = `${readyScreen}\n$ `;
+          const { adapter } = withoutPosition(atShell(old), [{ command: running, content: `${old}\nstarting` }]);
+          expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+            .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
+        });
+
+        for (const gate of (input.gateScreens ?? []).filter((gate) => gate.screen.split("\n").some((row) => row.trim() === "/home/user/work"))) {
+          it(`keeps the fresh ${gate.code} dialog intact when its cwd row occurred before launch`, async () => {
+            const shared = gate.screen.split("\n").find((row) => row.trim() === "/home/user/work")!;
+            const { adapter, pane } = withoutPosition(atShell(`${shared}\n$ `), [{ command: running, content: gate.screen }]);
+            expect(await adapter.launchHarness(harnessBinding({ cwd: "/home/user/work" }), { name: "x" }))
+              .toMatchObject({ ok: false, attentionCode: gate.code });
+            if (gate.code === "login_required") expect(pane.tmux.sendKeys).not.toHaveBeenCalled();
+          });
+        }
+
+        for (const foreground of ["zsh", running]) {
+          it(`retains raw diagnostics for an unchanged pane with foreground ${foreground}`, async () => {
+            const old = "previous CLI output\n$ ";
+            const { adapter } = withoutPosition(atShell(old), [{ command: foreground, content: old }]);
+            expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+              .toMatchObject({ ok: false, evidence: old });
+          });
+        }
+
         it("accepts repeated ready text on a newly entered alternate screen", async () => {
           const { adapter } = withoutPosition(atShell(readyScreen), [{ ...ready, alternate: true }]);
           expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+        });
+
+        it("does not mistake an unreadable alternate-screen flag for an observed exit", async () => {
+          const { adapter, pane } = withoutPosition({ command: "zsh", content: readyScreen, alternate: true }, [{ ...ready, alternate: true }]);
+          vi.mocked(pane.tmux.isPaneAlternateScreen).mockResolvedValue(true)
+            .mockResolvedValueOnce(true).mockResolvedValueOnce(null);
+          expect(await adapter.launchHarness(harnessBinding(), { name: "x" }))
+            .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
         });
 
         it("ignores an inherited alternate screen while the runtime is foreground", async () => {
@@ -320,6 +385,19 @@ export function runTuiCliAdapterContract(input: TuiCliAdapterContractInput): voi
             .toMatchObject({ ok: false, error: expect.stringContaining("timed out") });
         });
       });
+
+      for (const position of [null, "valid"]) {
+        it(`recognizes inherited alternate screen exit and reentry (position ${position})`, async () => {
+          const { adapter, pane } = rig([
+            { command: "zsh", content: `${readyScreen}\n$ `, alternate: true },
+            { command: running, content: "starting", alternate: false },
+            { ...ready, alternate: true },
+          ]);
+          vi.mocked(pane.tmux.getPaneLinePosition).mockResolvedValue(position === null ? null : readyScreen.split("\n").length);
+          expect((await adapter.launchHarness(harnessBinding(), { name: "x" })).ok).toBe(true);
+          expect(vi.mocked(pane.tmux.getPaneCommand).mock.calls.length).toBeGreaterThanOrEqual(3);
+        });
+      }
 
       it("a full-screen CLI is read whole on the alternate screen", async () => {
         const { adapter } = launchRig([{ command: running, content: readyScreen, alternate: true }]);

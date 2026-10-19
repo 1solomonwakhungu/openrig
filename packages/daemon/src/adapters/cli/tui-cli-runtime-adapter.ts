@@ -248,8 +248,10 @@ type LaunchFailure = Extract<HarnessLaunchResult, { ok: false }>;
 interface LaunchWindow {
   line: number | null;
   lines: readonly string[];
-  /** A previous process left the pane on the alternate screen. */
-  alternateAtLaunch: boolean;
+  /** The inherited prefix in the previous fallback capture. */
+  staleLines?: number;
+  /** Updated on every poll, so leaving and reentering is observable. */
+  previousAlternate: boolean | null;
 }
 
 /** A shell reporting the launch binary missing (bash, zsh, dash, env). */
@@ -477,7 +479,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     const window: LaunchWindow = {
       line: await this.tmux.getPaneLinePosition(sessionName),
       lines: ((await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "").split("\n"),
-      alternateAtLaunch: (await this.tmux.isPaneAlternateScreen(sessionName)) === true,
+      previousAlternate: await this.tmux.isPaneAlternateScreen(sessionName),
     };
     const sent = await this.tmux.sendShellCommand(sessionName, command);
     if (!sent.ok) return { ok: false, error: `Failed to send launch command: ${sent.message}` };
@@ -717,10 +719,10 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     let sawRuntime = false;
     let answered = null as { gate: TuiCliGatePattern; pollsSince: number } | null;
     let unreadablePolls = 0;
-    let last: { state: PaneState; content: string } = { state: { kind: "pending" }, content: "" };
+    let last = { state: { kind: "pending" } as PaneState, content: "", matchingContent: "" };
     for (let attempt = 0; attempt < attempts; attempt++) {
       last = await this.readPane(sessionName, window);
-      const { state, content } = last;
+      const { state, content, matchingContent } = last;
       if (state.kind === "ready") return { ok: true };
       if (state.kind === "gate") {
         if (answered?.gate === state.gate) {
@@ -730,7 +732,7 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
             return this.failure(`${state.gate.reason} (still showing after OpenRig answered it)`, "attention_required", content, state.gate.code);
           }
         } else if (state.gate.answer && !answered) {
-          const refusal = this.answerRefusal(state.gate, state.gate.answer, content, launch.binding);
+          const refusal = this.answerRefusal(state.gate, state.gate.answer, matchingContent, launch.binding);
           if (refusal && (refusal.final || ++unreadablePolls >= ANSWER_READ_POLLS)) {
             return this.failure(`${state.gate.reason} (not answered automatically: ${refusal.why})`, "attention_required", content, state.gate.code);
           }
@@ -752,9 +754,9 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
         // is not an exit. It is one once the CLI was seen in the foreground, or
         // when this launch's output shows an error pattern or a missing binary
         // (a CLI that exits before the first poll).
-        const error = this.matchError(content);
+        const error = this.matchError(matchingContent);
         if (error) return this.failure(error.reason, error.recovery ?? "attention_required", content, error.code);
-        if (MISSING_BINARY_RE.test(content)) {
+        if (MISSING_BINARY_RE.test(matchingContent)) {
           return this.failure(`the ${this.descriptor.binary ?? this.runtime} binary was not found (command not found)`, "attention_required", content, "runtime_missing");
         }
         if (sawRuntime) return this.failure(`the CLI exited back to the shell`, "attention_required", content);
@@ -819,38 +821,50 @@ export class TuiCliRuntimeAdapter implements CliRuntimeAdapter {
     return (this.spec.errorPatterns ?? []).find((error) => error.pattern.test(content));
   }
 
-  /**
-   * Read the pane. During a launch wait, `window` limits pattern matching to
-   * this launch's output: with a tmux line position, only lines after it are
-   * captured (ready, gate, and error text in older scrollback never counts);
-   * without one, all patterns skip pre-launch occurrences of captured lines.
-   */
-  private async readPane(sessionName: string, window?: LaunchWindow): Promise<{ state: PaneState; content: string }> {
+  /** Match only the launch window, but retain the unmodified capture for
+   * diagnostics. The fallback tracks an ordered inherited prefix across polls;
+   * it never deletes isolated rows from the middle of a current dialog. */
+  private async readPane(sessionName: string, window?: LaunchWindow): Promise<{ state: PaneState; content: string; matchingContent: string }> {
     const paneCommand = ((await this.tmux.getPaneCommand(sessionName)) ?? "").trim().replace(/^-/, "");
     const atShell = SHELL_COMMANDS.has(paneCommand);
-    let content = window && window.line !== null
+    const content = window && window.line !== null
       ? (await this.tmux.capturePaneFromLine(sessionName, window.line, JOINED)) ?? ""
       : (await this.tmux.capturePaneContent(sessionName, PANE_CAPTURE_LINES, JOINED)) ?? "";
-    // A newly entered alternate screen belongs to the foreground CLI, even
-    // when its prompt repeats the previous launch. Inherited alternate screens
-    // and captures without a line position need the baseline removed first.
+    let matchingContent = content;
     if (window) {
-      const alternate = (await this.tmux.isPaneAlternateScreen(sessionName)) === true;
-      const newAlternate = alternate && !window.alternateAtLaunch && !atShell;
-      if (!newAlternate && (window.line === null || alternate)) {
-        content = freshLines(content, window.lines);
+      const alternate = await this.tmux.isPaneAlternateScreen(sessionName);
+      const newAlternate = alternate === true && window.previousAlternate === false && !atShell;
+      if (newAlternate) {
+        window.lines = content.split("\n");
+        window.staleLines = 0;
+      } else if (window.line === null || alternate === true) {
+        const lines = content.split("\n");
+        const stale = inheritedPrefix(lines, window.lines, window.staleLines ?? window.lines.length);
+        // A cutoff must not split a multiline gate: keep its grammar and
+        // path/selection rows together if any of the dialog is newly drawn.
+        let offset = lines.slice(0, stale).reduce((length, row) => length + row.length + 1, 0);
+        for (const gate of this.spec.gatePatterns ?? []) {
+          const pattern = new RegExp(gate.pattern.source, gate.pattern.flags.includes("g") ? gate.pattern.flags : `${gate.pattern.flags}g`);
+          for (const match of content.matchAll(pattern)) {
+            if (match.index < offset && match.index + match[0].length > offset) offset = match.index;
+          }
+        }
+        matchingContent = content.slice(offset);
+        window.lines = lines;
+        window.staleLines = stale;
       }
+      if (alternate !== null) window.previousAlternate = alternate;
     }
-    // A dead CLI leaves the pane at the shell with its last screen in
-    // scrollback: gate, error, and ready text there is stale here.
-    if (atShell) return { state: { kind: "at_shell" }, content };
+    const pane = { content, matchingContent };
+    // Foreground alone cannot make inherited ready/gate text current.
+    if (atShell) return { state: { kind: "at_shell" }, ...pane };
     for (const gate of this.spec.gatePatterns ?? []) {
-      if (gate.pattern.test(content)) return { state: { kind: "gate", gate }, content };
+      if (gate.pattern.test(matchingContent)) return { state: { kind: "gate", gate }, ...pane };
     }
-    const error = this.matchError(content);
-    if (error) return { state: { kind: "error", pattern: error }, content };
-    if (this.spec.readyPatterns.some((pattern) => pattern.test(content))) return { state: { kind: "ready" }, content };
-    return { state: { kind: "pending" }, content };
+    const error = this.matchError(matchingContent);
+    if (error) return { state: { kind: "error", pattern: error }, ...pane };
+    if (this.spec.readyPatterns.some((pattern) => pattern.test(matchingContent))) return { state: { kind: "ready" }, ...pane };
+    return { state: { kind: "pending" }, ...pane };
   }
 
   /** The last N non-padding lines: a full-screen capture is padded to the
@@ -1015,14 +1029,51 @@ function lastMatchIndex(pattern: RegExp, text: string): number {
   return at;
 }
 
-/** Remove only pre-launch occurrences, preserving freshly appended repeats. */
-function freshLines(content: string, baseline: readonly string[]): string {
-  const remaining = new Map<string, number>();
-  for (const line of baseline) remaining.set(line, (remaining.get(line) ?? 0) + 1);
-  return content.split("\n").filter((line) => {
-    const count = remaining.get(line) ?? 0;
-    if (count === 0) return true;
-    remaining.set(line, count - 1);
-    return false;
-  }).join("\n");
+/** How much of an ordered capture still belongs to the inherited prefix.
+ * A retained suffix anchors rolling captures; a retained prefix anchors a
+ * repaint/append. Only the contiguous suffix after that boundary is matched.
+ * Retained inherited rows remain excluded even if surrounding rows change.
+ * A vanished post-launch suffix permits the bounded capture to move forward;
+ * isolated equal rows are never deleted from a current dialog.
+ *
+ * An identical frame supplies no evidence of a new occurrence. It stays
+ * inherited until a later capture or alternate-screen transition distinguishes
+ * it. Sampling cannot detect a clear and identical repaint between two polls.
+ */
+function inheritedPrefix(lines: readonly string[], previous: readonly string[], stale: number): number {
+  if (stale === 0) return 0;
+  // A shortened capture containing only inherited rows is still inherited.
+  for (let start = 0; start + lines.length <= stale; start++) {
+    if (lines.every((line, i) => line === previous[start + i])) return lines.length;
+  }
+  for (let overlap = Math.min(previous.length, lines.length); overlap > 0; overlap--) {
+    const start = previous.length - overlap;
+    if (lines.slice(0, overlap).every((line, i) => line === previous[start + i])) {
+      return Math.max(0, stale - start);
+    }
+  }
+  // Repainting an unrelated header does not refresh an inherited prompt or
+  // dialog below it. Its last non-padding row still anchors the old region.
+  let tail = stale - 1;
+  while (tail >= 0 && previous[tail]!.trim() === "") tail--;
+  if (tail >= 0) {
+    const anchor = lines.indexOf(previous[tail]!);
+    if (anchor >= 0) return anchor + 1;
+  }
+  // If the whole observed post-launch suffix has also left this bounded
+  // capture, the window has rolled past the inherited region or repainted.
+  // This is a temporal transition, not an arbitrary changed character.
+  const currentRows = new Set(lines.filter((row) => row.trim() !== ""));
+  const freshRows = previous.slice(stale).filter((row) => row.trim() !== "");
+  if (freshRows.length > 0 && freshRows.every((row) => !currentRows.has(row))) return 0;
+  // Otherwise keep surviving inherited rows in their original order. Changes
+  // around an old marker cannot make it fresh; a new multiline gate crossing
+  // this boundary is kept intact by the caller.
+  let boundary = 0;
+  for (const row of previous.slice(0, stale)) {
+    if (row.trim() === "") continue;
+    const at = lines.indexOf(row, boundary);
+    if (at >= 0) boundary = at + 1;
+  }
+  return boundary;
 }
