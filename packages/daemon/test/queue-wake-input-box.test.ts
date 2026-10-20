@@ -83,9 +83,36 @@ describe("a queue wake keeps its input-box reading (#1278)", () => {
     const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
 
     const stored = (h.db.prepare("SELECT last_nudge_input_box AS v FROM queue_items WHERE qitem_id = ?").get(item.qitemId) as { v: string }).v;
-    expect(JSON.parse(stored)).toEqual(BUSY_SEAT);
+    const row = h.repo.getById(item.qitemId)!;
+    // Stored with its attempt's own timestamp; the row shows only the four reading fields.
+    expect(JSON.parse(stored)).toEqual({ ...BUSY_SEAT, at: row.lastNudgeAttempt });
     expect(stored).not.toContain("secret");
-    expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toEqual(BUSY_SEAT);
+    expect(row.lastNudgeInputBox).toEqual(BUSY_SEAT);
+  });
+
+  it("an attempt an older daemon recorded (time and result only) does not show the earlier attempt's reading", async () => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    const control = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "control", nudge: false });
+    const downgraded = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "downgraded", nudge: false });
+
+    // Attempt A, recorded by this daemon with a reading.
+    for (const item of [control, downgraded]) h.repo.recordNudgeAttempt(item.qitemId, "delivered-ack-pending", TEXT_STILL_IN_BOX);
+
+    // Attempt B, recorded by an older daemon after a downgrade: its UPDATE sets only the time and
+    // the result, so A's reading stays in the column.
+    const attemptB = new Date(Date.now() + 60_000).toISOString();
+    h.db.prepare("UPDATE queue_items SET last_nudge_attempt = ?, last_nudge_result = ? WHERE qitem_id = ?")
+      .run(attemptB, "verified", downgraded.qitemId);
+
+    // After upgrading again, B shows no reading rather than A's.
+    expect(h.repo.getById(downgraded.qitemId)).toMatchObject({
+      lastNudgeAttempt: attemptB, lastNudgeWireResult: "verified", lastNudgeInputBox: null,
+    });
+    expect(h.repo.list({}).find((row) => row.qitemId === downgraded.qitemId)!.lastNudgeInputBox).toBeNull();
+
+    // Control: with no old-style update after A, A's reading still shows.
+    expect(h.repo.getById(control.qitemId)!.lastNudgeInputBox).toEqual(TEXT_STILL_IN_BOX);
   });
 
   it("a wake with no reading (setting off, a failed send, a retained wake) leaves the reading absent", async () => {

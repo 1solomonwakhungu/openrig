@@ -303,11 +303,16 @@ function inputBoxReading(inputBox: InputBoxEvidence | undefined): InputBoxEviden
   return { seat, before, after, sameProcess };
 }
 
-/** #1278: read a stored reading back; an absent or unreadable value reads unknown (null). */
-function parseNudgeInputBox(stored: string | null | undefined): InputBoxEvidence | null {
-  if (!stored) return null;
+/** #1278: read a stored reading back; an absent or unreadable value reads unknown (null). The
+ *  reading carries its attempt's timestamp (`at`), and reads unknown unless that is still the row's
+ *  latest attempt: an older daemon records an attempt without touching this column, so a reading
+ *  left behind by an earlier attempt must not read as the latest one's. */
+function parseNudgeInputBox(stored: string | null | undefined, lastAttempt: string | null | undefined): InputBoxEvidence | null {
+  if (!stored || !lastAttempt) return null;
   try {
-    return inputBoxReading(JSON.parse(stored) as InputBoxEvidence) ?? null;
+    const parsed = JSON.parse(stored) as InputBoxEvidence & { at?: unknown };
+    if (parsed?.at !== lastAttempt) return null;
+    return inputBoxReading(parsed) ?? null;
   } catch {
     return null;
   }
@@ -4102,7 +4107,7 @@ export class QueueRepository {
              SET last_nudge_attempt = ?, last_nudge_result = ?, last_nudge_input_box = ?
            WHERE qitem_id = ?`
         )
-        .run(ts, result, reading ? JSON.stringify(reading) : null, qitemId);
+        .run(ts, result, reading ? JSON.stringify({ ...reading, at: ts }) : null, qitemId);
       return;
     }
     this.db
@@ -4421,7 +4426,7 @@ export class QueueRepository {
       lastNudgeResult: presentedNudgeResult(row.last_nudge_result, row.claimed_at),
       lastNudgeWireResult: row.last_nudge_result,
       // #1278: absent before migration 116 and on compact rows (elided there), so null.
-      lastNudgeInputBox: parseNudgeInputBox(row.last_nudge_input_box),
+      lastNudgeInputBox: parseNudgeInputBox(row.last_nudge_input_box, row.last_nudge_attempt),
       lastHeartbeat: row.last_heartbeat,
       resolution: row.resolution,
       // PL-007: target_repo present only when migration 038 has applied;
