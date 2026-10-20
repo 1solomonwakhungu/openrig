@@ -118,6 +118,9 @@ import { appliedLaunchDaemonOptOutSchema } from "./migrations/113_applied_launch
 import { sessionAgentAppSchema as sessionCommunityHarnessSchema } from "./migrations/114_session_agent_app.js";
 import { threadSeatMapChannelKeySchema } from "./migrations/115_thread_seat_map_channel_key.js";
 import { queueItemWakeInputBoxSchema } from "./migrations/116_queue_item_wake_input_box.js";
+import { providerAccountReadingsSchema } from "./migrations/117_provider_account_readings.js";
+import { humanQuietWindowsSchema } from "./migrations/118_human_quiet_windows.js";
+import { seatIdentityPanePidSchema } from "./migrations/119_seat_identity_pane_pid.js";
 
 /** Ordered migrations; numbers may be reserved by independent changes. */
 
@@ -235,4 +238,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   sessionCommunityHarnessSchema,
   threadSeatMapChannelKeySchema,
   queueItemWakeInputBoxSchema,
+  providerAccountReadingsSchema,
+  humanQuietWindowsSchema,
+  seatIdentityPanePidSchema,
 ];

@@ -2,6 +2,10 @@
 // bound to the one attempt before any input, so an interrupted or partly accounted attempt is never written again under
 // another identity, and a new reminder still goes.
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import stringWidth from "string-width";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TmuxAdapter } from "../src/adapters/tmux.js";
@@ -20,6 +24,9 @@ import { WatchdogJobsRepository } from "../src/domain/watchdog-jobs-repository.j
 import { WatchdogHistoryLog } from "../src/domain/watchdog-history-log.js";
 import { WatchdogPolicyEngine } from "../src/domain/watchdog-policy-engine.js";
 import { WatchdogScheduler } from "../src/domain/watchdog-scheduler.js";
+import { WorkflowInstanceStore } from "../src/domain/workflow-instance-store.js";
+import { makeWorkflowKeepalivePolicy } from "../src/domain/policies/workflow-keepalive.js";
+import { makeIdleGateQitemPolicy } from "../src/domain/policies/idle-gate-qitem.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -72,8 +79,137 @@ function fixture(saved?: Buffer) {
 
 const seat = "worker@test";
 
-/** The queue, watchdog engine and scheduler on a fixture's store, wired as the daemon wires them. */
-function scheduled(f: ReturnType<typeof fixture>) {
+describe("recurring watchdog delivery to a draft-aware seat", () => {
+  it("finishes an interrupted condition receipt after reopening, and still delivers a changed condition", async () => {
+    const f = fixture();
+    await f.enable();
+    const s = scheduled(f);
+    await s.repo.create({ sourceSession: seat, destinationSession: seat, body: "review", tags: ["gate:review"], nudge: false });
+    const policy = (db: Database.Database) => makeIdleGateQitemPolicy({ db, seatActivity: {
+      getSeatStateBySession: () => ({ activity: "idle-at-prompt", needsInput: { count: 0 } }),
+    } as never });
+    const history = new WatchdogHistoryLog(f.db);
+    const engine = new WatchdogPolicyEngine({ jobsRepo: s.jobs, historyLog: history, eventBus: new EventBus(f.db),
+      deliver: f.deliver, additionalPolicies: [policy(f.db)] });
+    const job = s.jobs.register({ policy: "idle-gate-qitem", targetSession: seat, intervalSeconds: 60, registeredBySession: seat,
+      specYaml: "message: Gate ready\n" });
+    vi.spyOn(s.jobs, "recordConditionReceipt").mockImplementationOnce(() => { throw new Error("receipt interrupted"); });
+    await expect(engine.evaluate(job)).rejects.toThrow("receipt interrupted");
+    expect(f.submissions).toHaveLength(1);
+    expect(s.jobs.getByIdOrThrow(job.jobId).lastFireAt).not.toBeNull();
+
+    const g = fixture(f.db.serialize());
+    const jobs = new WatchdogJobsRepository(g.db);
+    const reopened = new WatchdogPolicyEngine({ jobsRepo: jobs, historyLog: new WatchdogHistoryLog(g.db),
+      eventBus: new EventBus(g.db), deliver: g.deliver, additionalPolicies: [policy(g.db)] });
+    expect((await reopened.evaluate(jobs.getByIdOrThrow(job.jobId))).delivery).toMatchObject({ status: "ok" });
+    expect(g.submissions).toEqual([]);
+    const receipt = (g.db.prepare("SELECT last_fired_condition AS value FROM watchdog_jobs WHERE job_id = ?").get(job.jobId) as { value: string }).value;
+    expect(receipt).toEqual(expect.any(String));
+    expect((await reopened.evaluate(jobs.getByIdOrThrow(job.jobId))).outcome).toMatchObject({ action: "skip", reason: "gate_condition_unchanged" });
+    await scheduled(g).repo.create({ sourceSession: seat, destinationSession: seat, body: "another review", tags: ["gate:review"], nudge: false });
+    await reopened.evaluate(jobs.getByIdOrThrow(job.jobId));
+    expect(g.submissions).toHaveLength(1);
+    expect((g.db.prepare("SELECT last_fired_condition AS value FROM watchdog_jobs WHERE job_id = ?").get(job.jobId) as { value: string }).value).not.toBe(receipt);
+  });
+
+  it.each(["sending", "indeterminate", "delivered"] as const)("keeps an unfinished pre-upgrade %s occurrence, then sends the later cadence", async (state) => {
+    const f = fixture();
+    await f.enable();
+    const pool = mkdtempSync(join(tmpdir(), "watchdog-upgrade-"));
+    cleanup.push(async () => { rmSync(pool, { recursive: true, force: true }); });
+    writeFileSync(join(pool, "ready.md"), "ready");
+    let at = Date.now() - 120_000;
+    const jobs = new WatchdogJobsRepository(f.db, () => new Date(at));
+    const job = jobs.register({ policy: "artifact-pool-ready", targetSession: seat, intervalSeconds: 60, registeredBySession: seat,
+      specYaml: JSON.stringify({ message: "Pool B", context: { pools: [{ path: pool }] } }) });
+    // The old release accounted A at T0, then attempted B under its three-field identity.
+    jobs.recordEvaluation(job.jobId, new Date(at).toISOString(), true);
+    new WatchdogHistoryLog(f.db).record({ jobId: job.jobId, evaluatedAt: new Date(at).toISOString(), outcome: "sent",
+      deliveryMessage: "Pool A", deliveryTargetSession: seat, deliveryStatus: "ok" });
+    const oldOccurrence = createHash("sha256").update(JSON.stringify([job.jobId, null, "Pool B"])).digest("hex");
+    const source = { jobId: job.jobId, policy: job.policy, occurrenceId: oldOccurrence };
+    let saved: Buffer;
+    if (state === "sending") {
+      let reached!: () => void, release!: () => void;
+      const started = new Promise<void>(resolve => { reached = resolve; });
+      f.hooks.paste = () => { reached(); return new Promise<void>(resolve => { release = resolve; }); };
+      const pending = f.deliver({ targetSession: seat, message: "Pool B" }, source);
+      await started;
+      saved = f.db.serialize();
+      release();
+      await pending;
+    } else {
+      if (state === "indeterminate") f.hooks.paste = async () => { throw new Error("lost paste acknowledgement"); };
+      await f.deliver({ targetSession: seat, message: "Pool B" }, source);
+      expect(f.outbox.getById(watchdogDeliveryId(oldOccurrence))?.deliveryState).toBe(state);
+      saved = f.db.serialize();
+    }
+    let g = fixture(saved);
+    let reopenedJobs = new WatchdogJobsRepository(g.db);
+    at += 60_000;
+    const history = new WatchdogHistoryLog(g.db);
+    let engine = new WatchdogPolicyEngine({ jobsRepo: reopenedJobs, historyLog: history,
+      eventBus: new EventBus(g.db), deliver: g.deliver, now: () => new Date(at) });
+    if (state === "delivered") {
+      vi.spyOn(history, "record").mockImplementationOnce(() => { throw new Error("bridge accounting interrupted"); });
+      await expect(engine.evaluate(reopenedJobs.getByIdOrThrow(job.jobId))).rejects.toThrow("bridge accounting interrupted");
+      expect(g.submissions).toEqual([]);
+      // The adoption itself is durable even if this upgraded process also stops.
+      g = fixture(g.db.serialize());
+      reopenedJobs = new WatchdogJobsRepository(g.db);
+      engine = new WatchdogPolicyEngine({ jobsRepo: reopenedJobs, historyLog: new WatchdogHistoryLog(g.db),
+        eventBus: new EventBus(g.db), deliver: g.deliver, now: () => new Date(at) });
+    }
+    const outcome = await engine.evaluate(reopenedJobs.getByIdOrThrow(job.jobId));
+    expect(g.submissions).toEqual([]);
+    expect(outcome.delivery?.status).toBe(state === "delivered" ? "ok" : "failed");
+    expect(g.outbox.getById(watchdogDeliveryId(oldOccurrence))?.deliveryState).toBe(state === "sending" ? "indeterminate" : state);
+    expect(g.db.prepare("SELECT count(*) AS n FROM outbox_entries").get()).toEqual({ n: 1 });
+    at += 60_000;
+    expect((await engine.evaluate(reopenedJobs.getByIdOrThrow(job.jobId))).delivery).toMatchObject({ status: "ok" });
+    expect(g.submissions).toHaveLength(1);
+    expect(g.db.prepare("SELECT count(*) AS n FROM outbox_entries").get()).toEqual({ n: 2 });
+  });
+
+  it.each([false, true])("sends the next keepalive after accounting the previous occurrence (interrupted: %s)", async (interrupted) => {
+    const f = fixture();
+    await f.enable();
+    const instance = new WorkflowInstanceStore(f.db).create({ workflowName: "ongoing", workflowVersion: "1", createdBySession: seat });
+    let at = Date.now();
+    const jobs = new WatchdogJobsRepository(f.db, () => new Date(at));
+    const history = new WatchdogHistoryLog(f.db);
+    const engine = new WatchdogPolicyEngine({ jobsRepo: jobs, historyLog: history, eventBus: new EventBus(f.db),
+      deliver: f.deliver, now: () => new Date(at), additionalPolicies: [makeWorkflowKeepalivePolicy({ db: f.db })] });
+    const job = jobs.register({ policy: "workflow-keepalive", targetSession: seat, intervalSeconds: 60, registeredBySession: seat,
+      specYaml: `message: Continue the current step\ncontext:\n  workflow_instance_id: ${instance.instanceId}\n` });
+
+    if (interrupted) {
+      vi.spyOn(history, "record").mockImplementationOnce(() => { throw new Error("accounting interrupted"); });
+      await expect(engine.evaluate(jobs.getByIdOrThrow(job.jobId))).rejects.toThrow("accounting interrupted");
+      expect(f.submissions).toHaveLength(1);
+      // The same unaccounted occurrence must read the saved receipt, without another input.
+    }
+    expect((await engine.evaluate(jobs.getByIdOrThrow(job.jobId))).delivery).toMatchObject({ status: "ok" });
+    expect(f.submissions).toHaveLength(1);
+    const firstOccurrence = createHash("sha256").update(JSON.stringify([job.jobId, null, "Continue the current step"])).digest("hex");
+    expect(f.outbox.getById(watchdogDeliveryId(firstOccurrence))?.deliveryState).toBe("delivered");
+    at += 60_000;
+    if (interrupted) {
+      vi.spyOn(history, "record").mockImplementationOnce(() => { throw new Error("later accounting interrupted"); });
+      await expect(engine.evaluate(jobs.getByIdOrThrow(job.jobId))).rejects.toThrow("later accounting interrupted");
+      expect(f.submissions).toHaveLength(2);
+    }
+    await engine.evaluate(jobs.getByIdOrThrow(job.jobId));
+    expect(f.submissions).toHaveLength(2);
+    expect(f.submissions[1]).toContain("Continue the current step");
+    expect(f.db.prepare("SELECT count(*) AS n FROM outbox_entries WHERE delivery_state = 'delivered'").get()).toEqual({ n: 2 });
+  });
+});
+
+/** The queue, watchdog engine and scheduler on a fixture's store, wired as the daemon wires them. `withoutPreview`
+ *  leaves out the park-entry lookup, so wakes go with their stored message, as a daemon before the preview sent them. */
+function scheduled(f: ReturnType<typeof fixture>, { withoutPreview = false } = {}) {
   const bus = new EventBus(f.db);
   const repo = new QueueRepository(f.db, bus, { transport: f.transport as never, loadHumanRegistry: () => ({ ok: true, entities: [], warnings: [] }) });
   repo.attachOutbox(f.outbox);
@@ -83,13 +219,13 @@ function scheduled(f: ReturnType<typeof fixture>) {
   const engine = new WatchdogPolicyEngine({ jobsRepo: jobs, historyLog: history, eventBus: bus, deliver: f.deliver,
     resolvePreDeliveryTerminalReason: ({ jobId }) => repo.resolveWatchdogPreDeliveryTerminalReason(jobId),
     onWakeAttempt: ({ jobId, deliveryStatus }) => repo.recordWatchdogWakeAttempt(jobId, deliveryStatus),
-    resolveDigestEntry: ({ jobId, message }) => repo.parkReminderDigestEntry(jobId, message),
+    ...(withoutPreview ? {} : { resolveDigestEntry: ({ jobId, message }: { jobId: string; message: string }) => repo.parkReminderDigestEntry(jobId, message) }),
     priorDigestAttempt: (occurrence) => priorDigestAttempt(f.outbox, occurrence),
     occurrenceAttempted: (occurrence) => occurrenceAttempted(f.outbox, occurrence) });
   const scheduler = new WatchdogScheduler({ jobsRepo: jobs, policyEngine: engine });
-  const park = async (summary: string) => {
+  const park = async (summary: string, transitionNote = "parked") => {
     const row = await repo.create({ sourceSession: "orch@test", destinationSession: seat, body: summary, summary, nudge: false } as never) as unknown as { qitemId: string };
-    repo.update({ qitemId: row.qitemId, actorSession: seat, state: "blocked", blockedOn: "external:wait", transitionNote: "parked", wakeAfterSeconds: 600 } as never);
+    repo.update({ qitemId: row.qitemId, actorSession: seat, state: "blocked", blockedOn: "external:wait", transitionNote, wakeAfterSeconds: 600 } as never);
     return { qitemId: row.qitemId, jobId: repo.getParkWakeStatus(row.qitemId)!.ref };
   };
   const due = (jobId: string) => {
@@ -171,6 +307,31 @@ describe("a watchdog digest through the real outbox and draft-aware transport", 
     expect(next.history.listForJob(b.jobId, 1)[0]).toMatchObject({ deliveryStatus: "ok" });
     expect(next.history.listForJob(a.jobId, 1)[0]).toMatchObject({ deliveryStatus: "failed" });
     // Let the first process's abandoned pass end before its store closes.
+    unblock();
+    await lost;
+  });
+
+  it("a recovered lone wake's history names the body it was bound with, not a preview composed now", async () => {
+    const f = fixture();
+    await f.enable();
+    // The first process binds A's wake with its stored, generic message; A's park has a recorded continuation.
+    const first = scheduled(f, { withoutPreview: true });
+    const a = await first.park("A's wait", "continuation: hand the head to the planner");
+    first.due(a.jobId);
+    let reached!: () => void;
+    const pasting = new Promise<void>((done) => { reached = done; });
+    let unblock!: () => void;
+    f.hooks.paste = () => { reached(); return new Promise((done) => { unblock = done; }); };
+    const lost = first.scheduler.runTickNow();
+    await pasting;
+    // After the restart the engine would compose a preview, but the bound occurrence keeps its body and types nothing.
+    const g = fixture(f.db.serialize());
+    const next = scheduled(g);
+    await next.scheduler.runTickNow();
+    expect(g.submissions).toEqual([]);
+    const [history] = next.history.listForJob(a.jobId, 1);
+    expect(history!.deliveryMessage).toBe(`Wake timer fired for parked qitem ${a.qitemId}. Resume the recorded continuation and update the row.`);
+    expect(history!.deliveryMessage).not.toContain("Recorded continuation");
     unblock();
     await lost;
   });
