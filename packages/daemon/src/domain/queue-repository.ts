@@ -296,10 +296,13 @@ type WakeAttemptOutcome = {
   inputBox?: InputBoxEvidence;
 };
 
-/** #1278: keep only the structured reading's four fields, never anything else a result carried. */
+/** #1278: reject incomplete or invalid readings and keep only the four diagnostic fields. */
 function inputBoxReading(inputBox: InputBoxEvidence | undefined): InputBoxEvidence | undefined {
   if (!inputBox || typeof inputBox !== "object") return undefined;
   const { seat, before, after, sameProcess } = inputBox;
+  if (!["idle", "not-idle", "unknown", "unchecked"].includes(seat) || typeof sameProcess !== "boolean") return undefined;
+  const readings = ["exact", "ambiguous", "empty", "queued", "hidden", "other", "unrecognized", "unavailable", "unchecked"];
+  if (!readings.includes(before) || !readings.includes(after)) return undefined;
   return { seat, before, after, sameProcess };
 }
 

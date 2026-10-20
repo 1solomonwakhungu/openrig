@@ -90,6 +90,43 @@ describe("a queue wake keeps its input-box reading (#1278)", () => {
     expect(row.lastNudgeInputBox).toEqual(BUSY_SEAT);
   });
 
+  it.each([
+    ...["seat", "before", "after", "sameProcess"].flatMap((field) => [
+      [field, undefined], [field, null], [field, "invalid"], [field, 1],
+    ]),
+  ])("rejects a missing or invalid %s (%j) on write and read", async (field, value) => {
+    const h = harness({ outbox: false });
+    db = h.db;
+    const malformed = { ...TEXT_STILL_IN_BOX, [field as string]: value } as unknown as InputBoxEvidence;
+    h.results.push({ ok: true, verified: true, inputBox: TEXT_STILL_IN_BOX });
+    const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+    h.results.push({ ok: true, verified: true, inputBox: malformed });
+    await h.repo.maybeNudge(item.qitemId, "bob@rig", true);
+    expect(h.repo.getById(item.qitemId)).toMatchObject({ lastNudgeWireResult: "verified", lastNudgeInputBox: null });
+    expect(h.db.prepare("SELECT last_nudge_input_box AS reading FROM queue_items WHERE qitem_id = ?").get(item.qitemId))
+      .toEqual({ reading: null });
+
+    // Even a matching attempt timestamp cannot make an incomplete stored reading valid.
+    const at = h.repo.getById(item.qitemId)!.lastNudgeAttempt;
+    h.db.prepare("UPDATE queue_items SET last_nudge_input_box = ? WHERE qitem_id = ?")
+      .run(JSON.stringify({ ...malformed, at }), item.qitemId);
+    expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toBeNull();
+    expect(h.repo.list({}).find((row) => row.qitemId === item.qitemId)!.lastNudgeInputBox).toBeNull();
+  });
+
+  it.each(["exact", "ambiguous", "empty", "queued", "hidden", "other", "unrecognized", "unavailable", "unchecked"] as const)(
+    "preserves valid %s readings, including false sameProcess", async (reading) => {
+      const h = harness({ outbox: false });
+      db = h.db;
+      for (const seat of ["idle", "not-idle", "unknown", "unchecked"] as const) {
+        const inputBox: InputBoxEvidence = { seat, before: reading, after: reading, sameProcess: false };
+        h.results.push({ ok: true, verified: true, inputBox });
+        const item = await h.repo.create({ sourceSession: "alice@rig", destinationSession: "bob@rig", body: "x" });
+        expect(h.repo.getById(item.qitemId)!.lastNudgeInputBox).toEqual(inputBox);
+      }
+    },
+  );
+
   it("an attempt an older daemon recorded (time and result only) does not show the earlier attempt's reading", async () => {
     const h = harness({ outbox: false });
     db = h.db;
